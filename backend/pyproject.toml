@@ -38,3 +38,8 @@ ignore = [
     # serialization. StrEnum is not a drop-in replacement here.
     "UP042",
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# The GSTR-2B fixtures are verbatim portal CSV: the heading row really is that
+# wide, and wrapping it would stop testing the format the portal emits.
+"tests/test_gstr2b.py" = ["E501"]

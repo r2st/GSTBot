@@ -5,7 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import Enum
 
-from sqlalchemy import DateTime, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import DateTime, Index, Integer, String, Text, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -45,8 +45,19 @@ class GSTRReturn(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
 
     __tablename__ = "gstr_returns"
     __table_args__ = (
-        UniqueConstraint(
-            "business_id", "period", "return_type", name="uq_gstr_returns_business_period_type"
+        # One live return per period and type — but only among the undeleted.
+        # The portal regenerates a GSTR-2B whenever a supplier files late, so
+        # re-importing a period is routine, and the superseded import is
+        # soft-deleted rather than dropped. A plain unique constraint would
+        # count those tombstones and make the second import fail.
+        Index(
+            "uq_gstr_returns_business_period_type",
+            "business_id",
+            "period",
+            "return_type",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
         ),
         Index("ix_gstr_returns_business_created", "business_id", "created_at"),
     )
