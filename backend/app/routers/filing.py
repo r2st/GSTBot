@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.rate_limit import RateLimit
 from app.models.business import Business
 from app.models.invoice import InvoiceType
 from app.schemas.filing import FilingPreviewOut, ValidationReportOut
@@ -15,6 +16,11 @@ from app.services import filing as filing_service
 from app.services import invoice_service
 
 router = APIRouter(prefix="/filing", tags=["filing"])
+
+_read_limit = RateLimit("filing_read", "120/minute")
+# An export builds the whole return and serialises it. Heavier than a preview,
+# and a download is something a person triggers rather than a screen.
+_export_limit = RateLimit("filing_export", "30/minute")
 
 # Which direction of invoice each return is built from.
 _DIRECTION = {
@@ -28,7 +34,20 @@ def _resolve_period(period: str | None) -> str:
     return period or invoice_service.month_of()
 
 
-@router.get("/validate", response_model=ValidationReportOut)
+@router.get(
+    "/validate",
+    response_model=ValidationReportOut,
+    summary="Everything that would stop a period being filed",
+    description=(
+        "Separates errors — which the portal will reject — from warnings, which "
+        "merely ought to be fixed. A GSTIN that does not checksum is an error; a "
+        "missing HSN code on a small-value line is a warning.\n\n"
+        "Runs over sales by default, because that is what GSTR-1 is built from. "
+        "Purchases are validated too — a supplier GSTIN that does not checksum is "
+        "a credit that will never match — but they are asked for explicitly."
+    ),
+    dependencies=[Depends(_read_limit)],
+)
 def validate(
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     invoice_type: InvoiceType = Query(default=InvoiceType.SALES),
@@ -47,7 +66,18 @@ def validate(
     return ValidationReportOut.model_validate(report.as_dict())
 
 
-@router.get("/gstr1", response_model=FilingPreviewOut)
+@router.get(
+    "/gstr1",
+    response_model=FilingPreviewOut,
+    summary="GSTR-1 for a period, in the portal's JSON shape",
+    description=(
+        "The outward-supplies return built from this period's sales invoices, "
+        "with its B2B, B2CL and B2CS blocks and the HSN summary, plus the "
+        "validation report for the same period so a caller does not need two "
+        "round trips to know whether it is fileable."
+    ),
+    dependencies=[Depends(_read_limit)],
+)
 def preview_gstr1(
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),
@@ -65,7 +95,19 @@ def preview_gstr1(
     )
 
 
-@router.get("/gstr3b", response_model=FilingPreviewOut)
+@router.get(
+    "/gstr3b",
+    response_model=FilingPreviewOut,
+    summary="GSTR-3B pre-filled from the reconciled position",
+    description=(
+        "The monthly summary return: outward tax from sales, eligible ITC from "
+        "the reconciliation rather than from the books alone, and the reversals "
+        "that follow from it — which is the difference between a 3B that matches "
+        "the portal's own figures and one that invites a notice.\n\n"
+        "Returned with the period's validation report."
+    ),
+    dependencies=[Depends(_read_limit)],
+)
 def preview_gstr3b(
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),
@@ -83,7 +125,33 @@ def preview_gstr3b(
     )
 
 
-@router.get("/export/{return_type}.{extension}")
+@router.get(
+    "/export/{return_type}.{extension}",
+    summary="Download a period as JSON for the portal, or CSV for a human",
+    description=(
+        "`return_type` is `gstr1`, `gstr3b` or `purchases`; `extension` is `json` "
+        "or `csv`. Purchases are CSV only — there is no portal JSON shape for a "
+        "purchase register.\n\n"
+        "A download rather than a JSON body: this file goes into the government's "
+        "offline utility or a spreadsheet, and it should arrive named for the "
+        "GSTIN and period it covers rather than as `download (3)`. CSV carries a "
+        "UTF-8 BOM, because Excel reads a plain UTF-8 CSV as Latin-1 and mangles "
+        "every trade name with a rupee sign in it.\n\n"
+        "Exports regardless of validation errors, on purpose. A business that "
+        "wants to see what its half-finished GSTR-1 looks like is entitled to; "
+        "`/filing/validate` is what says whether to file it."
+    ),
+    response_class=Response,
+    responses={
+        200: {
+            "description": "The file, as an attachment.",
+            "content": {"application/json": {}, "text/csv": {}},
+        },
+        400: {"description": "Purchases were requested as JSON."},
+        404: {"description": "Unknown return type or format."},
+    },
+    dependencies=[Depends(_export_limit)],
+)
 def export(
     return_type: str,
     extension: str,

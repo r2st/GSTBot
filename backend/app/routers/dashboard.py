@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.rate_limit import RateLimit
 from app.models.alert import Alert, AlertStatus
 from app.models.business import Business
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
@@ -25,6 +26,11 @@ from app.schemas.dashboard import (
 from app.services import invoice_service
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+# The heaviest read in the product: seven periods of tax summary plus four
+# aggregate counts. Limited more tightly than a plain list because a polling
+# client here costs real database work.
+_dashboard_limit = RateLimit("dashboard", "120/minute")
 
 # GSTR-3B is due on the 20th of the month after the period it covers. The one
 # deadline the dashboard can compute without talking to the portal, and the one
@@ -80,7 +86,21 @@ def _due_date(period: str) -> date:
                                                                      GSTR3B_DUE_DAY)
 
 
-@router.get("", response_model=DashboardOut)
+@router.get(
+    "",
+    response_model=DashboardOut,
+    summary="Everything the landing screen shows, in one round trip",
+    description=(
+        "Counts are lifetime; the money is for `period` (this month by default). "
+        "That split is deliberate — 'how much do I owe' is only ever a question "
+        "about a filing period, while 'how many invoices do I have here' is not."
+        "\n\n"
+        "Also returns six months of history for the trend chart, the plan usage, "
+        "the GSTR-3B due date, and a summary of the latest reconciliation for the "
+        "period, so the screen needs no follow-up calls."
+    ),
+    dependencies=[Depends(_dashboard_limit)],
+)
 def get_dashboard(
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),

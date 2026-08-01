@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.rate_limit import RateLimit
+from app.core.sanitize import safe_filename, search_pattern
 from app.models.business import Business
 from app.models.invoice import Invoice, InvoiceSource, InvoiceStatus, InvoiceType
 from app.schemas.invoice import (
@@ -24,6 +26,15 @@ from app.services import invoice_service
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
+
+# An upload costs a model call and a write; 60 a minute is a comfortable
+# ceiling for the drag-a-folder-in case and a floor under the cost of abuse.
+_upload_limit = RateLimit("invoice_upload", "60/minute")
+# Re-extraction is the same model call with none of the plan accounting, so it
+# gets the tighter budget of the two.
+_reparse_limit = RateLimit("invoice_reparse", "20/minute")
+_read_limit = RateLimit("invoice_read", "240/minute")
+_write_limit = RateLimit("invoice_write", "120/minute")
 
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
@@ -58,10 +69,46 @@ def _owned_invoice(db: Session, business: Business, invoice_id: int) -> Invoice:
     return invoice
 
 
-@router.post("/upload", response_model=InvoiceUploadResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/upload",
+    response_model=InvoiceUploadResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload one invoice and extract its fields",
+    description=(
+        "Accepts a PDF, a photograph, a scan, or a CSV/Excel purchase register "
+        "row. A PDF is read as text first and only falls back to the vision "
+        "model when a page carries no extractable text — a scan.\n\n"
+        "The file is stored and committed *before* it is parsed, so a "
+        "rate-limited model costs a retry rather than the document. When "
+        "`CELERY_ENABLED` is on the parse is queued and the response comes back "
+        "with `queued: true` and an invoice still in `uploaded` status; poll "
+        "`GET /invoices/{id}` for the result. With no reachable broker it "
+        "parses inline instead, which is slower but never loses the upload.\n\n"
+        "Duplicates are rejected two ways: the identical file (same SHA-256), "
+        "or the same invoice number from the same counterparty. Claiming ITC "
+        "twice on one invoice is what triggers a departmental notice."
+    ),
+    responses={
+        201: {"description": "Stored. Parsed inline, or queued for a worker."},
+        400: {"description": "The uploaded file is empty."},
+        402: {"description": "The plan's monthly invoice allowance is used up."},
+        409: {
+            "description": (
+                "Already on file. The body's `detail.invoice_id` points at the "
+                "existing invoice."
+            )
+        },
+        413: {"description": "Larger than `MAX_UPLOAD_MB`."},
+        415: {"description": "Not a file type this product can read."},
+    },
+    dependencies=[Depends(_upload_limit)],
+)
 async def upload_invoice(
     file: UploadFile = File(..., description="Invoice as PDF, image, CSV or Excel"),
-    invoice_type: InvoiceType = Form(InvoiceType.PURCHASE),
+    invoice_type: InvoiceType = Form(
+        InvoiceType.PURCHASE,
+        description="`purchase` (claims ITC) or `sales` (feeds GSTR-1).",
+    ),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> InvoiceUploadResponse:
@@ -72,7 +119,9 @@ async def upload_invoice(
     failure-prone half (a free-tier model call), and separating it means a
     rate-limited model costs a retry rather than the document.
     """
-    filename = file.filename or "invoice"
+    # The name reaches a filesystem path, a Content-Disposition header and the
+    # UI, so it is reduced to something safe before any of that.
+    filename = safe_filename(file.filename, fallback="invoice")
     lowered = filename.lower()
     if file.content_type not in ALLOWED_CONTENT_TYPES and not lowered.endswith(ALLOWED_EXTENSIONS):
         raise HTTPException(
@@ -135,15 +184,47 @@ async def upload_invoice(
     )
 
 
-@router.get("", response_model=InvoiceListOut)
+@router.get(
+    "",
+    response_model=InvoiceListOut,
+    summary="List invoices, newest first",
+    description=(
+        "Paginated and filterable. Every filter is combined with AND, and the "
+        "tenant scope is not optional — there is no parameter that widens it.\n\n"
+        "`search` matches the invoice number or the counterparty name, "
+        "case-insensitively. `%` and `_` in the term are matched literally "
+        "rather than as wildcards: a bare `%` would otherwise turn an indexed "
+        "lookup into a scan of the whole register."
+    ),
+    dependencies=[Depends(_read_limit)],
+)
 def list_invoices(
-    invoice_type: InvoiceType | None = None,
-    invoice_status: InvoiceStatus | None = Query(default=None, alias="status"),
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
-    counterparty_gstin: str | None = None,
-    search: str | None = Query(default=None, max_length=100),
-    limit: int = Query(default=50, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
+    invoice_type: InvoiceType | None = Query(
+        default=None, description="Restrict to `sales` or `purchase`."
+    ),
+    invoice_status: InvoiceStatus | None = Query(
+        default=None,
+        alias="status",
+        description="Extraction/reconciliation state, e.g. `parsed`, `mismatched`.",
+    ),
+    period: str | None = Query(
+        default=None,
+        pattern=r"^\d{4}-\d{2}$",
+        description="Filing period as `YYYY-MM`, derived from the invoice date.",
+        examples=["2026-04"],
+    ),
+    counterparty_gstin: str | None = Query(
+        default=None,
+        max_length=15,
+        description="Exact GSTIN of the supplier or customer. Case-insensitive.",
+    ),
+    search: str | None = Query(
+        default=None,
+        max_length=100,
+        description="Substring of the invoice number or the counterparty name.",
+    ),
+    limit: int = Query(default=50, ge=1, le=200, description="Page size, 1-200."),
+    offset: int = Query(default=0, ge=0, description="Rows to skip."),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> InvoiceListOut:
@@ -156,11 +237,12 @@ def list_invoices(
     if period:
         conditions.append(Invoice.period == period)
     if counterparty_gstin:
-        conditions.append(Invoice.counterparty_gstin == counterparty_gstin.upper())
-    if search:
-        pattern = f"%{search}%"
+        conditions.append(Invoice.counterparty_gstin == counterparty_gstin.strip().upper())
+    pattern = search_pattern(search)
+    if pattern:
         conditions.append(
-            Invoice.invoice_number.ilike(pattern) | Invoice.counterparty_name.ilike(pattern)
+            Invoice.invoice_number.ilike(pattern, escape="\\")
+            | Invoice.counterparty_name.ilike(pattern, escape="\\")
         )
 
     total = int(db.scalar(select(func.count(Invoice.id)).where(*conditions)) or 0)
@@ -179,7 +261,20 @@ def list_invoices(
     )
 
 
-@router.get("/{invoice_id}", response_model=InvoiceDetailOut)
+@router.get(
+    "/{invoice_id}",
+    response_model=InvoiceDetailOut,
+    summary="One invoice, with its extraction and warnings",
+    description=(
+        "Includes what the extractor read, how confident it was, and the "
+        "warnings a reviewer should look at before the invoice is filed.\n\n"
+        "An id belonging to another tenant answers 404, not 403: a 403 would "
+        "confirm the id exists, which is enough to probe a competitor's invoice "
+        "volume."
+    ),
+    responses={404: {"description": "No such invoice in this tenant."}},
+    dependencies=[Depends(_read_limit)],
+)
 def get_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
@@ -188,7 +283,22 @@ def get_invoice(
     return InvoiceDetailOut.from_invoice(_owned_invoice(db, business, invoice_id))
 
 
-@router.patch("/{invoice_id}", response_model=InvoiceDetailOut)
+@router.patch(
+    "/{invoice_id}",
+    response_model=InvoiceDetailOut,
+    summary="Apply a reviewer's corrections",
+    description=(
+        "A partial update: only the fields present in the body are touched.\n\n"
+        "Correcting an invoice promotes it out of `failed` — a human has now "
+        "supplied what the extractor could not, so it belongs in the filing "
+        "pool rather than the error queue — sets `parsed_with` to `manual`, and "
+        "sets confidence to 1.0. Changing `invoice_date` re-derives the filing "
+        "period, and setting a `counterparty_gstin` on a purchase links or "
+        "creates the supplier."
+    ),
+    responses={404: {"description": "No such invoice in this tenant."}},
+    dependencies=[Depends(_write_limit)],
+)
 def update_invoice(
     invoice_id: int,
     payload: InvoiceUpdate,
@@ -224,7 +334,20 @@ def update_invoice(
     return InvoiceDetailOut.from_invoice(invoice)
 
 
-@router.post("/{invoice_id}/reparse", response_model=InvoiceDetailOut)
+@router.post(
+    "/{invoice_id}/reparse",
+    response_model=InvoiceDetailOut,
+    summary="Re-run extraction over the stored file",
+    description=(
+        "Useful after a parser improvement, or when a model was rate-limited "
+        "and the heuristic fallback did a poor job. The original file is kept "
+        "precisely so this does not require re-photographing anything.\n\n"
+        "Always runs inline — the caller is waiting on the answer — so it is "
+        "limited more tightly than upload."
+    ),
+    responses={404: {"description": "No such invoice in this tenant."}},
+    dependencies=[Depends(_reparse_limit)],
+)
 def reparse_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
@@ -239,7 +362,21 @@ def reparse_invoice(
     return InvoiceDetailOut.from_invoice(invoice_service.process_invoice(db, invoice))
 
 
-@router.delete("/{invoice_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{invoice_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove an invoice from the books",
+    description=(
+        "A soft delete: `deleted_at` is set, and the row and the stored file "
+        "both stay. A GST filing can be reopened years later during an "
+        "assessment, and a row that is gone cannot be explained to an officer."
+    ),
+    responses={
+        204: {"description": "Deleted."},
+        404: {"description": "No such invoice in this tenant."},
+    },
+    dependencies=[Depends(_write_limit)],
+)
 def delete_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),

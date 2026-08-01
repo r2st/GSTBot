@@ -4,6 +4,11 @@ Nothing external is touched. No OpenRouter key is set, so every AI path
 degrades to its deterministic fallback — which means the suite also asserts
 that those fallbacks actually work, rather than only exercising the happy
 path against a mock.
+
+The same rule is applied to Redis: the URL points at a port nothing listens on,
+so the rate limiter uses its in-process fallback and a developer who happens to
+be running Redis locally does not get counters that survive between test runs.
+The ``rate_limited`` fixture is how the limiter itself gets tested.
 """
 from __future__ import annotations
 
@@ -19,6 +24,12 @@ os.environ.setdefault("ENVIRONMENT", "development")
 # uploads parse inline.
 os.environ.setdefault("CELERY_ENABLED", "false")
 os.environ.setdefault("UPLOAD_DIR", tempfile.mkdtemp(prefix="gstbot-uploads-"))
+# Deliberately unreachable: the suite must never touch a real Redis, and the
+# limiter's degraded path is what runs here.
+os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6399/15")
+# Off by default. The suite registers a business per test, and a 10/hour
+# sign-up limit would fail the twentieth test rather than the code under it.
+os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -102,6 +113,22 @@ def client(db_session):
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()
+
+
+@pytest.fixture()
+def rate_limited(monkeypatch):
+    """Turn the limiter on for one test, with counters starting empty.
+
+    Counters are cleared on the way out as well as in, so a test that trips a
+    limit cannot leak a full bucket into whatever runs next.
+    """
+    from app.core import rate_limit
+    from app.core.config import settings
+
+    rate_limit.reset()
+    monkeypatch.setattr(settings, "rate_limit_enabled", True)
+    yield rate_limit
+    rate_limit.reset()
 
 
 @pytest.fixture()

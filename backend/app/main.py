@@ -1,15 +1,27 @@
 """GSTBot FastAPI application entrypoint."""
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 import app.models  # noqa: F401  (registers every model on Base.metadata)
-from app.core.config import settings
+from app.core.config import settings, validate_startup_config
+from app.core.database import check_database
+from app.core.errors import register_exception_handlers
+from app.core.logging import configure_logging
+from app.core.middleware import (
+    AccessLogMiddleware,
+    CorrelationIdMiddleware,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
+from app.core.redis_client import ping as redis_ping
 from app.routers import (
     auth,
     dashboard,
@@ -21,47 +33,262 @@ from app.routers import (
     suppliers,
 )
 
+logger = logging.getLogger(__name__)
+
+DESCRIPTION = """
+GST compliance for Indian SMBs: read invoices, reconcile them against the
+portal's GSTR-2B, work out what input tax credit is actually safe to claim, and
+prepare the return.
+
+### Authentication
+
+Every endpoint except `/health*` and `/meta/*` needs a bearer token. Get one
+from `POST /auth/register` (which creates the business too) or
+`POST /auth/login`, then send it as `Authorization: Bearer <token>`.
+
+### Tenancy
+
+A token identifies a *business* — one GST registration — and every query is
+filtered by it. A row belonging to another tenant answers **404**, not 403: a
+403 would confirm that the id exists, which is enough to probe a competitor's
+invoice volume.
+
+### Errors
+
+Every error has the same shape, whatever raised it:
+
+```json
+{
+  "detail": "Invoice not found",
+  "error": {"code": "not_found", "status": 404, "message": "Invoice not found"},
+  "correlation_id": "9f2c1a0b4e7d5a63"
+}
+```
+
+Branch on `error.code` rather than on the prose in `detail`. The
+`correlation_id` also comes back as the `X-Request-ID` header on every
+response, and is what support needs to find the request in the logs.
+
+### Rate limits
+
+Responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`. A 429 carries
+`Retry-After` in seconds. Limits are keyed per authenticated user, falling back
+to the client address for anonymous callers — so an office behind one NAT does
+not share a single budget.
+
+### Money
+
+Every monetary value is a decimal *string*, not a float — `"1234.56"`. GST is
+computed to the paisa and a float cannot hold 18% of ₹1,234.56 exactly. Parse
+these with a decimal type.
+"""
+
+TAGS_METADATA = [
+    {
+        "name": "health",
+        "description": (
+            "Liveness, readiness and the public metadata the sign-up form needs. "
+            "No authentication."
+        ),
+    },
+    {
+        "name": "auth",
+        "description": (
+            "Registration, login and the current session. Registering creates the "
+            "business and its owner in one step and returns a usable token, so "
+            "there is no second login round trip."
+        ),
+    },
+    {
+        "name": "invoices",
+        "description": (
+            "Upload, list, correct and re-extract invoices. An upload is stored and "
+            "committed before it is parsed, so a rate-limited model costs a retry "
+            "rather than the document."
+        ),
+    },
+    {
+        "name": "dashboard",
+        "description": "Everything the landing screen shows, in one round trip.",
+    },
+    {
+        "name": "reconciliation",
+        "description": (
+            "Import a GSTR-2B and match it against the purchase register. Runs "
+            "accumulate rather than overwrite: a period is reconciled repeatedly as "
+            "suppliers file late, and 'what did we know, and when' is the question "
+            "an ITC reversal turns on months later."
+        ),
+    },
+    {
+        "name": "itc",
+        "description": (
+            "The input tax credit position: what is available, what reverses under "
+            "Rules 37/42/43, and how a credit settles against a liability in the "
+            "statutory order."
+        ),
+    },
+    {
+        "name": "filing",
+        "description": (
+            "Validate a period, generate GSTR-1 or GSTR-3B in the portal's JSON "
+            "shape, and export either as JSON for the offline utility or CSV for a "
+            "human."
+        ),
+    },
+    {
+        "name": "suppliers",
+        "description": (
+            "Counterparties and their compliance scores, built from this tenant's "
+            "own matched invoices rather than from a shared reputation."
+        ),
+    },
+]
+
+
+def _writable(directory: Path) -> bool:
+    probe = directory / ".write-probe"
+    try:
+        probe.write_bytes(b"")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """Boot checks. Anything fatal has already raised out of Settings by now.
+
+    What is left is the reporting tier: log the resolved configuration (with
+    secrets redacted), warn about anything questionable, and probe the two
+    dependencies once — so a misconfigured deployment says so in its first ten
+    log lines rather than on its first upload.
+    """
+    configure_logging(settings.log_level, settings.log_format)
+    logger.info("Starting %s", settings.app_name, extra=settings.startup_report())
+
+    for warning in validate_startup_config(settings):
+        logger.warning("Configuration warning: %s", warning)
+
     # Created at startup rather than on first upload, so a bad path or a
     # read-only volume fails at deploy time instead of on a user's file.
-    Path(settings.upload_dir).mkdir(parents=True, exist_ok=True)
+    upload_dir = Path(settings.upload_dir)
+    try:
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        if not _writable(upload_dir):
+            logger.error("UPLOAD_DIR %s is not writable — uploads will fail", upload_dir)
+    except OSError as exc:
+        logger.error("UPLOAD_DIR %s could not be created: %s", upload_dir, exc)
+
+    database_ok, database_error = check_database()
+    if database_ok:
+        logger.info("Database reachable")
+    else:
+        # Not fatal: a database still coming up is normal in a compose or
+        # Kubernetes start, and the readiness probe is what holds traffic back
+        # until it answers.
+        logger.error("Database unreachable at startup: %s", database_error)
+
+    if redis_ping():
+        logger.info("Redis reachable")
+    else:
+        logger.warning(
+            "Redis unreachable — rate limiting falls back to per-process counters"
+            + (", and queued parsing is unavailable" if settings.celery_enabled else "")
+        )
+
     yield
+
+    logger.info("Shutting down %s", settings.app_name)
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(
+    configure_logging(settings.log_level, settings.log_format)
+
+    docs_url = "/docs" if settings.docs_enabled else None
+    redoc_url = "/redoc" if settings.docs_enabled else None
+    openapi_url = "/openapi.json" if settings.docs_enabled else None
+
+    application = FastAPI(
         title=settings.app_name,
-        version="0.1.0",
-        description="AI GST compliance for Indian SMBs.",
+        version=settings.app_version,
+        summary="AI GST compliance for Indian SMBs.",
+        description=DESCRIPTION,
+        openapi_tags=TAGS_METADATA,
         debug=settings.debug,
         lifespan=lifespan,
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+        contact={"name": "GSTBot", "url": "https://gstbot.aiknol.com"},
+        license_info={"name": "Proprietary"},
+        responses={
+            401: {"description": "Missing, malformed or expired bearer token."},
+            429: {"description": "Rate limit exceeded. See the `Retry-After` header."},
+            500: {"description": "Unexpected error. Quote `correlation_id` to support."},
+        },
     )
 
-    app.add_middleware(
+    register_exception_handlers(application)
+
+    # Middleware runs in the reverse of the order it is added, so this block
+    # reads bottom-up: CorrelationId runs first (everything below it logs with
+    # an id bound), then the security headers, then the global rate limit, then
+    # the access log, then compression, with CORS closest to the route.
+    application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+        # Named rather than "*": with credentials allowed a wildcard is
+        # rejected by browsers anyway, and the list documents what a client is
+        # expected to send.
+        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Correlation-ID"],
+        # Without this a browser client cannot read the id it needs to report a
+        # problem, nor the rate-limit budget it should back off against, nor
+        # the filename on an export.
+        expose_headers=[
+            "X-Request-ID",
+            "X-Correlation-ID",
+            "X-RateLimit-Limit",
+            "X-RateLimit-Remaining",
+            "Retry-After",
+            "Content-Disposition",
+        ],
+        max_age=600,
     )
+    # A GSTR-2B report or a period's invoice list is repetitive JSON that
+    # compresses roughly 10:1; below 1 KB the header costs more than it saves.
+    application.add_middleware(GZipMiddleware, minimum_size=1024)
+    application.add_middleware(AccessLogMiddleware)
+    application.add_middleware(RateLimitMiddleware)
+    application.add_middleware(
+        SecurityHeadersMiddleware,
+        docs_paths=tuple(p for p in (docs_url, redoc_url, openapi_url) if p),
+    )
+    application.add_middleware(CorrelationIdMiddleware)
 
     prefix = settings.api_v1_prefix
-    app.include_router(misc.router, prefix=prefix)
-    app.include_router(auth.router, prefix=prefix)
-    app.include_router(invoices.router, prefix=prefix)
-    app.include_router(dashboard.router, prefix=prefix)
-    app.include_router(reconciliation.router, prefix=prefix)
-    app.include_router(itc.router, prefix=prefix)
-    app.include_router(filing.router, prefix=prefix)
-    app.include_router(suppliers.router, prefix=prefix)
+    application.include_router(misc.router, prefix=prefix)
+    application.include_router(auth.router, prefix=prefix)
+    application.include_router(invoices.router, prefix=prefix)
+    application.include_router(dashboard.router, prefix=prefix)
+    application.include_router(reconciliation.router, prefix=prefix)
+    application.include_router(itc.router, prefix=prefix)
+    application.include_router(filing.router, prefix=prefix)
+    application.include_router(suppliers.router, prefix=prefix)
 
-    @app.get("/")
-    def root() -> dict[str, str]:
-        return {"app": settings.app_name, "docs": "/docs", "health": f"{prefix}/health"}
+    @application.get("/", include_in_schema=False)
+    def root() -> dict[str, str | None]:
+        return {
+            "app": settings.app_name,
+            "version": settings.app_version,
+            "docs": docs_url,
+            "health": f"{prefix}/health",
+        }
 
-    return app
+    return application
 
 
 app = create_app()

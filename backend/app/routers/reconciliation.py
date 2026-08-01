@@ -10,6 +10,8 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.rate_limit import RateLimit
+from app.core.sanitize import safe_filename
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnType
 from app.models.reconciliation_run import ReconciliationRun
@@ -28,9 +30,46 @@ router = APIRouter(prefix="/reconciliation", tags=["reconciliation"])
 
 ALLOWED_EXTENSIONS = (".json", ".csv", ".txt")
 
+# A 2B import parses a whole month of the portal's JSON and rewrites the stored
+# statement; a run matches every purchase in the period against it. Both are
+# heavier than a read, and neither is something a person does repeatedly.
+_import_limit = RateLimit("gstr2b_import", "20/minute")
+_run_limit = RateLimit("reconcile_run", "30/minute")
+_read_limit = RateLimit("reconcile_read", "240/minute")
+
 
 @router.post(
-    "/gstr2b/import", response_model=GSTR2BImportOut, status_code=status.HTTP_201_CREATED
+    "/gstr2b/import",
+    response_model=GSTR2BImportOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Import a GSTR-2B statement",
+    description=(
+        "Takes the JSON the GST portal produces, or a CSV export of it.\n\n"
+        "The period is read out of the file when the caller does not name one: "
+        "the portal stamps the statement period into the download, and someone "
+        "who has just clicked through three months of statements should not have "
+        "to remember which one this was.\n\n"
+        "Re-importing a period is routine and expected — the portal regenerates "
+        "the 2B whenever a supplier files late — so the previous import is "
+        "soft-deleted rather than dropped, and the response says "
+        "`replaced_previous`. Invoices in the file that belong to *other* "
+        "periods are reported in `other_periods` rather than treated as an "
+        "error: those are late filings, and they reconcile against the month "
+        "they belong to."
+    ),
+    responses={
+        201: {"description": "Imported. Run a reconciliation next."},
+        400: {"description": "The uploaded file is empty."},
+        413: {"description": "Larger than `MAX_UPLOAD_MB`."},
+        415: {"description": "Not a JSON or CSV file."},
+        422: {
+            "description": (
+                "Not a readable GSTR-2B, it contained no invoices, or no period "
+                "could be determined from it."
+            )
+        },
+    },
+    dependencies=[Depends(_import_limit)],
 )
 async def import_gstr2b(
     file: UploadFile = File(..., description="GSTR-2B download: portal JSON or CSV export"),
@@ -47,7 +86,7 @@ async def import_gstr2b(
     just clicked through three months of statements should not have to keep
     track of which one this was.
     """
-    filename = file.filename or "gstr2b"
+    filename = safe_filename(file.filename, fallback="gstr2b")
     if not filename.lower().endswith(ALLOWED_EXTENSIONS):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
@@ -132,7 +171,13 @@ async def import_gstr2b(
     )
 
 
-@router.get("/gstr2b/periods", response_model=list[str])
+@router.get(
+    "/gstr2b/periods",
+    response_model=list[str],
+    summary="Periods with a GSTR-2B on file",
+    description="Newest first. What the period picker on the reconcile screen offers.",
+    dependencies=[Depends(_read_limit)],
+)
 def list_imported_periods(
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
@@ -141,7 +186,30 @@ def list_imported_periods(
     return reconciliation.periods_with_2b(db, business.id)
 
 
-@router.post("/run", response_model=ReconciliationDetailOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/run",
+    response_model=ReconciliationDetailOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Reconcile a period against its GSTR-2B",
+    description=(
+        "Matches every purchase invoice in the period against the imported "
+        "statement and classifies each one as matched, mismatched, missing in "
+        "2B, missing in books, or a duplicate. The response carries the "
+        "per-invoice report and the ITC split — what is safe to claim, and what "
+        "is resting on an invoice the supplier has not filed.\n\n"
+        "Runs inline: the caller is waiting on the answer, and this is "
+        "arithmetic over rows already in the database — unlike parsing, it makes "
+        "no network call that could rate-limit.\n\n"
+        "Runs accumulate rather than overwrite. A period is reconciled again "
+        "every time a supplier files late, and 'what did we know, and when' is "
+        "the question an ITC reversal turns on months later."
+    ),
+    responses={
+        201: {"description": "Reconciled. The report is in the response."},
+        409: {"description": "No GSTR-2B has been imported for that period yet."},
+    },
+    dependencies=[Depends(_run_limit)],
+)
 def run(
     payload: ReconcileRequest,
     db: Session = Depends(get_db),
@@ -163,7 +231,13 @@ def run(
     return ReconciliationDetailOut.model_validate(completed)
 
 
-@router.get("", response_model=ReconciliationListOut)
+@router.get(
+    "",
+    response_model=ReconciliationListOut,
+    summary="Past reconciliation runs",
+    description="Newest first, optionally filtered to one period. Counts only, no report.",
+    dependencies=[Depends(_read_limit)],
+)
 def list_runs(
     period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
     limit: int = Query(default=20, ge=1, le=100),
@@ -192,7 +266,14 @@ def list_runs(
     )
 
 
-@router.get("/latest", response_model=ReconciliationDetailOut)
+@router.get(
+    "/latest",
+    response_model=ReconciliationDetailOut,
+    summary="The most recent run for a period",
+    description="The full run including its per-invoice report. This is what the UI shows.",
+    responses={404: {"description": "That period has never been reconciled."}},
+    dependencies=[Depends(_read_limit)],
+)
 def latest_run(
     period: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
     db: Session = Depends(get_db),
@@ -217,7 +298,17 @@ def latest_run(
     return ReconciliationDetailOut.model_validate(found)
 
 
-@router.get("/{run_id}", response_model=ReconciliationDetailOut)
+@router.get(
+    "/{run_id}",
+    response_model=ReconciliationDetailOut,
+    summary="One run with its full report",
+    description=(
+        "404 rather than 403 outside the tenant: a 403 confirms the id exists, "
+        "which leaks that another business ran a reconciliation."
+    ),
+    responses={404: {"description": "No such run in this tenant."}},
+    dependencies=[Depends(_read_limit)],
+)
 def get_run(
     run_id: int,
     db: Session = Depends(get_db),
@@ -242,7 +333,14 @@ def get_run(
     return ReconciliationDetailOut.model_validate(found)
 
 
-@router.get("/gstr2b/{period}", response_model=GSTR2BImportOut)
+@router.get(
+    "/gstr2b/{period}",
+    response_model=GSTR2BImportOut,
+    summary="The GSTR-2B currently on file for a period",
+    description="The live import, with its totals. Superseded imports are not returned.",
+    responses={404: {"description": "Nothing imported for that period."}},
+    dependencies=[Depends(_read_limit)],
+)
 def get_imported_2b(
     period: str,
     db: Session = Depends(get_db),
