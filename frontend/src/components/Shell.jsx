@@ -5,6 +5,7 @@ const LINKS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/invoices", label: "Invoices" },
   { to: "/upload", label: "Upload" },
+  { to: "/reconcile", label: "Reconcile" },
 ];
 
 export default function Shell({ children }) {

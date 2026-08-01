@@ -139,4 +139,66 @@ describe("api", () => {
     await api.dashboard("2026-04");
     expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/dashboard?period=2026-04");
   });
+
+  it("sends a GSTR-2B as multipart with the period", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 1, period: "2026-04" }));
+    const file = new File(["{}"], "gstr2b.json", { type: "application/json" });
+    await api.importGstr2b(file, "2026-04");
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/reconciliation/gstr2b/import");
+    expect(options.method).toBe("POST");
+    expect(options.body.get("file").name).toBe("gstr2b.json");
+    expect(options.body.get("period")).toBe("2026-04");
+    // The browser sets the multipart boundary; setting it by hand breaks it.
+    expect(options.headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("omits the period rather than sending an empty one", async () => {
+    // The server reads the period out of the file when none is given, and ""
+    // is not a period it can parse.
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 1, period: "2026-04" }));
+    await api.importGstr2b(new File(["{}"], "gstr2b.json"));
+
+    expect(global.fetch.mock.calls[0][1].body.has("period")).toBe(false);
+  });
+
+  it("posts a reconciliation run", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 7 }));
+    await api.reconcile("2026-04");
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/reconciliation/run");
+    expect(JSON.parse(options.body)).toEqual({ period: "2026-04" });
+  });
+
+  it("sends a tolerance only when one was chosen", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 7 }));
+    await api.reconcile("2026-04", "0");
+
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+      period: "2026-04",
+      tolerance: "0",
+    });
+  });
+
+  it("escapes the period in a GSTR-2B lookup", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 1 }));
+    await api.getImported2b("2026-04");
+    expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/reconciliation/gstr2b/2026-04");
+  });
+
+  it("fetches the latest run for a period", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 7 }));
+    await api.latestReconciliation("2026-04");
+    expect(global.fetch.mock.calls[0][0]).toBe(
+      "/api/v1/reconciliation/latest?period=2026-04",
+    );
+  });
+
+  it("builds a bare reconciliation URL when there are no filters", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+    await api.listReconciliations();
+    expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/reconciliation");
+  });
 });

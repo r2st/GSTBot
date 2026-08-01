@@ -115,4 +115,36 @@ export const api = {
   // ---- Dashboard ----
   dashboard: (period) =>
     request(`/dashboard${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+
+  // ---- GSTR-2B and reconciliation ----
+  importGstr2b(file, period) {
+    const form = new FormData();
+    form.append("file", file);
+    // Omitted rather than sent empty: the server reads the period out of the
+    // file when the caller does not name one, and "" is not a period.
+    if (period) form.append("period", period);
+    return request("/reconciliation/gstr2b/import", { method: "POST", form });
+  },
+
+  importedPeriods: () => request("/reconciliation/gstr2b/periods"),
+  getImported2b: (period) =>
+    request(`/reconciliation/gstr2b/${encodeURIComponent(period)}`),
+
+  reconcile: (period, tolerance) =>
+    request("/reconciliation/run", {
+      method: "POST",
+      body: tolerance === undefined ? { period } : { period, tolerance },
+    }),
+
+  listReconciliations: (params = {}) => {
+    const query = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+    );
+    const suffix = query.toString();
+    return request(`/reconciliation${suffix ? `?${suffix}` : ""}`);
+  },
+
+  getReconciliation: (id) => request(`/reconciliation/${id}`),
+  latestReconciliation: (period) =>
+    request(`/reconciliation/latest?period=${encodeURIComponent(period)}`),
 };

@@ -5,6 +5,7 @@ import DashboardPage from "./pages/DashboardPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import LoginPage from "./pages/LoginPage";
+import ReconcilePage from "./pages/ReconcilePage";
 import UploadPage from "./pages/UploadPage";
 
 function Protected({ children }) {
@@ -54,6 +55,14 @@ export default function App() {
         element={
           <Protected>
             <UploadPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/reconcile"
+        element={
+          <Protected>
+            <ReconcilePage />
           </Protected>
         }
       />

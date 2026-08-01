@@ -465,6 +465,42 @@ label {
   background: var(--canvas);
   color: var(--ink-soft);
 }
+/* Chips double as filter buttons on the reconciliation screen. */
+button.chip {
+  border: 1px solid transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 600;
+}
+button.chip.is-active {
+  border-color: currentColor;
+}
+
+/* ---- Reconciliation ---- */
+.filter-row,
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  margin: 0.75rem 0;
+}
+/* The findings table is seven columns wide and must scroll inside the panel
+   rather than pushing the page sideways on a phone. */
+.table-scroll {
+  overflow-x: auto;
+}
+.numeric {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.diff-list {
+  margin: 0;
+  padding-left: 1rem;
+  font-size: 0.82rem;
+}
 
 /* ---- Chart ---- */
 .chart {
