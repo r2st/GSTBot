@@ -1,0 +1,29 @@
+# GSTBot backend — runtime dependencies.
+# Dev/test extras live in requirements-dev.txt.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
+alembic>=1.13
+pydantic>=2.7
+pydantic-settings>=2.3
+python-jose[cryptography]>=3.3
+bcrypt>=4.1
+python-multipart>=0.0.9
+email-validator>=2.1
+httpx>=0.27
+celery[redis]>=5.4
+redis>=5.0
+
+# Invoice ingestion: PDFs are read as text first (pypdf) and only fall back to
+# the vision model when a page carries no extractable text — a scan.
+pypdf>=4.2
+# Excel/CSV purchase registers.
+openpyxl>=3.1
+
+# Tesseract OCR fallback for image invoices when no vision model is reachable.
+# Needs the `tesseract` binary on the host; the parser degrades gracefully
+# without either, so this stays a soft dependency at runtime.
+pytesseract>=0.3.10
+pillow>=10.3
