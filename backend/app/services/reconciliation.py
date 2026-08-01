@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -41,8 +41,9 @@ from app.models.reconciliation_run import (
     ReconciliationRun,
     ReconciliationStatus,
 )
-from app.models.supplier import RiskLevel, Supplier
+from app.models.supplier import Supplier
 from app.services import gstin as gstin_service
+from app.services import supplier_score
 from app.services.gstr2b import GSTR2BRecord
 
 logger = logging.getLogger(__name__)
@@ -397,8 +398,16 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
     files everything for one buyer and nothing for another genuinely is two
     different risks, and the product has no authority to publish a shared
     reputation.
+
+    This function's job is to *record* the period's observation; the weighting
+    that turns a history into a number lives in :mod:`app.services.supplier_score`
+    and is applied here from the full history rather than from this period
+    alone. Re-running a period therefore corrects a supplier's score instead of
+    compounding it, which matters because periods are reconciled repeatedly as
+    suppliers file late.
     """
     per_gstin: dict[str, dict[str, int]] = {}
+    filing_dates: dict[str, date] = {}
     for finding in result.findings:
         gstin = (
             finding.invoice.counterparty_gstin
@@ -407,6 +416,15 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
         )
         if not gstin:
             continue
+
+        # When the supplier actually filed, taken from the earliest 2B row seen
+        # for them: a statement carries one filing date per supplier, and the
+        # earliest is the one the buyer's claim depends on.
+        if finding.record is not None and finding.record.supplier_filing_date:
+            existing = filing_dates.get(gstin)
+            if existing is None or finding.record.supplier_filing_date < existing:
+                filing_dates[gstin] = finding.record.supplier_filing_date
+
         bucket = per_gstin.setdefault(
             gstin, {"total": 0, "matched": 0, "mismatched": 0, "missing": 0}
         )
@@ -432,43 +450,61 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
         if supplier is None:
             continue
 
-        supplier.total_invoices += tally["total"]
-        supplier.matched_invoices += tally["matched"]
-        supplier.mismatched_invoices += tally["mismatched"]
-        supplier.missing_invoices += tally["missing"]
-
-        considered = supplier.matched_invoices + supplier.mismatched_invoices + (
-            supplier.missing_invoices
-        )
-        if considered:
-            # A mismatch is a data problem worth half credit; a missing invoice
-            # is the supplier not having filed at all, and scores nothing.
-            weighted = supplier.matched_invoices + Decimal("0.5") * supplier.mismatched_invoices
-            supplier.compliance_score = int((weighted / considered) * 100)
-            supplier.risk_level = (
-                RiskLevel.LOW
-                if supplier.compliance_score >= 85
-                else RiskLevel.MEDIUM
-                if supplier.compliance_score >= 60
-                else RiskLevel.HIGH
-            )
-        supplier.last_filed_period = result.period
-
-        history = list(supplier.filing_history or [])
-        history.append(
-            {
-                "period": result.period,
-                "matched": tally["matched"],
-                "mismatched": tally["mismatched"],
-                "missing": tally["missing"],
-            }
-        )
+        history = [
+            entry
+            for entry in (supplier.filing_history or [])
+            # Replace this period's entry rather than appending a second one:
+            # a re-run supersedes what the last run saw.
+            if isinstance(entry, dict) and entry.get("period") != result.period
+        ]
+        observation: dict = {
+            "period": result.period,
+            "matched": tally["matched"],
+            "mismatched": tally["mismatched"],
+            "missing": tally["missing"],
+        }
+        filed_on = filing_dates.get(gstin)
+        if filed_on is not None:
+            delay = (filed_on - supplier_score.gstr1_due_date(result.period)).days
+            observation["filing_delay_days"] = delay
+            observation["filed_on"] = filed_on.isoformat()
+        history.append(observation)
         # Bounded: this column is an audit trail for the score, not a ledger.
-        supplier.filing_history = history[-36:]
+        supplier.filing_history = sorted(history, key=lambda e: e["period"])[-36:]
+
+        # Counters are totals over the recorded history, so re-running a period
+        # cannot inflate them.
+        supplier.total_invoices = sum(
+            int(e.get("matched") or 0) + int(e.get("mismatched") or 0)
+            + int(e.get("missing") or 0)
+            for e in supplier.filing_history
+        )
+        supplier.matched_invoices = sum(
+            int(e.get("matched") or 0) for e in supplier.filing_history
+        )
+        supplier.mismatched_invoices = sum(
+            int(e.get("mismatched") or 0) for e in supplier.filing_history
+        )
+        supplier.missing_invoices = sum(
+            int(e.get("missing") or 0) for e in supplier.filing_history
+        )
+        supplier.late_filings = sum(
+            1
+            for e in supplier.filing_history
+            if (e.get("filing_delay_days") or 0) > 0
+        )
+
+        score = supplier_score.score_supplier(supplier, as_of_period=result.period)
+        supplier_score.apply_score(supplier, score)
+        supplier.last_filed_period = result.period
+        if filed_on is not None:
+            supplier.last_seen_at = filed_on
 
         summary[gstin] = {
             "compliance_score": supplier.compliance_score,
             "risk_level": supplier.risk_level.value,
+            "confidence": float(score.confidence),
+            "recommended_provision_pct": float(score.recommended_provision_pct),
             **tally,
         }
     return summary

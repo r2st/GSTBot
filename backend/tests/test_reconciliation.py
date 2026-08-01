@@ -437,7 +437,12 @@ def test_supplier_score_reflects_the_run(db_session, business):
     supplier = db_session.query(Supplier).filter_by(gstin=SUPPLIER_GSTIN_OTHER_STATE).one()
     assert supplier.matched_invoices == 1
     assert supplier.missing_invoices == 1
-    assert supplier.compliance_score == 50
+    # One of two invoices filed is a 50% match rate, which carries half the
+    # weight of the score; the supplier did file this period, so recency scores
+    # full marks on its 10%. Timeliness and consistency have no evidence from a
+    # single period with no filing date, so they drop out and the rest are
+    # renormalised: (50x50 + 100x10) / 60.
+    assert supplier.compliance_score == 58
     assert supplier.risk_level is RiskLevel.HIGH
     assert supplier.filing_history[-1]["period"] == PERIOD
 

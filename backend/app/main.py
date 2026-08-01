@@ -10,7 +10,16 @@ from fastapi.middleware.cors import CORSMiddleware
 
 import app.models  # noqa: F401  (registers every model on Base.metadata)
 from app.core.config import settings
-from app.routers import auth, dashboard, invoices, misc, reconciliation
+from app.routers import (
+    auth,
+    dashboard,
+    filing,
+    invoices,
+    itc,
+    misc,
+    reconciliation,
+    suppliers,
+)
 
 
 @asynccontextmanager
@@ -44,6 +53,9 @@ def create_app() -> FastAPI:
     app.include_router(invoices.router, prefix=prefix)
     app.include_router(dashboard.router, prefix=prefix)
     app.include_router(reconciliation.router, prefix=prefix)
+    app.include_router(itc.router, prefix=prefix)
+    app.include_router(filing.router, prefix=prefix)
+    app.include_router(suppliers.router, prefix=prefix)
 
     @app.get("/")
     def root() -> dict[str, str]:

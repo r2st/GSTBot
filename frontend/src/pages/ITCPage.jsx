@@ -1,0 +1,313 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import ErrorBanner from "../components/ErrorBanner";
+import StatCard from "../components/StatCard";
+import { api } from "../lib/api";
+import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
+
+/** The last 12 filing periods, newest first. */
+function recentPeriodOptions(now = new Date()) {
+  const options = [];
+  for (let i = 0; i < 12; i += 1) {
+    const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    options.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return options;
+}
+
+const HEADS = [
+  { key: "igst", label: "IGST" },
+  { key: "cgst", label: "CGST" },
+  { key: "sgst", label: "SGST" },
+  { key: "cess", label: "Cess" },
+];
+
+/** A four-head breakdown with a total, used for credit, tax and reversals. */
+function HeadsTable({ caption, rows }) {
+  return (
+    <div className="table-scroll">
+      <table className="table">
+        <thead>
+          <tr>
+            <th scope="col">{caption}</th>
+            {HEADS.map((head) => (
+              <th scope="col" key={head.key} className="numeric">
+                {head.label}
+              </th>
+            ))}
+            <th scope="col" className="numeric">
+              Total
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td>
+                {row.label}
+                {row.help && <div className="muted small">{row.help}</div>}
+              </td>
+              {HEADS.map((head) => (
+                <td key={head.key} className="numeric">
+                  {rupees(row.heads?.[head.key])}
+                </td>
+              ))}
+              <td className="numeric">
+                <strong>{rupees(row.heads?.total)}</strong>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default function ITCPage() {
+  const [period, setPeriod] = useState(currentPeriod());
+  const [summary, setSummary] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async (target) => {
+    setLoading(true);
+    setError("");
+    try {
+      setSummary(await api.itc(target));
+    } catch (err) {
+      setError(err.message);
+      setSummary(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load(period);
+  }, [load, period]);
+
+  const rule37 = summary?.rule_37;
+  const proportionate = summary?.proportionate;
+  const setOff = summary?.set_off;
+
+  return (
+    <div className="page">
+      <div className="page-head">
+        <div>
+          <h1>Input Tax Credit</h1>
+          <p className="muted">
+            What you can claim this period, what has to be reversed, and what the credit
+            leaves you to pay in cash.
+          </p>
+        </div>
+        <label className="period-picker">
+          <span>Period</span>
+          <select value={period} onChange={(e) => setPeriod(e.target.value)}>
+            {recentPeriodOptions().map((option) => (
+              <option key={option} value={option}>
+                {periodLabel(option)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <ErrorBanner message={error} onDismiss={() => setError("")} />
+
+      {loading ? (
+        <p className="muted">Loading…</p>
+      ) : !summary ? null : (
+        <>
+          {!summary.reconciled && (
+            <div className="banner banner-warn" role="status">
+              No reconciliation has been run for {periodLabel(period)}. These figures are
+              what your books claim, not what GSTR-2B supports —{" "}
+              <Link to="/reconcile">reconcile the period</Link> before relying on them.
+            </div>
+          )}
+
+          <section className="stat-grid">
+            <StatCard
+              label="Credit available"
+              value={rupees(summary.available.total)}
+              sub={summary.reconciled ? "Confirmed against 2B" : "Unreconciled"}
+              tone={summary.reconciled ? "good" : "warn"}
+            />
+            <StatCard
+              label="To reverse"
+              value={rupees(summary.total_reversal.total)}
+              sub="Rules 37, 42 and 43"
+              tone={Number(summary.total_reversal.total) > 0 ? "bad" : "good"}
+            />
+            <StatCard
+              label="Net credit"
+              value={rupees(summary.net_available.total)}
+              sub="After every reversal"
+            />
+            <StatCard
+              label="Cash to pay"
+              value={rupees(setOff.total_cash)}
+              sub={`Output tax ${rupees(summary.output_tax.total)}`}
+              tone={Number(setOff.total_cash) > 0 ? "warn" : "good"}
+            />
+          </section>
+
+          <section className="panel">
+            <h2>Position by tax head</h2>
+            <HeadsTable
+              caption="Head"
+              rows={[
+                {
+                  label: "Credit available",
+                  heads: summary.available,
+                  help: `${summary.invoice_count} purchase invoices${
+                    summary.unclaimed_count
+                      ? `, ${summary.unclaimed_count} carrying no claimable credit`
+                      : ""
+                  }`,
+                },
+                {
+                  label: "Capital goods, this month",
+                  heads: proportionate.capital_credit_this_month,
+                  help: `One month of ${proportionate.capital_months} (Rule 43)`,
+                },
+                { label: "Less: reversals", heads: summary.total_reversal },
+                { label: "Net credit", heads: summary.net_available },
+                { label: "Output tax", heads: summary.output_tax },
+              ]}
+            />
+          </section>
+
+          <section className="panel">
+            <h2>How the credit settles</h2>
+            <p className="muted small">
+              Applied in the order sections 49, 49A and 49B require: IGST credit first and
+              in full, then each of CGST and SGST against its own head and IGST. CGST
+              credit can never settle SGST, or the reverse.
+            </p>
+            {setOff.steps.length === 0 ? (
+              <p className="muted">No credit could be applied to this period's liability.</p>
+            ) : (
+              <ul className="result-list">
+                {setOff.steps.map((step) => (
+                  <li key={`${step.credit_head}-${step.liability_head}`} className="result-row">
+                    <span className="result-name">
+                      {step.credit_head.toUpperCase()} credit → {step.liability_head.toUpperCase()}{" "}
+                      liability
+                    </span>
+                    <span className="numeric">{rupees(step.amount)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="kv">
+              <div>
+                <span className="muted">Cash payable</span>
+                <strong>{rupees(setOff.total_cash)}</strong>
+              </div>
+              <div>
+                <span className="muted">Credit carried forward</span>
+                <strong>{rupees(setOff.credit_carried_forward.total)}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="panel">
+            <h2>Rule 37 — unpaid suppliers</h2>
+            <p className="muted small">
+              Credit reverses on an invoice still unpaid {rule37.days} days after its date.
+              Paying the supplier before then keeps it.
+            </p>
+
+            {rule37.overdue.length === 0 && rule37.approaching.length === 0 ? (
+              <p className="muted">Nothing outstanding past the deadline or approaching it.</p>
+            ) : (
+              <div className="table-scroll">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Status</th>
+                      <th scope="col">Invoice</th>
+                      <th scope="col">Supplier</th>
+                      <th scope="col">Date</th>
+                      <th scope="col" className="numeric">
+                        Days
+                      </th>
+                      <th scope="col" className="numeric">
+                        Credit
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...rule37.overdue, ...rule37.approaching].map((item) => (
+                      <tr key={item.invoice_id}>
+                        <td>
+                          <span className={item.overdue ? "chip chip-bad" : "chip chip-warn"}>
+                            {item.overdue ? "Reversed" : "Due soon"}
+                          </span>
+                        </td>
+                        <td>
+                          <Link to={`/invoices/${item.invoice_id}`}>
+                            {item.invoice_number || "(no number)"}
+                          </Link>
+                        </td>
+                        <td>
+                          <div>{item.supplier_name || "—"}</div>
+                          <div className="muted small">{item.supplier_gstin || ""}</div>
+                        </td>
+                        <td>{dateLabel(item.invoice_date)}</td>
+                        <td className="numeric">
+                          {item.overdue
+                            ? `${item.days_outstanding} outstanding`
+                            : `${item.days_remaining} left`}
+                        </td>
+                        <td className="numeric">{rupees(item.tax.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+
+          <section className="panel">
+            <h2>Rules 42 and 43 — exempt supplies</h2>
+            <p className="muted small">
+              Credit on purchases that fed exempt supplies has to be given back in
+              proportion to exempt turnover.
+            </p>
+            <div className="kv">
+              <div>
+                <span className="muted">Exempt turnover</span>
+                <strong>{rupees(proportionate.exempt_turnover)}</strong>
+              </div>
+              <div>
+                <span className="muted">Total turnover</span>
+                <strong>{rupees(proportionate.total_turnover)}</strong>
+              </div>
+              <div>
+                <span className="muted">Exempt share</span>
+                <strong>{(Number(proportionate.exempt_ratio) * 100).toFixed(2)}%</strong>
+              </div>
+            </div>
+            <HeadsTable
+              caption="Reversal"
+              rows={[
+                {
+                  label: "Rule 42 — inputs and services",
+                  heads: proportionate.rule_42_reversal,
+                },
+                {
+                  label: "Rule 43 — capital goods",
+                  heads: proportionate.rule_43_reversal,
+                },
+                { label: "Rule 37 — unpaid suppliers", heads: rule37.reversal },
+                { label: "Total to reverse", heads: summary.total_reversal },
+              ]}
+            />
+          </section>
+        </>
+      )}
+    </div>
+  );
+}

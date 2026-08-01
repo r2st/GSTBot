@@ -2,10 +2,13 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Shell from "./components/Shell";
 import { useAuth } from "./hooks/useAuth";
 import DashboardPage from "./pages/DashboardPage";
+import FilingPage from "./pages/FilingPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
+import ITCPage from "./pages/ITCPage";
 import LoginPage from "./pages/LoginPage";
 import ReconcilePage from "./pages/ReconcilePage";
+import SuppliersPage from "./pages/SuppliersPage";
 import UploadPage from "./pages/UploadPage";
 
 function Protected({ children }) {
@@ -63,6 +66,30 @@ export default function App() {
         element={
           <Protected>
             <ReconcilePage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/itc"
+        element={
+          <Protected>
+            <ITCPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/filing"
+        element={
+          <Protected>
+            <FilingPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/suppliers"
+        element={
+          <Protected>
+            <SuppliersPage />
           </Protected>
         }
       />

@@ -147,4 +147,68 @@ export const api = {
   getReconciliation: (id) => request(`/reconciliation/${id}`),
   latestReconciliation: (period) =>
     request(`/reconciliation/latest?period=${encodeURIComponent(period)}`),
+
+  // ---- ITC ----
+  itc: (period, params = {}) =>
+    request(`/itc${query({ period, ...params })}`),
+
+  rule37: (asOf) => request(`/itc/rule37${query({ as_of: asOf })}`),
+
+  setOff: (payload) => request("/itc/set-off", { method: "POST", body: payload }),
+
+  // ---- Filing ----
+  validateFiling: (period, invoiceType) =>
+    request(`/filing/validate${query({ period, invoice_type: invoiceType })}`),
+
+  gstr1: (period) => request(`/filing/gstr1${query({ period })}`),
+  gstr3b: (period) => request(`/filing/gstr3b${query({ period })}`),
+
+  /** The download URL for an export. Used as an href, not fetched. */
+  exportUrl: (returnType, extension, period) =>
+    `${BASE}/filing/export/${returnType}.${extension}${query({ period })}`,
+
+  /**
+   * Fetch an export as a Blob.
+   *
+   * The export endpoints need the bearer token, which a plain `<a href>`
+   * cannot carry — so the file is fetched with the header and handed to the
+   * browser as an object URL rather than linked to directly.
+   */
+  async downloadExport(returnType, extension, period) {
+    const headers = {};
+    const token = getToken();
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
+    const res = await fetch(api.exportUrl(returnType, extension, period), { headers });
+    if (res.status === 401) setToken(null);
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(errorMessage(text ? JSON.parse(text) : null, res.statusText));
+    }
+    return {
+      blob: await res.blob(),
+      filename: filenameFrom(res.headers.get("Content-Disposition")),
+    };
+  },
+
+  // ---- Suppliers ----
+  listSuppliers: (params = {}) => request(`/suppliers${query(params)}`),
+  getSupplier: (id, period) => request(`/suppliers/${id}${query({ period })}`),
+  rescoreSuppliers: (period) =>
+    request(`/suppliers/rescore${query({ period })}`, { method: "POST" }),
 };
+
+/** Build a `?a=1&b=2` suffix, dropping empty values. Returns "" when empty. */
+function query(params = {}) {
+  const search = new URLSearchParams(
+    Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""),
+  );
+  const suffix = search.toString();
+  return suffix ? `?${suffix}` : "";
+}
+
+/** Pull the filename out of a Content-Disposition header. */
+export function filenameFrom(header, fallback = "gstbot-export") {
+  const match = /filename="?([^"]+)"?/.exec(header ?? "");
+  return match ? match[1] : fallback;
+}

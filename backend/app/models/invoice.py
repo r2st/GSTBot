@@ -92,6 +92,9 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         Index("ix_invoices_business_period", "business_id", "period"),
         Index("ix_invoices_business_status", "business_id", "status"),
         Index("ix_invoices_business_type_date", "business_id", "invoice_type", "invoice_date"),
+        # Rule 37 asks "what is unpaid and older than 180 days" of the whole
+        # purchase register, on every ITC screen.
+        Index("ix_invoices_business_paid", "business_id", "paid_at"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -140,6 +143,16 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
     # False for exempt, nil-rated, or blocked-credit (s.17(5)) purchases.
     itc_eligible: Mapped[bool] = mapped_column(default=True, nullable=False)
     reverse_charge: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    # ---- ITC reversal inputs ----
+    # When the supplier was paid. Rule 37 reverses the credit on a purchase left
+    # unpaid 180 days past the invoice date, so "not yet paid" and "paid" have
+    # to be distinguishable per invoice rather than inferred from a ledger the
+    # product does not hold. None means unpaid as far as GSTBot knows.
+    paid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # Capital goods take their credit over 60 months under Rule 43 instead of
+    # in the month of purchase, so they cannot sit in the same pool as inputs.
+    is_capital_good: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     line_items: Mapped[list | None] = mapped_column(JSONType, nullable=True)
 
