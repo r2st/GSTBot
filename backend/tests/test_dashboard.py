@@ -168,6 +168,34 @@ def test_the_period_filter_scopes_the_money_but_not_the_counts(
     assert Decimal(may["purchase"]["igst"]) == Decimal("2000.00")
 
 
+def test_a_failed_invoice_is_counted_but_its_money_is_not(auth_client, db_session, business):
+    """The badge should show the document; the liability should not.
+
+    A failed extraction can still carry figures — a re-parse of an invoice
+    that read cleanly the first time leaves them behind. The returns leave the
+    row out, so the dashboard's net liability has to leave it out too, or a
+    business plans its cash around a number its GSTR-3B will not show.
+    """
+    make_invoice(
+        db_session,
+        business.id,
+        invoice_type=InvoiceType.SALES,
+        invoice_number="S-1",
+        status=InvoiceStatus.FAILED,
+        taxable_value=Decimal("100000.00"),
+        igst=Decimal("18000.00"),
+        total_value=Decimal("118000.00"),
+    )
+
+    body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+
+    assert body["counts"]["total"] == 1
+    assert body["counts"]["by_status"]["failed"] == 1
+    assert body["sales"]["count"] == 0
+    assert Decimal(body["sales"]["igst"]) == Decimal("0.00")
+    assert Decimal(body["net_liability"]["total"]) == Decimal("0.00")
+
+
 def test_soft_deleted_invoices_are_excluded(auth_client, db_session, business):
     invoice = make_invoice(db_session, business.id, invoice_number="D-1",
                            igst=Decimal("5000.00"))

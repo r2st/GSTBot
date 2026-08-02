@@ -506,7 +506,15 @@ def purchase_invoices(
 
 
 def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
-    """Output tax declared on sales invoices for *period*."""
+    """Output tax declared on sales invoices for *period*.
+
+    Failed extractions are excluded, because GSTR-1 excludes them: ``filing``
+    leaves a failed row out of the return entirely. Counting it here and not
+    there makes the ITC screen quote an output tax the 3B it produces will not
+    contain, and the difference lands on the cash the business is told to pay.
+    A re-parse is where this bites — the figures from the first, successful
+    read stay on the row after a later attempt fails.
+    """
     row = db.execute(
         select(
             func.coalesce(func.sum(Invoice.igst), 0),
@@ -518,6 +526,7 @@ def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.SALES,
             Invoice.period == period,
+            Invoice.status != InvoiceStatus.FAILED,
         )
     ).one()
     return TaxHeads(
@@ -536,6 +545,11 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
     it is the best evidence the product has without asking a business to
     classify every line by hand — the caller can override both figures when
     they know better.
+
+    Failed extractions are excluded for the same reason as ``_outward_tax``,
+    and one worse: a row whose tax fields were never read has no tax, so it
+    would be counted as an *exempt* supply and inflate the Rule 42 ratio —
+    reversing credit on the strength of an extraction that failed.
     """
     rows = db.execute(
         select(
@@ -549,6 +563,7 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.SALES,
             Invoice.period == period,
+            Invoice.status != InvoiceStatus.FAILED,
         )
     ).all()
 

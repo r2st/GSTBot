@@ -395,8 +395,19 @@ def tax_summary(
     One grouped query rather than a query per figure: the dashboard is the
     most-hit endpoint in the product and a business can hold tens of thousands
     of invoices.
+
+    Failed extractions are left out, because the returns leave them out. The
+    dashboard's net liability is the number a business plans its cash around,
+    and it has to be the number the GSTR-3B it files will show — a row whose
+    figures are stale from an earlier read is not in the return, and must not
+    be in the total either. The status counts above are unaffected: those are
+    lifetime counts of documents, and a failed one still needs attention.
     """
-    conditions = [Invoice.business_id == business_id, Invoice.deleted_at.is_(None)]
+    conditions = [
+        Invoice.business_id == business_id,
+        Invoice.deleted_at.is_(None),
+        Invoice.status != InvoiceStatus.FAILED,
+    ]
     if period:
         conditions.append(Invoice.period == period)
 

@@ -565,6 +565,104 @@ def test_turnover_split_treats_untaxed_sales_as_exempt(db_session, business):
     assert total == Decimal("150000.00")
 
 
+def test_output_tax_ignores_a_sale_whose_extraction_failed(db_session, business):
+    """A failed row is not in GSTR-1, so it is not output tax either.
+
+    A re-parse of an already-parsed invoice leaves the first read's figures on
+    the row and the status at FAILED. Counting them here charges the business
+    for a supply the return it files does not declare.
+    """
+    db_session.add_all(
+        [
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.PARSED,
+                invoice_number="S-1",
+                period=PERIOD,
+                taxable_value=Decimal("100000.00"),
+                igst=Decimal("18000.00"),
+                total_value=Decimal("118000.00"),
+            ),
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.FAILED,
+                invoice_number="S-2",
+                period=PERIOD,
+                taxable_value=Decimal("200000.00"),
+                igst=Decimal("36000.00"),
+                total_value=Decimal("236000.00"),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    output = itc_service._outward_tax(db_session, business.id, PERIOD)
+
+    assert output.igst == Decimal("18000.00")
+
+
+def test_turnover_split_ignores_a_sale_whose_extraction_failed(db_session, business):
+    """A row with no readable tax is not evidence of an exempt supply.
+
+    Left in, it counts as exempt turnover — which raises the Rule 42 ratio and
+    reverses credit on the strength of a parse that failed.
+    """
+    db_session.add_all(
+        [
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.PARSED,
+                invoice_number="S-1",
+                period=PERIOD,
+                taxable_value=Decimal("100000.00"),
+                igst=Decimal("18000.00"),
+                total_value=Decimal("118000.00"),
+            ),
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.FAILED,
+                invoice_number="S-2",
+                period=PERIOD,
+                taxable_value=Decimal("100000.00"),
+                total_value=Decimal("100000.00"),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    exempt, total = itc_service.turnover_split(db_session, business.id, PERIOD)
+
+    assert exempt == Decimal("0.00")
+    assert total == Decimal("100000.00")
+
+
+def test_a_failed_sale_does_not_make_the_business_pay_cash(db_session, business):
+    """The end of the chain: an inflated liability is cash out of the door."""
+    save(db_session, business.id, invoice_number="A-1")  # ₹18,000 of credit.
+    db_session.add(
+        Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.SALES,
+            status=InvoiceStatus.FAILED,
+            invoice_number="S-1",
+            period=PERIOD,
+            taxable_value=Decimal("500000.00"),
+            igst=Decimal("90000.00"),
+            total_value=Decimal("590000.00"),
+        )
+    )
+    db_session.commit()
+
+    summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+    assert summary.output_tax.igst == Decimal("0.00")
+    assert summary.set_off.cash_payable.igst == Decimal("0.00")
+
+
 def test_summary_set_off_uses_the_net_credit(db_session, business):
     save(db_session, business.id, invoice_number="A-1")
     db_session.add(

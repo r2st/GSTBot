@@ -523,6 +523,31 @@ def test_gstr3b_carries_the_set_off_for_the_screen(db_session, business):
     assert document["gstbot_set_off"]["cash_payable"]["igst"] == "18000.00"
 
 
+def test_gstr3b_leaves_a_failed_sale_out_of_both_value_and_tax(db_session, business):
+    """3.1(a) has to describe one set of invoices, not two.
+
+    The taxable value comes from the filable rows and the tax from the ITC
+    summary. When a re-parse fails, the figures from the earlier successful
+    read stay on the row — so if the two sides disagree about whether that row
+    counts, the return declares ₹1,00,000 of supplies carrying ₹36,000 of tax,
+    and the portal rejects it for the arithmetic.
+    """
+    save(db_session, business.id, sale(invoice_number="S-GOOD"))
+    save(
+        db_session,
+        business.id,
+        sale(invoice_number="S-STALE", status=InvoiceStatus.FAILED),
+    )
+
+    document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+    outward = document["sup_details"]["osup_det"]
+    assert outward["txval"] == 100000.00
+    assert outward["iamt"] == 18000.00
+    # 18% of the declared value, which is the check the portal itself runs.
+    assert outward["iamt"] == round(outward["txval"] * 0.18, 2)
+
+
 # ---------------------------------------------------------------------------
 # CSV
 # ---------------------------------------------------------------------------
