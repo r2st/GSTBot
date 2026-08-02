@@ -58,7 +58,10 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Lint
-        run: ruff check app tests
+        # `tools` is included: it is not deployed, but it is the thing that
+        # decides whether the suite's assertions are worth anything, and a
+        # mutation tester nobody trusts is a mutation tester nobody runs.
+        run: ruff check app tests tools
 
       # Deliberately no `ruff format --check`. The source is hand-formatted to
       # keep comment blocks and long call signatures readable, and ruff's

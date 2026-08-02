@@ -1,5 +1,5 @@
 {
-  "include": ["backend/app", "backend/tests"],
+  "include": ["backend/app", "backend/tests", "backend/tools"],
   "exclude": ["**/node_modules", "**/__pycache__", "**/.venv"],
   "venvPath": "backend",
   "venv": ".venv",
