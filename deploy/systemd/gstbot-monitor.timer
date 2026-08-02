@@ -1,0 +1,21 @@
+[Unit]
+Description=Periodic GSTBot health check
+Documentation=https://gstbot.aiknol.com/api/v1/health
+
+[Timer]
+Unit=gstbot-monitor.service
+# Every 15 minutes. Short enough that an outage is noticed inside the window
+# somebody would call an outage; long enough that a persistent problem
+# reported every time does not become the thing people mute.
+OnCalendar=*:0/15
+# Not Persistent=. Unlike the backup, a check missed while the box was down
+# is not worth catching up: it would report the state of ten minutes ago, and
+# the check that runs on schedule shortly afterwards reports now.
+Persistent=false
+# The API and the site are also checked from here, so a spread start keeps
+# four products' health checks off the same instant.
+RandomizedDelaySec=2m
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

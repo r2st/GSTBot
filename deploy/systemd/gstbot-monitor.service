@@ -1,0 +1,73 @@
+[Unit]
+# Periodic health check, started by gstbot-monitor.timer.
+#
+# Not PartOf=gstbot.target and not in its Wants=, for the same reason
+# gstbot-backup is not: stopping the stack for maintenance must not also stop
+# the thing that would notice the stack is down, and a release restarting the
+# target must not fire a check against units that are mid-restart.
+Description=GSTBot health check
+Documentation=https://gstbot.aiknol.com/api/v1/health
+Wants=network-online.target
+After=network-online.target
+# Nothing is Requires=. A check that refuses to run because what it checks is
+# missing reports nothing at exactly the moment it is needed.
+
+[Service]
+Type=oneshot
+
+User=gstbot
+Group=gstbot
+# For GSTBOT_ALERT_WEBHOOK. The rest of the script's knobs have defaults that
+# match this deployment, so an env file without any of them is correct.
+EnvironmentFile=/etc/gstbot/gstbot.env
+ExecStart=/opt/GSTBot/deploy/monitor.sh
+
+# The script exits non-zero when a check fails, so the unit is left in
+# `failed` — which is the point: `systemctl is-failed gstbot-monitor` answers
+# "is anything wrong" without a webhook, a dashboard or a login to journald.
+# Restart=no because the timer is the retry, and a check retried three times
+# in ten seconds reports the same transient blip three times.
+Restart=no
+# Every check has its own curl --max-time; this is the backstop for a DNS
+# resolution that hangs rather than refuses.
+TimeoutStartSec=120
+
+# Four products share this box and none of them should wait on a health check.
+Nice=10
+IOSchedulingClass=idle
+
+# ---- Sandboxing ----
+# The same set as the application units, and notably *without* ReadWritePaths:
+# this script writes nothing at all. The whole filesystem being read-only to
+# it is what keeps "the monitor has a bug" a smaller problem than any of the
+# things it watches.
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+# AF_UNIX is not optional here: `systemctl show` reaches the manager over the
+# system D-Bus socket, and the resolver behind curl uses it too. Without it
+# every unit reads as "unreadable" and the report is confidently wrong.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gstbot-monitor

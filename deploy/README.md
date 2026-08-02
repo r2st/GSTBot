@@ -148,9 +148,10 @@ install -m 0644 /opt/GSTBot/deploy/systemd/* /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now gstbot.target
 systemctl enable --now gstbot-backup.timer
+systemctl enable --now gstbot-monitor.timer
 ```
 
-That installs seven units:
+That installs nine units:
 
 | Unit | What it is |
 |---|---|
@@ -161,18 +162,22 @@ That installs seven units:
 | `gstbot-worker.service` | the Celery worker that extracts invoices |
 | `gstbot-backup.service` | one `pg_dump`, started by the timer — see "Backups" |
 | `gstbot-backup.timer` | 02:30 nightly |
+| `gstbot-monitor.service` | one pass of the health checks — see "Monitoring" |
+| `gstbot-monitor.timer` | every 15 minutes |
 
 `gstbot-migrate.service` is a `oneshot` that stays active after it exits, and
 both serving units `Requires=` it. That is what stops two processes running
 `alembic upgrade` against one database at the same time — the same rule the
 container entrypoint follows when it refuses to migrate from the worker.
 
-The backup timer is enabled separately and on purpose. It is not in
+Both timers are enabled separately and on purpose. Neither is in
 `gstbot.target`, so `systemctl restart gstbot.target` during a release does
-not fire a dump — and the price of that is a unit `enable --now gstbot.target`
-does not reach. Enabling the target and forgetting the timer is the way this
-box ends up with no backups and no sign of it, so the line above is part of
-step 6 rather than a footnote.
+not fire a dump or run a health check against units that are mid-restart — and
+the price of that is two units `enable --now gstbot.target` does not reach.
+Enabling the target and forgetting the timers is the way this box ends up with
+no backups and no sign of it, so both lines are part of step 6 rather than a
+footnote. `gstbot-monitor` reports the other one being missed; nothing reports
+`gstbot-monitor` being missed, so it is the one to check twice.
 
 **7. Edge**
 
@@ -367,6 +372,67 @@ the stack stopped, not a step to copy from a runbook.
 Two limits, repeated here because they are the ones that matter at 3am: the
 dumps are on the same disk as the database, and the uploaded invoice files in
 `/var/lib/gstbot/invoices` are not in them.
+
+## Monitoring
+
+```sh
+systemctl is-failed gstbot-monitor.service    # "is anything wrong" in one command
+systemctl start gstbot-monitor.service        # run the checks now, synchronously
+journalctl -u gstbot-monitor -n 30            # what the last pass found
+systemctl list-timers 'gstbot-*'              # both timers, last and next run
+```
+
+`gstbot-monitor.timer` runs `deploy/monitor.sh` every 15 minutes. systemd
+already restarts what crashes and the readiness probe already holds traffic
+back from an API that cannot reach its database; what neither of them does is
+tell anybody. So the checks are the failures that are silent by construction:
+
+| Check | The failure it is for |
+|---|---|
+| the three serving units are `active` | one exhausted `StartLimitBurst` and stopped being restarted |
+| `gstbot-backup.timer` is `active` | it was never enabled, or was disabled and not put back |
+| a `*.dump` newer than 48 hours exists | dumps have been failing into a journal with no reader |
+| 1 GiB free where the dumps go | the disk fills, and it takes out four products |
+| `/health/ready` on the bridge | the API is not serving |
+| `/health/live` through Caddy | DNS, TLS or `knol-caddy` — the part the bridge check cannot see |
+
+The last two are separate on purpose: only the public one failing means the
+edge, and knowing that before logging in is most of the value.
+
+Every check runs even after one has failed — a report that stops at the dead
+API and says nothing about the full disk that caused it is the wrong report.
+The unit is left `failed` when anything is wrong, which is what makes
+`systemctl is-failed` a complete answer on a box with no alerting configured.
+
+It writes nothing: no `StateDirectory`, no `ReadWritePaths`, and
+`ProtectSystem=strict`, so the filesystem is read-only to it. That is also why
+it does not deduplicate — there is nowhere to remember what it already said. A
+problem that persists is reported every 15 minutes, deliberately: a monitor
+that goes quiet after the first alert cannot be told apart from one that
+stopped running.
+
+To have it reach somebody, set one variable in `/etc/gstbot/gstbot.env`:
+
+```
+GSTBOT_ALERT_WEBHOOK=https://hooks.example.com/...
+```
+
+It POSTs `{"text": ...}`, which is the field Slack, Discord and Mattermost
+incoming webhooks all read, alongside the problems as a list for anything that
+parses the body. Unset — which is how it ships — every check still runs and
+still lands in the journal behind a failed unit; the webhook only changes who
+finds out without looking.
+
+The thresholds are environment variables with defaults in the script
+(`GSTBOT_MONITOR_MAX_BACKUP_AGE_HOURS`, `GSTBOT_MONITOR_MIN_FREE_MB`,
+`GSTBOT_MONITOR_READY_URL`, `GSTBOT_MONITOR_PUBLIC_URL`). The backup window is
+48 hours rather than 24 because the timer carries 15 minutes of jitter and
+catches up after a reboot, so a tighter window reports a dump that is merely
+late — and an alert that is usually wrong is one people learn to close.
+
+What it does not do is page anyone, keep history, or notice a trend. It answers
+"is something broken right now", which is the question this box did not have an
+answer to at all.
 
 ## What is deliberately not here
 

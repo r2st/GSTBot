@@ -47,6 +47,7 @@ SITE_CONF = DEPLOY / "caddy-gstbot.conf"
 ENV_EXAMPLE = DEPLOY / "gstbot.env.example"
 DEPLOY_SCRIPT = DEPLOY / "deploy.sh"
 BACKUP_SCRIPT = DEPLOY / "backup.sh"
+MONITOR_SCRIPT = DEPLOY / "monitor.sh"
 STATIC_SERVER = DEPLOY / "static-server.mjs"
 TARGET = SYSTEMD / "gstbot.target"
 
@@ -70,7 +71,16 @@ SERVING_UNITS = ("gstbot-api.service", "gstbot-web.service", "gstbot-worker.serv
 # SANDBOXED_UNITS below is for.
 BACKUP_SERVICE = "gstbot-backup.service"
 BACKUP_TIMER = "gstbot-backup.timer"
-SANDBOXED_UNITS = (*SERVICE_UNITS, BACKUP_SERVICE)
+# The periodic health check. Kept apart from the units above for the same
+# reasons as the backup, and from the backup because it writes nothing — the
+# one unit here with no writable path at all.
+MONITOR_SERVICE = "gstbot-monitor.service"
+MONITOR_TIMER = "gstbot-monitor.timer"
+# Every unit that runs as the service account under the shared sandbox.
+SANDBOXED_UNITS = (*SERVICE_UNITS, BACKUP_SERVICE, MONITOR_SERVICE)
+# The two units nothing starts on its own: each is enabled by hand and would
+# otherwise be installed, never run, and never missed.
+TIMER_UNITS = (BACKUP_TIMER, MONITOR_TIMER)
 
 # The one address this deployment answers on. Written out rather than derived,
 # because "the site block and the CORS list agree" is only interesting if they
@@ -213,7 +223,7 @@ def env_example() -> dict[str, str]:
 
 @pytest.fixture(scope="module")
 def units() -> dict[str, dict]:
-    names = (*SANDBOXED_UNITS, BACKUP_TIMER)
+    names = (*SANDBOXED_UNITS, *TIMER_UNITS)
     return {name: parse_unit((SYSTEMD / name).read_text()) for name in names}
 
 
@@ -252,6 +262,7 @@ class TestTheManifestsAreThere:
             ENV_EXAMPLE,
             DEPLOY_SCRIPT,
             BACKUP_SCRIPT,
+            MONITOR_SCRIPT,
             STATIC_SERVER,
             TARGET,
             DEPLOY / "README.md",
@@ -281,7 +292,7 @@ class TestTheManifestsAreThere:
         # SERVICE_UNITS: it is started by its timer and belongs to no target,
         # so the checks above about gstbot.target would be wrong about it.
         shipped = {p.name for p in SYSTEMD.iterdir() if p.suffix == ".service"}
-        assert shipped == {*SERVICE_UNITS, BACKUP_SERVICE}
+        assert shipped == {*SERVICE_UNITS, BACKUP_SERVICE, MONITOR_SERVICE}
 
     def test_every_timer_starts_a_unit_that_ships(self):
         # A timer naming a unit that does not exist is enabled without
@@ -1144,6 +1155,170 @@ class TestTheBackupJob:
         assert entry(timer, "Timer", "Persistent") == "true"
 
 
+class TestTheMonitor:
+    """The periodic health check, its unit and its timer.
+
+    systemd already restarts what crashes and the readiness probe already
+    holds traffic back from an API that cannot reach its database. Neither
+    tells anyone. What this unit exists for is the set of failures that are
+    silent by construction — a unit past its start limit, a timer never
+    enabled, dumps that stopped, a disk filling — and what the checks below
+    assert is that it reports them rather than becoming one of them.
+    """
+
+    @pytest.fixture(scope="class")
+    def script(self) -> str:
+        return MONITOR_SCRIPT.read_text()
+
+    @pytest.fixture(scope="class")
+    def commands(self, script) -> str:
+        """The script without its comments — see TestTheDeployScript."""
+        return "\n".join(
+            line for line in script.splitlines() if not line.lstrip().startswith("#")
+        )
+
+    @pytest.fixture(scope="class")
+    def unit(self) -> dict:
+        return parse_unit((SYSTEMD / MONITOR_SERVICE).read_text())
+
+    @pytest.fixture(scope="class")
+    def timer(self) -> dict:
+        return parse_unit((SYSTEMD / MONITOR_TIMER).read_text())
+
+    def test_the_script_is_executable(self):
+        assert MONITOR_SCRIPT.stat().st_mode & stat.S_IXUSR, "chmod +x deploy/monitor.sh"
+
+    def test_the_script_is_valid_bash(self):
+        result = subprocess.run(
+            ["bash", "-n", str(MONITOR_SCRIPT)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_it_checks_every_unit_that_serves(self, commands):
+        # A unit left out here is one whose death is invisible. gstbot-migrate
+        # is correctly absent: RemainAfterExit=yes means "active" says only
+        # that the last release migrated, which is not a fact about now.
+        for name in SERVING_UNITS:
+            assert name in commands, f"{name} is not checked"
+        assert "gstbot-migrate" not in commands
+
+    def test_it_checks_that_something_is_taking_backups(self, commands):
+        # The timer, not the service: gstbot-backup.service is inactive
+        # between runs, which is correct and says nothing about whether
+        # backups happen. An un-enabled timer is the documented way this box
+        # ends up with no backups and no sign of it.
+        assert BACKUP_TIMER in commands
+        assert BACKUP_SERVICE not in commands
+
+    def test_it_checks_that_a_dump_actually_landed(self, commands):
+        # An active timer proves a dump was attempted. Only the directory
+        # proves one was written, which is the difference between a backup
+        # job that is running and a backup job that is working.
+        assert BACKUP_DIR in commands
+        assert "-name '*.dump'" in commands
+
+    def test_the_freshness_window_survives_a_late_backup(self, commands):
+        # The timer carries 15 minutes of jitter and Persistent= catches up
+        # after a reboot, so a 24-hour window reports a dump that is merely
+        # late. Anything under two nights is an alert nobody will keep reading.
+        hours = matched(
+            r'MAX_BACKUP_AGE_HOURS="?\$\{GSTBOT_MONITOR_MAX_BACKUP_AGE_HOURS:-(\d+)\}', commands
+        )
+        assert int(hours.group(1)) >= 48
+
+    def test_it_checks_the_api_and_the_edge_separately(self, commands):
+        # Two requests with different blast radii. Only the bridge failing is
+        # the app; only the public URL failing is DNS, TLS or a Caddy that
+        # belongs to another product — and knowing which without logging in
+        # is most of what a check like this is for.
+        assert BRIDGE in commands
+        assert SITE in commands
+
+    def test_every_check_has_a_timeout(self, commands):
+        # A curl with no timeout against a host that drops packets hangs
+        # until TimeoutStartSec, and the report never arrives.
+        for line in commands.splitlines():
+            if "curl" in line:
+                assert "--max-time" in line, f"curl without a timeout can hang: {line.strip()}"
+
+    def test_one_failed_check_does_not_hide_the_rest(self, commands):
+        # `set -e` plus a check that exits on the first problem reports a dead
+        # API and says nothing about the full disk that caused it. Every
+        # failure accumulates and the report comes at the end.
+        assert "set -euo pipefail" in commands
+        assert "problems+=(" in commands
+
+    def test_it_fails_the_unit_when_a_check_fails(self, commands):
+        # The webhook is optional; this is not. `systemctl is-failed
+        # gstbot-monitor` has to answer "is anything wrong" on a box where
+        # nobody configured a notification channel.
+        assert commands.rstrip().endswith("exit 1")
+
+    def test_it_says_nothing_and_exits_clean_when_all_is_well(self, commands):
+        # A check that reports every run trains people to ignore it.
+        assert matched(r'if \[ "\$\{#problems\[@\]\}" -eq 0 \]', commands)
+        assert "exit 0" in commands
+
+    def test_the_alert_channel_is_optional(self, commands):
+        # Unset, everything still runs and still lands in the journal behind a
+        # failed unit. A monitor that only works once someone has wired up a
+        # webhook is one that does nothing on the day it is installed.
+        assert matched(r'WEBHOOK="\$\{GSTBOT_ALERT_WEBHOOK:-\}"', commands)
+        assert matched(r'if \[ -n "\$WEBHOOK" \]', commands)
+
+    def test_the_alert_body_is_built_by_something_that_escapes(self, commands):
+        # Problem lines carry unit names, paths and URLs. One quote pasted
+        # into hand-written JSON turns the alert into a 400 from the receiving
+        # end — a notification channel that breaks exactly when it is used.
+        assert "json.dumps" in commands
+
+    def test_the_monitor_writes_nothing(self, unit):
+        # No StateDirectory and no ReadWritePaths under ProtectSystem=strict,
+        # so the whole filesystem is read-only to it. "The monitor has a bug"
+        # should be a smaller problem than any of the things it watches.
+        assert not entries(unit, "Service", "ReadWritePaths")
+        assert not entries(unit, "Service", "StateDirectory")
+
+    def test_it_can_reach_the_manager_and_the_resolver(self, unit):
+        # `systemctl show` goes over the system D-Bus socket and curl's
+        # resolver uses it too. Without AF_UNIX every unit reads as
+        # unreadable and the report is confidently wrong.
+        assert "AF_UNIX" in entry(unit, "Service", "RestrictAddressFamilies")
+
+    def test_a_failed_check_is_not_retried_into_a_loop(self, unit):
+        assert entry(unit, "Service", "Type") == "oneshot"
+        assert entry(unit, "Service", "Restart") == "no"
+        # And it must not hold "active" afterwards, or the timer cannot start
+        # it again in fifteen minutes.
+        assert not entries(unit, "Service", "RemainAfterExit")
+
+    def test_the_unit_runs_the_script_that_ships_with_the_release(self, unit):
+        assert entry(unit, "Service", "ExecStart") == f"{INSTALL_ROOT}/deploy/monitor.sh"
+
+    def test_a_release_does_not_fire_a_health_check(self, unit):
+        # PartOf= would run a check against units that are mid-restart, once
+        # per `systemctl restart gstbot.target`, and report the outage the
+        # release is currently causing.
+        assert not entries(unit, "Unit", "PartOf")
+        assert not entries(unit, "Install", "WantedBy")
+
+    def test_the_timer_starts_the_monitor(self, timer):
+        assert entry(timer, "Timer", "Unit") == MONITOR_SERVICE
+        assert entry(timer, "Install", "WantedBy") == "timers.target"
+
+    def test_it_runs_often_enough_to_notice_an_outage(self, timer):
+        # An hourly check makes "the site was down for 55 minutes and nothing
+        # said so" a normal outcome.
+        minutes = matched(r"^\*:0?/(\d+)$", entry(timer, "Timer", "OnCalendar"))
+        assert int(minutes.group(1)) <= 15
+
+    def test_a_missed_check_is_not_caught_up(self, timer):
+        # The opposite of the backup timer, on purpose: a check that ran while
+        # the box was down would report the state of ten minutes ago, and the
+        # next scheduled one reports now.
+        assert entry(timer, "Timer", "Persistent") == "false"
+
+
 class TestTheRunbook:
     @pytest.fixture(scope="class")
     def readme(self) -> str:
@@ -1153,7 +1328,7 @@ class TestTheRunbook:
         # A unit added without a line here is one nobody knows to install.
         # The timer especially: it is the one unit that does nothing at all
         # until `systemctl enable` is run against it by hand.
-        for name in (*SANDBOXED_UNITS, BACKUP_TIMER, "gstbot.target"):
+        for name in (*SANDBOXED_UNITS, *TIMER_UNITS, "gstbot.target"):
             assert name in readme, f"{name} is undocumented"
 
     def test_it_documents_the_edge_file_by_the_name_it_has(self, readme):
