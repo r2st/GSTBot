@@ -84,6 +84,65 @@ class TestParseRate:
     def test_the_label_is_what_the_caller_is_told(self, window, label):
         assert Rate(5, window).label == label
 
+    # Every spelling `_UNITS` accepts, written out here rather than read off
+    # the table under test. The accepted forms above cover one alias per unit,
+    # which is enough to catch a unit that is missing entirely and not enough
+    # to catch one mapped to the wrong number of seconds — and a `100/hours`
+    # in the deployed configuration that quietly means a minute is a rate limit
+    # that is sixty times tighter than the operator wrote.
+    @pytest.mark.parametrize(
+        "unit,window",
+        [
+            ("s", 1), ("sec", 1), ("second", 1), ("seconds", 1),
+            ("m", 60), ("min", 60), ("minute", 60), ("minutes", 60),
+            ("h", 3600), ("hour", 3600), ("hours", 3600),
+            ("d", 86400), ("day", 86400), ("days", 86400),
+        ],
+    )
+    def test_every_accepted_spelling_of_a_period_means_what_it_says(self, unit, window):
+        assert parse_rate(f"7/{unit}") == Rate(7, window)
+
+    def test_the_unit_table_has_no_spelling_that_is_not_tested_above(self):
+        """Guards the list above against a unit being added and not covered."""
+        from app.core.ratespec import _UNITS
+
+        tested = {
+            "s", "sec", "second", "seconds",
+            "m", "min", "minute", "minutes",
+            "h", "hour", "hours",
+            "d", "day", "days",
+        }
+        assert set(_UNITS) == tested
+
+    def test_a_limit_of_one_is_a_limit_rather_than_an_error(self):
+        """`0` is refused; the boundary is that `1` is not.
+
+        A `1/day` is a real configuration — it is what a destructive endpoint
+        would be given — and refusing it would fail startup rather than the
+        request.
+        """
+        assert parse_rate("1/day") == Rate(1, 86400)
+
+    def test_a_one_second_window_is_a_window_rather_than_an_error(self):
+        """The other boundary: `30/0s` is refused, so `30/1s` must not be."""
+        assert parse_rate("30/1s") == Rate(30, 1)
+
+    def test_a_number_glued_to_an_unknown_unit_is_refused_as_a_rate(self):
+        """`10x` parses as a count and a suffix, and the suffix is not a unit.
+
+        Without both halves of that check the suffix is looked up anyway, and
+        the operator gets a KeyError out of configuration loading instead of
+        the message naming the entry they mistyped.
+        """
+        with pytest.raises(ValueError, match="unknown period"):
+            parse_rate("5/10x")
+
+    def test_a_rate_cannot_be_edited_after_it_is_parsed(self):
+        """One `Rate` is cached per limit and shared across every request."""
+        rate = parse_rate("30/minute")
+        with pytest.raises(Exception, match="assign|immutable|frozen"):
+            rate.limit = 1_000_000  # type: ignore[misc]
+
 
 class TestIdentity:
     """Who a request is charged to."""

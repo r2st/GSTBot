@@ -82,6 +82,27 @@ class TestPeriodFormats:
         # MMYYYY is what the portal emits, so it wins.
         assert period_from_portal("012026") == "2026-01"
 
+    # The YYYYMM fallback has its own 1..12 test, and the cases above only
+    # reach it with a month of 04 — comfortably inside the range. Both ends of
+    # a filing year go down this branch in practice: an annual export names
+    # January and March, and a quarterly filer's is December.
+    @pytest.mark.parametrize(
+        "raw,period",
+        [("202601", "2026-01"), ("202612", "2026-12"), ("202603", "2026-03")],
+    )
+    def test_the_yyyymm_fallback_accepts_both_ends_of_the_year(self, raw, period):
+        assert period_from_portal(raw) == period
+
+    @pytest.mark.parametrize("raw", ["132026", "002026", "202600", "202613"])
+    def test_a_month_outside_the_year_is_refused_under_either_reading(self, raw):
+        """Neither reading may be stretched to accept a thirteenth month.
+
+        A period that parses to `2026-13` is worse than one that fails: it
+        becomes a filing period no return can ever be filed for, and the
+        invoices booked against it silently leave the reconciliation.
+        """
+        assert period_from_portal(raw) is None
+
 
 # --------------------------------------------------------------------------
 # JSON that is shaped wrong

@@ -88,6 +88,115 @@ def test_compute_check_digit_rejects_wrong_length():
         gstin_service.compute_check_digit("27AAPFU0939F1")
 
 
+# ---------------------------------------------------------------------------
+# The check digit, pinned to the specification rather than to three examples
+# ---------------------------------------------------------------------------
+#
+# Three known-good GSTINs are enough to catch a check digit that is wrong for
+# everything, and not enough to catch one that is wrong for a few inputs.
+# Mutating each `36` in `compute_check_digit` individually showed which: two of
+# them survived the whole suite, because the constants only diverge on inputs
+# no fixture happened to contain.
+#
+# `_reference_check_digit` is written straight from the module docstring's
+# description of the algorithm, independently of the implementation. Two
+# implementations of the same spec agreeing on a corpus that spans every
+# character in every position is a much stronger claim than three fixtures.
+
+
+def _reference_check_digit(first14: str) -> str:
+    """The base-36 weighted mod-36 algorithm, transcribed from the spec."""
+    alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    total = 0
+    for index, char in enumerate(first14):
+        weight = 2 if index % 2 else 1
+        product = alphabet.index(char) * weight
+        total += (product // 36) + (product % 36)
+    return alphabet[(36 - (total % 36)) % 36]
+
+
+def _bodies():
+    """14-character bodies that put every alphabet value at every position.
+
+    Not restricted to the GSTIN shape on purpose: `compute_check_digit` is
+    defined over the base-36 alphabet, and the point here is to cover the
+    arithmetic rather than the format `parse` separately enforces.
+
+    The third family is what guarantees every check digit appears. The last
+    position carries weight 2, so sweeping it alone walks the running total
+    through all 36 residues: below 'I' the contribution is 2v, and from 'I' up
+    the carry out of `product // 36` makes it 2v-35 — the odd residues the
+    doubling skips.
+    """
+    alphabet = gstin_service._ALPHABET
+    for offset in range(len(alphabet)):
+        yield "".join(alphabet[(offset + position) % 36] for position in range(14))
+        yield "".join(alphabet[(offset * position) % 36] for position in range(14))
+    for base in ("27AAPFU0939F1Z", "0000000000000A", "ZZZZZZZZZZZZZZ"):
+        for last in alphabet:
+            yield base[:13] + last
+
+
+def test_the_check_digit_agrees_with_an_independent_implementation():
+    for body in _bodies():
+        assert gstin_service.compute_check_digit(body) == _reference_check_digit(body), body
+
+
+def test_the_corpus_produces_every_possible_check_digit():
+    """Otherwise the previous test's agreement could be over a narrow range.
+
+    The wrap in `(36 - total % 36) % 36` only does anything when the total is
+    already a multiple of 36 — the case that yields '0' — so a corpus that
+    never lands there leaves that expression unasserted.
+    """
+    produced = {gstin_service.compute_check_digit(body) for body in _bodies()}
+    assert produced == set(gstin_service._ALPHABET)
+
+
+# 'I' is worth a case of its own: its value is 18, so at an odd index its
+# weighted product is exactly 36 — the one input where `product // 36` and the
+# quotient of any nearby divisor disagree.
+GSTIN_WITH_I_AT_AN_ODD_INDEX = "27AAAIA0939F1ZN"
+
+# A GSTIN whose own check digit is '0', i.e. one whose weighted total is a
+# multiple of 36. Nothing in the rest of the suite has one.
+GSTIN_WITH_A_ZERO_CHECK_DIGIT = "27AAAAU6094J2Z0"
+
+
+@pytest.mark.parametrize(
+    "gstin", [GSTIN_WITH_I_AT_AN_ODD_INDEX, GSTIN_WITH_A_ZERO_CHECK_DIGIT]
+)
+def test_the_arithmetic_edges_are_real_gstins_that_validate(gstin):
+    assert gstin_service.compute_check_digit(gstin[:14]) == gstin[14]
+    assert gstin_service.is_valid(gstin)
+
+
+def test_a_zero_check_digit_is_not_confused_with_a_missing_one():
+    assert gstin_service.parse(GSTIN_WITH_A_ZERO_CHECK_DIGIT).check_digit == "0"
+
+
+def test_every_field_a_parsed_gstin_exposes_is_the_one_it_encodes():
+    """`entity_number` had no assertion anywhere, and position 13 is always 'Z'.
+
+    A field read off the wrong offset returns a plausible-looking constant, so
+    it takes an assertion naming the expected value to notice.
+    """
+    parts = gstin_service.parse(BUSINESS_GSTIN)
+    assert parts.gstin == "27AAPFU0939F1ZV"
+    assert parts.state_code == "27"
+    assert parts.state_name == "Maharashtra"
+    assert parts.pan == "AAPFU0939F"
+    assert parts.entity_number == "1"
+    assert parts.check_digit == "V"
+
+
+def test_a_parsed_gstin_cannot_be_edited_after_validation():
+    """It is passed around as a validated fact; a mutable one is not that."""
+    parts = gstin_service.parse(BUSINESS_GSTIN)
+    with pytest.raises(Exception, match="assign|immutable|frozen"):
+        parts.state_code = "29"  # type: ignore[misc]
+
+
 def test_find_gstins_extracts_from_invoice_text(sample_invoice_text):
     found = gstin_service.find_gstins(sample_invoice_text)
     # Supplier's letterhead GSTIN first, buyer's from the "Bill To" block second.

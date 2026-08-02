@@ -55,6 +55,15 @@ class TestCleanText:
     def test_length_is_bounded(self):
         assert len(clean_text("x" * 5000, max_length=100)) == 100
 
+    def test_the_default_bound_is_the_one_the_columns_are_sized_for(self):
+        """Every caller that omits `max_length` gets this number.
+
+        Passing an explicit bound, as the test above does, leaves the default
+        itself unasserted — and the default is what the model columns and the
+        API schemas were sized against.
+        """
+        assert len(clean_text("x" * 5000)) == 500
+
     def test_truncation_that_leaves_nothing_gives_none(self):
         assert clean_text("    ", max_length=2) is None
 
@@ -93,6 +102,15 @@ class TestSearchPattern:
     def test_none_and_blank_mean_no_filter(self):
         assert search_pattern(None) is None
         assert search_pattern("   ") is None
+
+    def test_the_default_bound_keeps_a_pasted_page_out_of_a_like_clause(self):
+        """A search term becomes `%term%` against an indexed column.
+
+        The endpoint caps the query parameter at 100 too, but this function is
+        the one that has to hold when it is called from anywhere else.
+        """
+        pattern = search_pattern("x" * 5000)
+        assert pattern == "%" + "x" * 100 + "%"
 
     def test_a_term_is_wrapped_in_wildcards(self):
         assert search_pattern("acme") == "%acme%"
@@ -164,3 +182,11 @@ class TestSafeExtension:
 
     def test_a_double_extension_takes_only_the_last(self):
         assert safe_extension("invoice.pdf.exe") == ".exe"
+
+    def test_an_absurdly_long_extension_is_bounded_rather_than_refused(self):
+        """The extension is appended to a path, so its length is not cosmetic.
+
+        Truncating keeps it alphanumeric, so the result is still a valid
+        extension rather than the "" that a rejection would give.
+        """
+        assert safe_extension("invoice." + "a" * 400) == "." + "a" * 10

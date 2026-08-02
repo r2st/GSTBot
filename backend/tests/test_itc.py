@@ -424,6 +424,86 @@ def test_net_available_never_goes_negative(db_session, business):
     assert summary.net_available.total == Decimal("0.00")
 
 
+def test_net_available_combines_every_term_in_the_same_period(db_session, business):
+    """The one arrangement where each part of the formula is load-bearing.
+
+    ``net = max(0, available + capital_credit_this_month - reversal)``, where
+    the reversal is Rule 37's plus Rule 42/43's. Every other test here leaves
+    at least one of those terms at zero, and a term that is zero cannot show
+    whether it is added or subtracted — so the sign of each was never actually
+    asserted. This also runs it on CGST/SGST/cess rather than IGST, which is
+    the split an intra-state buyer actually has.
+
+    Worked through by hand:
+
+    ==========================  =======  =======  =====
+    Term                          CGST     SGST    Cess
+    ==========================  =======  =======  =====
+    Credit on this period's
+    inputs                       9000     9000    1000
+    Capital credit 12000/60        100      100       0
+    Rule 42 (25% of inputs)     -2250    -2250    -250
+    Rule 43 (25% of monthly)      -25      -25       0
+    Rule 37 (unpaid > 180 days)  -500     -500       0
+    ==========================  =======  =======  =====
+    Net available                6325     6325     750
+    """
+    # This period's input credit.
+    save(
+        db_session,
+        business.id,
+        invoice_number="IN-1",
+        igst=Decimal("0.00"),
+        cgst=Decimal("9000.00"),
+        sgst=Decimal("9000.00"),
+        cess=Decimal("1000.00"),
+    )
+    # A capital good, whose credit belongs to Rule 43's sixty months.
+    save(
+        db_session,
+        business.id,
+        invoice_number="CAP-1",
+        is_capital_good=True,
+        igst=Decimal("0.00"),
+        cgst=Decimal("6000.00"),
+        sgst=Decimal("6000.00"),
+        cess=Decimal("0.00"),
+    )
+    # An earlier invoice still unpaid past 180 days: Rule 37 reverses it.
+    save(
+        db_session,
+        business.id,
+        invoice_number="OLD-1",
+        invoice_date=date(2025, 6, 1),
+        period="2025-06",
+        igst=Decimal("0.00"),
+        cgst=Decimal("500.00"),
+        sgst=Decimal("500.00"),
+        cess=Decimal("0.00"),
+    )
+
+    summary = itc_service.summarise(
+        db_session,
+        business.id,
+        PERIOD,
+        as_of=date(2026, 4, 30),
+        exempt_turnover=Decimal("25000.00"),
+        total_turnover=Decimal("100000.00"),
+    )
+
+    # The inputs to the formula, so a failure below says which term moved.
+    assert summary.available.cgst == Decimal("9000.00")
+    assert summary.proportionate.capital_credit_this_month.cgst == Decimal("100.00")
+    assert summary.proportionate.rule_42_reversal.cgst == Decimal("2250.00")
+    assert summary.proportionate.rule_43_reversal.cgst == Decimal("25.00")
+    assert summary.rule_37.reversal.cgst == Decimal("500.00")
+
+    assert summary.net_available.cgst == Decimal("6325.00")
+    assert summary.net_available.sgst == Decimal("6325.00")
+    assert summary.net_available.cess == Decimal("750.00")
+    assert summary.net_available.igst == Decimal("0.00")
+
+
 def test_turnover_split_treats_untaxed_sales_as_exempt(db_session, business):
     db_session.add_all(
         [

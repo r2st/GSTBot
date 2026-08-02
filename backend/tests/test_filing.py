@@ -318,6 +318,72 @@ def test_gstr1_summarises_b2cs_by_place_and_rate(db_session, business):
     assert bucket["iamt"] == 36000.00
 
 
+def test_gstr1_carries_the_state_split_into_a_b2cs_bucket(db_session, business):
+    """A counter sale in the seller's own state is CGST + SGST, not IGST.
+
+    Every other B2CS assertion here is on an inter-state sale, so only `iamt`
+    was ever checked — and for a retailer the intra-state row is the common
+    one. Filing it with the tax in the wrong head is a return that has to be
+    amended.
+    """
+    for number in ("C-1", "C-2"):
+        save(
+            db_session,
+            business.id,
+            local_sale(invoice_number=number, counterparty_gstin=None),
+        )
+
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+    (bucket,) = document["b2cs"]
+    assert bucket["sply_ty"] == "INTRA"
+    assert bucket["pos"] == "27"
+    assert bucket["txval"] == 200000.00
+    assert bucket["camt"] == 18000.00
+    assert bucket["samt"] == 18000.00
+    assert bucket["iamt"] == 0.0
+    assert bucket["csamt"] == 0.0
+
+
+def test_gstr1_carries_the_state_split_and_cess_into_the_hsn_summary(db_session, business):
+    """The HSN table is filed alongside the invoices and must agree with them."""
+    save(
+        db_session,
+        business.id,
+        local_sale(invoice_number="S-1", cess=Decimal("2500.00")),
+    )
+    save(
+        db_session,
+        business.id,
+        local_sale(invoice_number="S-2", cess=Decimal("2500.00")),
+    )
+
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+    (entry,) = document["hsn"]["data"]
+    assert entry["hsn_sc"] == "84713010"
+    assert entry["txval"] == 200000.00
+    assert entry["camt"] == 18000.00
+    assert entry["samt"] == 18000.00
+    assert entry["iamt"] == 0.0
+    assert entry["csamt"] == 5000.00
+
+
+def test_gstr1_declares_the_hsn_quantity_it_does_not_yet_extract(db_session, business):
+    """`qty` is 0 and the unit is the portal's catch-all, deliberately.
+
+    Filing a made-up quantity against a real HSN code is worse than filing
+    none, so this asserts the placeholder rather than leaving it unpinned.
+    """
+    save(db_session, business.id, sale())
+
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+    (entry,) = document["hsn"]["data"]
+    assert entry["qty"] == 0
+    assert entry["uqc"] == "NOS"
+
+
 def test_gstr1_lists_large_interstate_unregistered_sales_separately(db_session, business):
     """Above ₹2.5 lakh a B2C inter-state supply is reported invoice by invoice."""
     save(
