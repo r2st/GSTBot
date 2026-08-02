@@ -22,6 +22,9 @@ module's reading of a response, not httpx's ability to make a request.
 from __future__ import annotations
 
 import json
+import logging
+from datetime import UTC, datetime, timedelta
+from email.utils import format_datetime
 
 import httpx
 import pytest
@@ -39,17 +42,38 @@ from app.services.openrouter_client import (
 
 MESSAGES = [{"role": "user", "content": "Read this invoice"}]
 
+# Captured at import, before the autouse fixture below can stub it out — the
+# only way for a test to assert anything about the real jitter.
+_REAL_JITTER = openrouter_client._jitter
+
 
 class _FakeResponse:
-    def __init__(self, status_code=200, payload=None, text=None):
+    def __init__(self, status_code=200, payload=None, text=None, headers=None):
         self.status_code = status_code
         self._payload = payload
         self.text = text if text is not None else json.dumps(payload)
+        self.headers = headers or {}
 
     def json(self):
         if self._payload is None:
             raise ValueError("not JSON")
         return self._payload
+
+
+@pytest.fixture(autouse=True)
+def no_real_sleeping(monkeypatch):
+    """Retries are scheduled, not slept through.
+
+    Several tests below drive a 429 or a 502 to its last attempt. Left alone
+    that is seconds of real backoff per test, which is how a suite stops being
+    run. The delays themselves are asserted in TestRetries, against this list.
+    """
+    slept: list[float] = []
+    monkeypatch.setattr(openrouter_client, "_sleep", slept.append)
+    # Jitter exists to decorrelate real workers; in a test it only makes the
+    # asserted schedule unpredictable.
+    monkeypatch.setattr(openrouter_client, "_jitter", lambda: 0.0)
+    return slept
 
 
 @pytest.fixture()
@@ -356,6 +380,331 @@ class TestChatCompletionResponse:
         with pytest.raises(OpenRouterError) as caught:
             chat_completion(MESSAGES)
         assert isinstance(caught.value.__cause__, httpx.ReadTimeout)
+
+
+# --------------------------------------------------------------------------
+# Retries
+# --------------------------------------------------------------------------
+
+class TestRetries:
+    """The free tier rate-limits as a matter of course, and the caller's
+    alternative to a completion is regex heuristics over the invoice.
+
+    That makes a 429 worth asking again — the window it refers to has usually
+    refilled — and makes a 401 worth failing immediately, because the answer is
+    the same however many times it is asked and the caller is waiting.
+    """
+
+    @pytest.fixture()
+    def scripted(self, monkeypatch):
+        """A transport that plays a sequence: each entry a response or a raise."""
+        calls: list[dict] = []
+        queue: list = []
+
+        def fake_post(url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            item = queue.pop(0) if queue else _FakeResponse(payload=_completion("ok"))
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        return {"calls": calls, "queue": queue}
+
+    def test_a_rate_limit_is_retried_rather_than_fallen_back_from(
+        self, configured, scripted
+    ):
+        # The whole point. Without this the invoice is parsed by regex because
+        # the provider was busy for a second.
+        scripted["queue"].append(_FakeResponse(status_code=429, payload={"error": "slow down"}))
+
+        assert chat_completion(MESSAGES) == "ok"
+        assert len(scripted["calls"]) == 2
+
+    @pytest.mark.parametrize("status", [408, 429, 500, 502, 503, 504])
+    def test_every_transient_status_is_retried(self, configured, scripted, status):
+        scripted["queue"].append(_FakeResponse(status_code=status, payload={"error": "x"}))
+
+        assert chat_completion(MESSAGES) == "ok"
+        assert len(scripted["calls"]) == 2
+
+    @pytest.mark.parametrize("status", [400, 401, 402, 403, 404, 422])
+    def test_a_client_error_is_not_retried(self, configured, scripted, status):
+        # A missing key or a malformed request fails the same way twice. Asking
+        # again turns a fast, clear error into a slow one, and on a metered
+        # endpoint it is a second charge for the same mistake.
+        scripted["queue"].append(_FakeResponse(status_code=status, payload={"error": "x"}))
+
+        with pytest.raises(OpenRouterError, match=str(status)):
+            chat_completion(MESSAGES)
+        assert len(scripted["calls"]) == 1
+
+    def test_a_network_error_is_retried(self, configured, scripted):
+        scripted["queue"].append(httpx.ConnectError("refused"))
+
+        assert chat_completion(MESSAGES) == "ok"
+        assert len(scripted["calls"]) == 2
+
+    def test_a_timeout_is_retried(self, configured, scripted):
+        scripted["queue"].append(httpx.ReadTimeout("timed out"))
+
+        assert chat_completion(MESSAGES) == "ok"
+        assert len(scripted["calls"]) == 2
+
+    def test_attempts_are_bounded(self, configured, scripted, monkeypatch):
+        monkeypatch.setattr(settings, "openrouter_max_attempts", 3)
+        scripted["queue"].extend(
+            _FakeResponse(status_code=429, payload={"error": "x"}) for _ in range(10)
+        )
+
+        with pytest.raises(OpenRouterError, match="429"):
+            chat_completion(MESSAGES)
+        assert len(scripted["calls"]) == 3
+
+    def test_one_attempt_disables_retrying(self, configured, scripted, monkeypatch):
+        # The escape hatch for a deployment that would rather fail fast.
+        monkeypatch.setattr(settings, "openrouter_max_attempts", 1)
+        scripted["queue"].append(_FakeResponse(status_code=429, payload={"error": "x"}))
+
+        with pytest.raises(OpenRouterError, match="429"):
+            chat_completion(MESSAGES)
+        assert len(scripted["calls"]) == 1
+
+    def test_the_error_raised_is_the_one_that_kept_happening(self, configured, scripted):
+        # Not a generic "gave up": the operator needs to see the 503.
+        scripted["queue"].extend(
+            _FakeResponse(status_code=503, text="upstream down") for _ in range(5)
+        )
+
+        with pytest.raises(OpenRouterError, match="503"):
+            chat_completion(MESSAGES)
+
+    def test_a_network_failure_still_chains_its_cause(self, configured, scripted):
+        # Raised after the loop rather than inside the handler, so the chaining
+        # has to be explicit — otherwise the traceback loses which error it was.
+        scripted["queue"].extend(httpx.ConnectError("refused") for _ in range(5))
+
+        with pytest.raises(OpenRouterError) as caught:
+            chat_completion(MESSAGES)
+        assert isinstance(caught.value.__cause__, httpx.ConnectError)
+
+    def test_the_backoff_doubles(self, configured, scripted, monkeypatch, no_real_sleeping):
+        monkeypatch.setattr(settings, "openrouter_max_attempts", 4)
+        scripted["queue"].extend(
+            _FakeResponse(status_code=429, payload={"error": "x"}) for _ in range(10)
+        )
+
+        with pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+        # Jitter is stubbed to zero by the autouse fixture.
+        assert no_real_sleeping == [1.0, 2.0, 4.0]
+
+    def test_jitter_is_added_so_workers_do_not_re_collide(
+        self, configured, scripted, monkeypatch, no_real_sleeping
+    ):
+        # Every worker throttled by the same window would otherwise wake at the
+        # same instant and throttle each other again.
+        monkeypatch.setattr(openrouter_client, "_jitter", lambda: 0.25)
+        scripted["queue"].append(_FakeResponse(status_code=429, payload={"error": "x"}))
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [1.25]
+
+    def test_jitter_stays_within_a_fraction_of_a_second(self):
+        # It decorrelates retries; it is not a second backoff. A jitter that
+        # can exceed the base delay makes the schedule unpredictable.
+        #
+        # Against _REAL_JITTER, not openrouter_client._jitter: the autouse
+        # fixture has replaced the module attribute with a stub, so reading it
+        # here would assert that 0.0 is between 0 and 0.5 — a test that passes
+        # whatever the real function does.
+        assert all(0 <= _REAL_JITTER() <= 0.5 for _ in range(200))
+
+    def test_an_httpx_error_that_is_not_a_transport_error_is_not_retried(
+        self, configured, scripted
+    ):
+        # httpx.HTTPError splits into RequestError (the network — retryable)
+        # and HTTPStatusError (a response we already have). Retrying the latter
+        # would rebuild an identical request and get an identical answer.
+        failure = httpx.HTTPStatusError(
+            "boom",
+            request=httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions"),
+            response=httpx.Response(400),
+        )
+        scripted["queue"].extend(failure for _ in range(5))
+
+        with pytest.raises(OpenRouterError, match="request failed"):
+            chat_completion(MESSAGES)
+        assert len(scripted["calls"]) == 1
+
+
+class TestRetryAfter:
+    """The provider's own number beats a guess.
+
+    Guessing shorter re-enters a window that has not refilled, which spends the
+    next window's budget on a request that was always going to be refused.
+    """
+
+    @pytest.fixture()
+    def scripted(self, monkeypatch):
+        calls: list[dict] = []
+        queue: list = []
+
+        def fake_post(url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            item = queue.pop(0) if queue else _FakeResponse(payload=_completion("ok"))
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        return {"calls": calls, "queue": queue}
+
+    def test_it_is_honoured_over_the_backoff(self, configured, scripted, no_real_sleeping):
+        scripted["queue"].append(
+            _FakeResponse(status_code=429, payload={"error": "x"}, headers={"retry-after": "7"})
+        )
+
+        assert chat_completion(MESSAGES) == "ok"
+        assert no_real_sleeping == [7.0], "used its own backoff instead of the provider's"
+
+    def test_a_fractional_value_is_kept(self, configured, scripted, no_real_sleeping):
+        scripted["queue"].append(
+            _FakeResponse(status_code=429, payload={"error": "x"}, headers={"retry-after": "1.5"})
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [1.5]
+
+    def test_no_jitter_is_added_to_an_explicit_wait(
+        self, configured, scripted, monkeypatch, no_real_sleeping
+    ):
+        # The provider said when; moving it is second-guessing a real answer.
+        monkeypatch.setattr(openrouter_client, "_jitter", lambda: 0.4)
+        scripted["queue"].append(
+            _FakeResponse(status_code=429, payload={"error": "x"}, headers={"retry-after": "3"})
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [3.0]
+
+    def test_an_http_date_is_understood(self, configured, scripted, no_real_sleeping):
+        # The header is defined as seconds *or* an HTTP-date, and OpenRouter
+        # has sent both. An unparsed date would fall back to the backoff.
+        when = datetime.now(UTC) + timedelta(seconds=12)
+        scripted["queue"].append(
+            _FakeResponse(
+                status_code=429,
+                payload={"error": "x"},
+                headers={"retry-after": format_datetime(when, usegmt=True)},
+            )
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping and 10 <= no_real_sleeping[0] <= 13
+
+    def test_a_date_in_the_past_is_not_a_negative_sleep(
+        self, configured, scripted, no_real_sleeping
+    ):
+        # A clock skewed the wrong way, or a slow hop. time.sleep would raise.
+        when = datetime.now(UTC) - timedelta(seconds=60)
+        scripted["queue"].append(
+            _FakeResponse(
+                status_code=429,
+                payload={"error": "x"},
+                headers={"retry-after": format_datetime(when, usegmt=True)},
+            )
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [0.0]
+
+    def test_a_negative_number_is_not_a_negative_sleep(
+        self, configured, scripted, no_real_sleeping
+    ):
+        scripted["queue"].append(
+            _FakeResponse(status_code=429, payload={"error": "x"}, headers={"retry-after": "-5"})
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [0.0]
+
+    @pytest.mark.parametrize("value", ["soon", "", "   ", "NaN-ish"])
+    def test_an_unparseable_value_falls_back_to_the_backoff(
+        self, configured, scripted, no_real_sleeping, value
+    ):
+        # Falling back to zero here would hammer a provider that just asked to
+        # be left alone.
+        scripted["queue"].append(
+            _FakeResponse(status_code=429, payload={"error": "x"}, headers={"retry-after": value})
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [1.0]
+
+    def test_a_response_without_headers_is_survived(self, configured, scripted):
+        # httpx always has .headers; a stub in a caller's test may not.
+        scripted["queue"].append(_FakeResponse(status_code=429, payload={"error": "x"}))
+
+        assert chat_completion(MESSAGES) == "ok"
+
+
+class TestTheWaitingBudget:
+    """Extraction runs inline in the upload request when Celery is off, so time
+    spent between attempts is time a user is sitting through."""
+
+    @pytest.fixture()
+    def scripted(self, monkeypatch):
+        calls: list[dict] = []
+        queue: list = []
+
+        def fake_post(url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            item = queue.pop(0) if queue else _FakeResponse(payload=_completion("ok"))
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        return {"calls": calls, "queue": queue}
+
+    def test_a_retry_that_would_exceed_it_is_not_taken(
+        self, configured, scripted, monkeypatch, no_real_sleeping
+    ):
+        monkeypatch.setattr(settings, "openrouter_retry_max_wait_seconds", 5.0)
+        scripted["queue"].append(
+            _FakeResponse(status_code=429, payload={"error": "x"}, headers={"retry-after": "600"})
+        )
+
+        with pytest.raises(OpenRouterError, match="429"):
+            chat_completion(MESSAGES)
+        assert no_real_sleeping == [], "slept past the budget"
+        assert len(scripted["calls"]) == 1
+
+    def test_it_is_a_total_not_a_per_wait_limit(
+        self, configured, scripted, monkeypatch, no_real_sleeping
+    ):
+        # 1s then 2s is 3s; the third wait of 4s crosses a 5s budget.
+        monkeypatch.setattr(settings, "openrouter_max_attempts", 6)
+        monkeypatch.setattr(settings, "openrouter_retry_max_wait_seconds", 5.0)
+        scripted["queue"].extend(
+            _FakeResponse(status_code=503, payload={"error": "x"}) for _ in range(10)
+        )
+
+        with pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+        assert no_real_sleeping == [1.0, 2.0]
+        assert sum(no_real_sleeping) <= 5.0
+
+    def test_giving_up_early_is_logged(self, configured, scripted, monkeypatch, caplog):
+        # Otherwise "it fell back to heuristics" and "it was throttled for
+        # longer than we were willing to wait" look identical afterwards.
+        monkeypatch.setattr(settings, "openrouter_retry_max_wait_seconds", 0.0)
+        scripted["queue"].append(_FakeResponse(status_code=429, payload={"error": "x"}))
+
+        with caplog.at_level(logging.WARNING), pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+        assert "budget" in caplog.text
 
 
 # --------------------------------------------------------------------------

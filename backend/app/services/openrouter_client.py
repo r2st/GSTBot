@@ -13,13 +13,32 @@ tests mock one function. Two provider quirks shape this module:
 Every caller is expected to handle :class:`OpenRouterError` by falling back to
 something deterministic. A free tier is a free tier: it rate-limits, and an
 invoice upload must not fail because a model was busy.
+
+That fallback is a real downgrade, though, and it is worth not taking when the
+failure is one that goes away by itself. A 429 from the free tier is a
+per-minute window that has refilled by the time the caller could have asked
+again; the caller's alternative is regex heuristics on the invoice, which is a
+materially worse answer for something the model would have got right on the
+second try. So transient failures are retried here, and only transient ones — a
+401 is a missing key and a 400 is a malformed request, and asking twice turns a
+fast, clear error into a slow one.
+
+Two bounds keep that from becoming its own outage. ``Retry-After`` is honoured
+when the provider sends it, because guessing shorter just burns the next window
+too. And the total time spent waiting is capped, because this runs inline in the
+upload request when Celery is off — a caller waiting on retries is a caller
+whose request is still open.
 """
 from __future__ import annotations
 
 import base64
 import json
 import logging
+import random
 import re
+import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -31,6 +50,66 @@ logger = logging.getLogger(__name__)
 
 class OpenRouterError(RuntimeError):
     """Raised when no completion could be obtained."""
+
+
+# Failures that a second attempt can plausibly fix. 429 is the free tier's
+# normal signalling; 408 and the 5xx gateway codes are the provider or the hop
+# in front of it, not the request. Deliberately absent: 400, 401, 403 and 404,
+# which are the same wrong answer however many times they are asked.
+_RETRYABLE_STATUS = frozenset({408, 429, 500, 502, 503, 504})
+
+# The wait before the first retry when the provider does not say. Doubles per
+# attempt, so attempts land at roughly 1s, 2s, 4s.
+_BACKOFF_BASE_SECONDS = 1.0
+
+
+def _sleep(seconds: float) -> None:
+    """Indirection so tests can assert the schedule without living through it."""
+    time.sleep(seconds)
+
+
+def _jitter() -> float:
+    """Spread retries so concurrent workers do not re-collide in lockstep.
+
+    Every worker that got rate-limited by the same window would otherwise wake
+    at the same instant and rate-limit each other again.
+    """
+    return random.uniform(0, 0.5)
+
+
+def _retry_after_seconds(response: Any) -> float | None:
+    """The provider's own ``Retry-After``, in seconds, if it sent a usable one.
+
+    The header is defined as either a count of seconds or an HTTP-date, and
+    OpenRouter has used both. Anything unparseable returns ``None`` so the
+    caller falls back to its own backoff rather than to zero.
+    """
+    raw = (getattr(response, "headers", None) or {}).get("retry-after")
+    if not raw:
+        return None
+
+    try:
+        return max(0.0, float(str(raw).strip()))
+    except ValueError:
+        pass
+
+    try:
+        when = parsedate_to_datetime(str(raw))
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    try:
+        if when.tzinfo is None:
+            # An HTTP-date is UTC by definition, but parsedate_to_datetime
+            # returns naive for the obsolete formats, and subtracting a naive
+            # from an aware datetime raises.
+            when = when.replace(tzinfo=UTC)
+        # Clamped: a clock skewed the wrong way, or a slow hop, otherwise gives
+        # a negative delay and time.sleep raises on those.
+        return max(0.0, (when - datetime.now(UTC)).total_seconds())
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 def is_configured() -> bool:
@@ -109,21 +188,88 @@ def chat_completion(
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    try:
-        response = httpx.post(
-            f"{settings.openrouter_base_url.rstrip('/')}/chat/completions",
-            headers=_headers(),
-            json=payload,
-            timeout=timeout or settings.openrouter_timeout_seconds,
-        )
-    except httpx.HTTPError as exc:
-        raise OpenRouterError(f"OpenRouter request failed: {exc}") from exc
+    url = f"{settings.openrouter_base_url.rstrip('/')}/chat/completions"
+    request_timeout = timeout or settings.openrouter_timeout_seconds
 
-    if response.status_code >= 400:
-        raise OpenRouterError(
-            f"OpenRouter returned {response.status_code}: {response.text[:500]}"
-        )
+    attempts = max(1, settings.openrouter_max_attempts)
+    budget = settings.openrouter_retry_max_wait_seconds
+    waited = 0.0
+    # Only ever set from a *transient* failure, so raising it after the last
+    # attempt reports the thing that actually kept failing rather than a
+    # generic "gave up".
+    last_error: OpenRouterError | None = None
 
+    for attempt in range(1, attempts + 1):
+        retry_after: float | None = None
+        try:
+            response = httpx.post(
+                url, headers=_headers(), json=payload, timeout=request_timeout
+            )
+        except httpx.TransportError as exc:
+            # Connect, read, write and timeout errors — the network, not the
+            # request. A different socket may well behave differently.
+            last_error = OpenRouterError(f"OpenRouter request failed: {exc}")
+            # Raised later, outside this handler, so the implicit chaining that
+            # a bare `raise` would give is not available. Set explicitly:
+            # without it the traceback says the request failed and not which
+            # of connect, read or timeout did it.
+            last_error.__cause__ = exc
+        except httpx.HTTPError as exc:
+            # Everything else httpx raises is about the request we built, and
+            # rebuilding it identically would fail identically.
+            raise OpenRouterError(f"OpenRouter request failed: {exc}") from exc
+        else:
+            if response.status_code in _RETRYABLE_STATUS:
+                last_error = OpenRouterError(
+                    f"OpenRouter returned {response.status_code}: {response.text[:500]}"
+                )
+                retry_after = _retry_after_seconds(response)
+            elif response.status_code >= 400:
+                raise OpenRouterError(
+                    f"OpenRouter returned {response.status_code}: {response.text[:500]}"
+                )
+            else:
+                return _completion_text(response)
+
+        if attempt == attempts:
+            break
+
+        delay = retry_after if retry_after is not None else (
+            _BACKOFF_BASE_SECONDS * 2 ** (attempt - 1) + _jitter()
+        )
+        if waited + delay > budget:
+            # Sleeping the rest of the budget and retrying into a window that
+            # is still closed helps nobody: the caller gets the same failure,
+            # later. Falling back to heuristics now is the better answer.
+            logger.warning(
+                "OpenRouter retry would exceed the %ss budget, giving up after "
+                "attempt %s of %s",
+                budget,
+                attempt,
+                attempts,
+            )
+            break
+
+        logger.info(
+            "OpenRouter attempt %s of %s failed, retrying in %.1fs: %s",
+            attempt,
+            attempts,
+            delay,
+            last_error,
+        )
+        _sleep(delay)
+        waited += delay
+
+    raise last_error or OpenRouterError("OpenRouter request failed")
+
+
+def _completion_text(response: Any) -> str:
+    """The assistant's text out of a 2xx body, or an error saying why not.
+
+    Separate from the retry loop because none of these failures is transient:
+    a body that is not JSON, or has no choices, is a response the same request
+    would get again.
+    """
     try:
         data = response.json()
     except ValueError as exc:

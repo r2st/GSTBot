@@ -120,6 +120,14 @@ class Settings(BaseSettings):
     openrouter_app_url: str = "https://gstbot.aiknol.com"
     openrouter_app_title: str = "GSTBot"
     openrouter_timeout_seconds: float = 90.0
+    # Total tries, not retries: 1 disables retrying entirely. Only transient
+    # failures (429, 408, 5xx, network) consume one — a 401 fails on the first.
+    openrouter_max_attempts: int = Field(default=3, ge=1, le=10)
+    # Ceiling on time spent *waiting between* attempts for a single call. With
+    # Celery off, extraction runs inline in the upload request, so this is
+    # latency a user is sitting through. A retry that would cross it is not
+    # taken: falling back to heuristics now beats the same failure 30s later.
+    openrouter_retry_max_wait_seconds: float = Field(default=30.0, ge=0, le=300)
 
     # ---- Uploads ----
     upload_dir: str = "./data/invoices"
