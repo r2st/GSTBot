@@ -112,7 +112,21 @@ def _url_for(path: Path) -> str:
 
 
 def _script() -> ScriptDirectory:
-    return ScriptDirectory.from_config(Config(str(BACKEND / "alembic.ini")))
+    """The revision directory, found from anywhere.
+
+    ``script_location = alembic`` in the ini is relative, and alembic resolves
+    it against the *working directory*, not against the ini file it came from.
+    The subprocess helpers above pin ``cwd`` to ``BACKEND`` and so are fine;
+    this one runs in-process and inherits whatever directory pytest was
+    started in. Left alone it fails from the repository root — and fails
+    quietly, because ``_load_chain`` swallows the error to keep collection
+    alive, leaving ``CHAIN`` empty and ``ROLLBACK_TARGETS`` collapsed to
+    ``["base"]``. The rollback tests below would then still pass, having
+    stopped covering every revision but the first.
+    """
+    config = Config(str(BACKEND / "alembic.ini"))
+    config.set_main_option("script_location", str(BACKEND / "alembic"))
+    return ScriptDirectory.from_config(config)
 
 
 def _load_chain() -> tuple[list[str], str | None]:
@@ -354,6 +368,35 @@ class TestTheChainCanBeWalkedBothWays:
         # unattributed KeyError out of collection.
         assert CHAIN_ERROR is None, f"alembic cannot read the history: {CHAIN_ERROR}"
         assert CHAIN, "no migrations found"
+
+    def test_the_history_is_readable_from_any_working_directory(self, tmp_path):
+        """Where pytest was started from must not change what is covered.
+
+        ``script_location`` is relative and alembic resolves it against the
+        working directory, so an in-process ``Config`` finds the revisions only
+        when the caller happens to be sitting in ``backend/``. That failure is
+        not loud: ``_load_chain`` catches it so collection survives, so running
+        the suite from the repository root would leave ``CHAIN`` empty and the
+        rollback parametrization below reduced to ``base`` alone — fewer tests,
+        all of them green.
+        """
+        original = Path.cwd()
+        os.chdir(tmp_path)
+        try:
+            revisions = [rev.revision for rev in _script().walk_revisions()][::-1]
+        finally:
+            os.chdir(original)
+
+        assert revisions == CHAIN
+
+    def test_every_revision_before_the_head_is_a_rollback_target(self):
+        # Guards the parametrization itself rather than the migrations. The
+        # targets are computed once at import from a chain that is empty when
+        # loading it failed, and an empty parametrize list is not an error —
+        # it is a test that silently stops running.
+        expected = ["base", *CHAIN[:-1]]
+        assert expected == ROLLBACK_TARGETS
+        assert len(ROLLBACK_TARGETS) == len(CHAIN)
 
     def test_there_is_exactly_one_head(self, script):
         # Two developers branching from the same revision produces two heads,
