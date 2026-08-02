@@ -85,6 +85,123 @@ class TestValidation:
         assert settings.cors_origins == ["https://a.example.com", "https://b.example.com"]
 
 
+class TestFieldsThatMustBeSane:
+    """Single-field guards, each protecting something a long way from here.
+
+    Cheap to write and easy to leave untested, which is exactly the problem: a
+    validator nobody has ever watched fire is indistinguishable from one that
+    does not fire at all. The normalisation cases matter for the same reason —
+    every caller downstream assumes the canonical form came back.
+    """
+
+    @pytest.mark.parametrize("field", ["access_token_expire_minutes", "max_upload_mb"])
+    @pytest.mark.parametrize("value", [0, -1])
+    def test_a_non_positive_value_is_refused(self, field, value):
+        # Zero is the interesting one. A zero token lifetime signs credentials
+        # that have already expired, and a zero upload cap rejects every file —
+        # both look like a working deployment until someone tries to use it.
+        with pytest.raises(ValidationError, match="must be positive"):
+            Settings(**prod(**{field: value}))
+
+    def test_an_unknown_log_level_is_refused(self):
+        with pytest.raises(ValidationError, match="LOG_LEVEL must be one of"):
+            Settings(**prod(log_level="CHATTY"))
+
+    def test_a_log_level_is_normalised_to_upper_case(self):
+        assert Settings(**prod(log_level=" debug ")).log_level == "DEBUG"
+
+    def test_an_unknown_log_format_is_refused(self):
+        # Typo'd to "text" and accepted, this would emit console output into an
+        # aggregator that only parses JSON — logs that exist but are unsearchable.
+        with pytest.raises(ValidationError, match="LOG_FORMAT must be"):
+            Settings(**prod(log_format="text"))
+
+    def test_an_asymmetric_jwt_algorithm_is_refused(self):
+        # RS256 here would mean the verification key and the signing key are the
+        # same string, which is the classic JWT confusion. The product signs and
+        # verifies with one secret, so the asymmetric family must not be offered.
+        with pytest.raises(ValidationError, match="JWT_ALGORITHM must be"):
+            Settings(**prod(jwt_algorithm="RS256"))
+
+    def test_a_supported_algorithm_is_normalised(self):
+        assert Settings(**prod(jwt_algorithm="hs512")).jwt_algorithm == "HS512"
+
+    def test_a_blank_environment_falls_back_to_development(self):
+        # Not to production: an empty ENVIRONMENT is an unset one, and the
+        # stricter branch must be opted into rather than arrived at by accident.
+        settings = Settings(environment="   ")
+        assert settings.environment == "development"
+        assert not settings.is_production
+
+    def test_a_plaintext_cors_origin_is_fatal_in_production(self):
+        # Allowing the origin is what makes the browser attach the token, so a
+        # http:// entry here puts a live credential on the wire in clear text.
+        with pytest.raises(ValidationError, match="must use https"):
+            Settings(**prod(backend_cors_origins="https://app.example.com,http://staging.local"))
+
+    def test_max_upload_bytes_matches_the_megabyte_setting(self):
+        # The setting an operator writes is MB; every size check reads bytes.
+        assert Settings(**prod(max_upload_mb=15)).max_upload_bytes == 15 * 1024 * 1024
+
+
+class TestPlanLimits:
+    """``plan_monthly_invoice_limits`` is enforced at upload, parsed here."""
+
+    def test_the_shipped_default_parses(self):
+        limits = Settings(**prod()).plan_limits
+        assert limits["free"] == 50
+        assert limits["starter"] == 500
+        # 0 is "unlimited", not "nothing allowed" — the paid plans rely on it.
+        assert limits["pro"] == 0
+
+    def test_a_garbled_entry_is_dropped_and_its_neighbours_survive(self):
+        # A typo in one plan must not take the other plans' ceilings with it,
+        # and must not raise: this string is read on the upload path.
+        limits = Settings(
+            **prod(plan_monthly_invoice_limits="free=50,starter=lots,=9,pro=0")
+        ).plan_limits
+        assert limits == {"free": 50, "pro": 0}
+
+    def test_names_are_lower_cased_and_trimmed(self):
+        assert Settings(**prod(plan_monthly_invoice_limits=" Free = 50 ")).plan_limits == {
+            "free": 50
+        }
+
+
+class TestRateLimitOverrides:
+    """``RATE_LIMIT_OVERRIDES`` is the one config string that warns instead of raising."""
+
+    def test_the_global_default_is_always_present(self):
+        # Every caller passes through it, so its absence would mean no ceiling
+        # at all rather than a missing override.
+        assert Settings(**prod()).rate_limits["global"] == "300/minute"
+
+    def test_an_override_applies_under_its_registered_name(self):
+        limits = Settings(
+            **prod(rate_limit_overrides="Login=5/minute, upload=20/hour")
+        ).rate_limits
+        assert limits["login"] == "5/minute"
+        assert limits["upload"] == "20/hour"
+        assert limits["global"] == "300/minute"
+
+    def test_an_unparseable_override_warns_and_leaves_the_rest_alone(self):
+        # Deliberately not fatal, and this is the asymmetry worth pinning down:
+        # an operator tuning a limit at 2am should get the built-in default for
+        # the entry they fat-fingered, not an API that refuses to start. The
+        # entry beside it still has to apply.
+        with pytest.warns(UserWarning, match="login=5/fortnight"):
+            limits = Settings(
+                **prod(rate_limit_overrides="login=5/fortnight,upload=20/hour")
+            ).rate_limits
+        assert "login" not in limits
+        assert limits["upload"] == "20/hour"
+
+    def test_a_valueless_entry_is_skipped_silently(self):
+        # "login=" is a half-finished edit rather than a wrong value; there is
+        # nothing to tell the operator that the built-in default does not say.
+        assert "login" not in Settings(**prod(rate_limit_overrides="login=")).rate_limits
+
+
 class TestStartupWarnings:
     """Questionable, not fatal — the deployment still comes up."""
 

@@ -1,6 +1,7 @@
 """Registration, login, and the tenant boundary they establish."""
 from __future__ import annotations
 
+from app.core.security import create_access_token
 from app.models.business import Business, BusinessPlan
 from app.models.user import User, UserRole
 from tests.conftest import BUSINESS_GSTIN, TEST_EMAIL, TEST_PASSWORD
@@ -170,6 +171,74 @@ def test_me_rejects_a_token_for_a_deleted_user(client, auth_client, db_session):
     db_session.commit()
 
     assert client.get("/api/v1/auth/me", headers={"Authorization": token}).status_code == 401
+
+
+def test_me_rejects_a_token_whose_subject_is_not_a_user_id(client):
+    """A signature check is not an authorization check.
+
+    ``create_access_token`` stringifies whatever it is handed, so anyone who
+    ever obtains the signing key — or any future code path that mints a token
+    from something other than a user id — produces a token that verifies
+    perfectly and resolves to no user. The subject has to be rejected as
+    unusable rather than reaching ``db.get`` and raising a 500 out of the
+    driver, which would turn a bad token into an availability problem.
+    """
+    forged = create_access_token("admin")
+    response = client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {forged}"})
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Could not validate credentials"
+
+
+def test_login_still_finds_a_row_stored_with_mixed_case(client, db_session):
+    """The fallback for rows written before addresses were folded.
+
+    Registration lower-cases the address now, so the indexed lookup finds
+    everything created since. A row from before that must still be able to log
+    in — and only the exact address they typed can match it, because no index
+    could serve a ``lower(email)`` comparison.
+    """
+    from app.core.security import hash_password
+    from app.models.business import Business
+
+    business = db_session.query(Business).filter_by(gstin=BUSINESS_GSTIN).one_or_none()
+    if business is None:
+        client.post("/api/v1/auth/register", json=REGISTRATION)
+        business = db_session.query(Business).filter_by(gstin=BUSINESS_GSTIN).one()
+
+    db_session.add(
+        User(
+            email="Legacy.Owner@Example.com",
+            hashed_password=hash_password(TEST_PASSWORD),
+            full_name="Legacy Owner",
+            role=UserRole.OWNER,
+            business_id=business.id,
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/api/v1/auth/login",
+        data={"username": "Legacy.Owner@Example.com", "password": TEST_PASSWORD},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["access_token"]
+
+
+def test_register_rejects_a_password_from_the_top_of_every_breach_corpus(client):
+    # Long enough to clear the length check, which is exactly why the length
+    # check on its own is not enough.
+    response = client.post(
+        "/api/v1/auth/register", json={**REGISTRATION, "password": "Password123"}
+    )
+    assert response.status_code == 422
+    assert "too common" in str(response.json()["detail"]).lower()
+
+
+def test_register_rejects_a_password_that_is_only_whitespace(client):
+    # Eight spaces satisfies min_length and is not in the corpus list.
+    response = client.post("/api/v1/auth/register", json={**REGISTRATION, "password": "        "})
+    assert response.status_code == 422
+    assert "whitespace" in str(response.json()["detail"]).lower()
 
 
 def test_inactive_business_blocks_access(auth_client, db_session):
