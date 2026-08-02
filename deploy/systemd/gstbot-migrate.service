@@ -1,0 +1,72 @@
+[Unit]
+# Schema migration, run once per boot of the stack and once per release.
+#
+# A separate unit rather than an ExecStartPre on the API, for the same reason
+# the container entrypoint refuses to migrate from the worker: two processes
+# running `alembic upgrade` against one database at the same time is how you
+# get a half-applied schema. This is the only thing that touches it, and the
+# API and worker are ordered behind it.
+Description=GSTBot database migrations
+Documentation=https://gstbot.aiknol.com
+Wants=network-online.target
+After=network-online.target postgresql.service
+# Not Requires=: Postgres may legitimately be on another host, in which case
+# the unit does not exist here and Requires= would fail the whole stack.
+PartOf=gstbot.target
+
+[Service]
+Type=oneshot
+# Holds "active" after exiting, so the API's Requires= is satisfied for the
+# lifetime of the boot rather than only during the seconds alembic runs.
+RemainAfterExit=yes
+
+User=gstbot
+Group=gstbot
+WorkingDirectory=/srv/gstbot/src/backend
+EnvironmentFile=/etc/gstbot/gstbot.env
+# /srv is read-only under ProtectSystem=strict, so a stray .pyc write would
+# be an error rather than a cache.
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+
+ExecStart=/srv/gstbot/venv/bin/alembic upgrade head
+
+# A migration that fails must stop the release, not retry into a loop.
+Restart=no
+TimeoutStartSec=300
+
+# ---- Sandboxing ----
+# Identical across the three units on purpose: they run the same code as the
+# same user, and a difference between them would be an accident rather than a
+# decision. StateDirectory= is what keeps /var/lib/gstbot writable while
+# ProtectSystem=strict makes everything else read-only.
+StateDirectory=gstbot
+StateDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Deliberately no MemoryDenyWriteExecute=: it breaks any dependency that maps
+# executable pages, and the set of those is a property of the wheels pip
+# resolved rather than of anything reviewable here.
+
+[Install]
+WantedBy=gstbot.target

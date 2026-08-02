@@ -1,0 +1,68 @@
+[Unit]
+Description=GSTBot Celery worker (invoice extraction)
+Documentation=https://gstbot.aiknol.com
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service gstbot-migrate.service
+Requires=gstbot-migrate.service
+PartOf=gstbot.target
+
+[Service]
+Type=exec
+User=gstbot
+Group=gstbot
+WorkingDirectory=/srv/gstbot/src/backend
+
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=CELERY_CONCURRENCY=2
+Environment=CELERY_LOG_LEVEL=info
+EnvironmentFile=/etc/gstbot/gstbot.env
+
+# The same command the container entrypoint runs, so a bug reproduces the
+# same way under compose and under systemd.
+ExecStart=/srv/gstbot/venv/bin/celery -A app.celery_app worker \
+    --loglevel=${CELERY_LOG_LEVEL} \
+    --concurrency=${CELERY_CONCURRENCY}
+
+# SIGTERM is Celery's warm shutdown: stop consuming, finish what is in hand.
+# With task_acks_late=True a task killed mid-flight is redelivered, so the
+# stop timeout only has to cover one parse rather than protect against loss.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# ---- Sandboxing ----
+# See gstbot-migrate.service. The worker needs the same StateDirectory as the
+# API and for the same reason: it parses the file the API wrote, and only the
+# row id travels through the broker.
+StateDirectory=gstbot
+StateDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=gstbot.target

@@ -1,0 +1,86 @@
+[Unit]
+Description=GSTBot API (uvicorn)
+Documentation=https://gstbot.aiknol.com/api/v1/health
+Wants=network-online.target
+After=network-online.target postgresql.service redis-server.service gstbot-migrate.service
+# Requires only the migration: Postgres and Redis may be remote, and the app
+# already degrades correctly while they come up — the readiness probe holds
+# traffic back. A schema that has not been migrated is different in kind: the
+# process would start and then 500 on every query.
+Requires=gstbot-migrate.service
+PartOf=gstbot.target
+
+[Service]
+Type=exec
+User=gstbot
+Group=gstbot
+WorkingDirectory=/srv/gstbot/src/backend
+
+# Order matters. Environment= lines are defaults; the EnvironmentFile below
+# is read afterwards and overrides them, so an operator can retune the worker
+# count in /etc/gstbot/gstbot.env without editing a unit.
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=WEB_CONCURRENCY=4
+EnvironmentFile=/etc/gstbot/gstbot.env
+
+# 127.0.0.1, not 0.0.0.0: Caddy is on this host and is the only thing that
+# should be able to reach the API. Bound to every interface, the Hetzner
+# public address would serve the API unencrypted on port 8000 alongside the
+# TLS one, and every rate limit keyed on a forwarded header would be
+# forgeable by connecting directly.
+#
+# --forwarded-allow-ips is the loopback for the same reason: uvicorn only
+# honours X-Forwarded-* from a peer on that list, so the app's
+# TRUST_PROXY_HEADERS=true is only ever acted on for traffic that came
+# through Caddy.
+ExecStart=/srv/gstbot/venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 \
+    --port 8000 \
+    --proxy-headers \
+    --forwarded-allow-ips=127.0.0.1 \
+    --workers ${WEB_CONCURRENCY}
+
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+# Long enough for an in-flight invoice parse that fell back to inline
+# processing to finish, which is one model call against a free-tier endpoint.
+TimeoutStopSec=120
+
+Restart=always
+RestartSec=5
+# A process that cannot start is a configuration error; retrying it forever
+# just buries the first traceback under a thousand identical ones.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# ---- Sandboxing ----
+# See gstbot-migrate.service for why this block is identical across the three
+# units.
+StateDirectory=gstbot
+StateDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=gstbot.target
