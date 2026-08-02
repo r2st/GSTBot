@@ -1,0 +1,77 @@
+"""Return due dates: the day, the rollover, and the return that has none.
+
+These dates decide whether an alert fires and whether a supplier is scored as
+late, so they are asserted against literal dates rather than against a
+recomputation of the same arithmetic — a test that rebuilds the rule agrees
+with the bug.
+"""
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+
+from app.models.gstr_return import ReturnType
+from app.services import gst_calendar
+
+
+class TestTheDayEachReturnIsDue:
+    def test_gstr1_is_due_on_the_eleventh_of_the_following_month(self):
+        assert gst_calendar.gstr1_due_date("2026-04") == date(2026, 5, 11)
+
+    def test_gstr3b_is_due_on_the_twentieth_of_the_following_month(self):
+        assert gst_calendar.gstr3b_due_date("2026-04") == date(2026, 5, 20)
+
+    def test_the_two_returns_for_one_period_are_nine_days_apart(self):
+        # The gap is the whole reason both are tracked: a business that has
+        # filed its GSTR-1 is not done, and the 3B is the one with the penalty.
+        gap = gst_calendar.gstr3b_due_date("2026-04") - gst_calendar.gstr1_due_date("2026-04")
+        assert gap.days == 9
+
+
+class TestTheDecemberRollover:
+    """A December period is due in the next calendar year."""
+
+    def test_gstr1_for_december_is_due_in_january(self):
+        assert gst_calendar.gstr1_due_date("2026-12") == date(2027, 1, 11)
+
+    def test_gstr3b_for_december_is_due_in_january(self):
+        assert gst_calendar.gstr3b_due_date("2026-12") == date(2027, 1, 20)
+
+    def test_november_does_not_roll_over(self):
+        # The boundary either side of it, so an off-by-one in the month test
+        # cannot pass by rolling everything.
+        assert gst_calendar.gstr3b_due_date("2026-11") == date(2026, 12, 20)
+
+    def test_next_period_rolls_the_year_at_december(self):
+        assert gst_calendar.next_period("2026-12") == "2027-01"
+
+    def test_next_period_pads_a_single_digit_month(self):
+        # "2026-9" would compare wrong against every other period string in
+        # the product, all of which are zero-padded.
+        assert gst_calendar.next_period("2026-08") == "2026-09"
+
+
+class TestDispatchingOnReturnType:
+    @pytest.mark.parametrize(
+        ("return_type", "expected"),
+        [
+            (ReturnType.GSTR1, date(2026, 5, 11)),
+            (ReturnType.GSTR3B, date(2026, 5, 20)),
+        ],
+    )
+    def test_due_date_agrees_with_the_named_helper(self, return_type, expected):
+        assert gst_calendar.due_date("2026-04", return_type) == expected
+
+    def test_a_gstr2b_has_no_due_date(self):
+        # The portal generates it; nobody files it, so it can never be late.
+        # Returning some date anyway would put a deadline alert on the screen
+        # for a return the business cannot act on.
+        with pytest.raises(ValueError, match="not a return this business files"):
+            gst_calendar.due_date("2026-04", ReturnType.GSTR2B)
+
+    def test_every_filed_return_type_has_a_day(self):
+        # DUE_DAY is what the alerting iterates. If a return type is added to
+        # the model and not here, the deadline alerts silently stop covering
+        # it — so the omission is asserted rather than discovered.
+        assert set(gst_calendar.DUE_DAY) == {ReturnType.GSTR1, ReturnType.GSTR3B}

@@ -44,7 +44,7 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
@@ -67,9 +67,6 @@ WEIGHT_RECENCY = Decimal("10")
 # recoverable once someone reconciles the figures. A missing invoice is the
 # supplier not having filed, and scores nothing.
 MISMATCH_CREDIT = Decimal("0.5")
-
-# GSTR-1 is due on the 11th of the month after the period it covers.
-GSTR1_DUE_DAY = 11
 
 # Filing this many days past the due date scores zero for timeliness. Set at a
 # full period: a supplier who is a month late has already cost the buyer the
@@ -172,16 +169,6 @@ class SupplierScore:
             "recommended_provision_pct": float(_q(self.recommended_provision_pct)),
             "recommendation": self.recommendation,
         }
-
-
-def gstr1_due_date(period: str) -> date:
-    """GSTR-1 due date for *period* — the 11th of the following month."""
-    year, month = (int(part) for part in period.split("-"))
-    return (
-        date(year + 1, 1, GSTR1_DUE_DAY)
-        if month == 12
-        else date(year, month + 1, GSTR1_DUE_DAY)
-    )
 
 
 def _periods_between(earlier: str, later: str) -> int:

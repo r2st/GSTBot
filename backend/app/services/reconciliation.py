@@ -44,6 +44,7 @@ from app.models.reconciliation_run import (
 from app.models.supplier import Supplier
 from app.services import gstin as gstin_service
 from app.services import supplier_score
+from app.services.gst_calendar import gstr1_due_date
 from app.services.gstr2b import GSTR2BRecord
 
 logger = logging.getLogger(__name__)
@@ -465,7 +466,7 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
         }
         filed_on = filing_dates.get(gstin)
         if filed_on is not None:
-            delay = (filed_on - supplier_score.gstr1_due_date(result.period)).days
+            delay = (filed_on - gstr1_due_date(result.period)).days
             observation["filing_delay_days"] = delay
             observation["filed_on"] = filed_on.isoformat()
         history.append(observation)

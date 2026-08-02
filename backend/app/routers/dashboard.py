@@ -1,7 +1,6 @@
 """The dashboard: counts, tax summary, and what is owed this period."""
 from __future__ import annotations
 
-from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
@@ -24,6 +23,7 @@ from app.schemas.dashboard import (
     TaxBucket,
 )
 from app.services import invoice_service
+from app.services.gst_calendar import gstr3b_due_date
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -31,11 +31,6 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 # aggregate counts. Limited more tightly than a plain list because a polling
 # client here costs real database work.
 _dashboard_limit = RateLimit("dashboard", "120/minute")
-
-# GSTR-3B is due on the 20th of the month after the period it covers. The one
-# deadline the dashboard can compute without talking to the portal, and the one
-# that carries interest and a late fee for missing it.
-GSTR3B_DUE_DAY = 20
 
 # An extraction below this needs a human to look at it before it is filed.
 REVIEW_CONFIDENCE_THRESHOLD = 0.6
@@ -77,13 +72,6 @@ def _net_liability(sales: TaxBucket, purchase: TaxBucket) -> NetLiability:
     igst = _net(sales.igst, purchase.igst)
     cess = _net(sales.cess, purchase.cess)
     return NetLiability(cgst=cgst, sgst=sgst, igst=igst, cess=cess, total=cgst + sgst + igst + cess)
-
-
-def _due_date(period: str) -> date:
-    """GSTR-3B due date for *period*."""
-    year, month = (int(part) for part in period.split("-"))
-    return date(year + 1, 1, GSTR3B_DUE_DAY) if month == 12 else date(year, month + 1,
-                                                                     GSTR3B_DUE_DAY)
 
 
 @router.get(
@@ -218,7 +206,7 @@ def get_dashboard(
         ),
         recent_periods=recent,
         open_alerts=open_alerts,
-        next_due_date=_due_date(period),
+        next_due_date=gstr3b_due_date(period),
         last_reconciliation=(
             {
                 "id": last_run.id,

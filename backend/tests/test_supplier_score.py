@@ -36,16 +36,8 @@ def component(result, name) -> scoring.Component:
     return next(c for c in result.components if c.name == name)
 
 
-# ---------------------------------------------------------------------------
-# Due dates and period arithmetic
-# ---------------------------------------------------------------------------
-
-def test_gstr1_is_due_on_the_eleventh_of_the_following_month():
-    assert scoring.gstr1_due_date("2026-04") == date(2026, 5, 11)
-
-
-def test_a_december_period_is_due_in_january():
-    assert scoring.gstr1_due_date("2026-12") == date(2027, 1, 11)
+# The GSTR-1 due date this scoring reads is asserted in tests/test_gst_calendar.py,
+# which owns the rule for every return type.
 
 
 # ---------------------------------------------------------------------------
