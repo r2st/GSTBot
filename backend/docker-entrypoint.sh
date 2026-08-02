@@ -4,6 +4,7 @@
 #
 #   api      uvicorn, after running migrations
 #   worker   the Celery worker
+#   beat     the Celery scheduler
 #   migrate  run migrations and exit
 #   shell    a Python REPL with the app importable
 #
@@ -63,6 +64,19 @@ case "${1:-api}" in
         exec celery -A app.celery_app worker \
             --loglevel="${CELERY_LOG_LEVEL:-info}" \
             --concurrency="${CELERY_CONCURRENCY:-2}"
+        ;;
+    beat)
+        # No wait_for_database and no migrations: beat opens no database
+        # connection. It publishes a task name to Redis and the worker — which
+        # does wait — executes it.
+        #
+        # The schedule file is named explicitly for the same reason the systemd
+        # unit names it: the default is relative to the working directory, and
+        # /app belongs to the image rather than to this container's state.
+        exec celery -A app.celery_app beat \
+            --loglevel="${CELERY_LOG_LEVEL:-info}" \
+            --schedule=/tmp/celerybeat-schedule \
+            --pidfile=
         ;;
     migrate)
         wait_for_database

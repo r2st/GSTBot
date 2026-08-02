@@ -144,7 +144,8 @@ systemctl restart gstbot-migrate.service \
     || die "migrations failed; journalctl -u gstbot-migrate -n 100"
 
 log "Restarting services"
-systemctl restart gstbot-api.service gstbot-web.service gstbot-worker.service
+systemctl restart gstbot-api.service gstbot-web.service gstbot-worker.service \
+    gstbot-beat.service
 
 log "Checking health"
 for attempt in $(seq 1 30); do

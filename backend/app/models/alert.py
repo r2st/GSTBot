@@ -31,8 +31,15 @@ class AlertStatus(str, Enum):
     PENDING = "pending"
     SENT = "sent"
     READ = "read"
-    DISMISSED = "dismissed"
+    DISMISSED = "dismissed"  # The business closed it: "I know."
     FAILED = "failed"
+    # The thing the alert asked for happened — the return was filed. Kept
+    # distinct from DISMISSED because the difference is the only way to ask
+    # later whether these alerts do anything: one means the business acted, the
+    # other means they made it go away. Stored as the member name in a plain
+    # VARCHAR (``native_enum=False``, no check constraint), so adding it needs
+    # no migration.
+    RESOLVED = "resolved"
 
 
 class Alert(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):

@@ -1,24 +1,21 @@
 [Unit]
 # One handle for the whole stack:
 #
-#   systemctl restart gstbot.target    # migrate, then API and worker
-#   systemctl stop gstbot.target       # both, together
+#   systemctl restart gstbot.target    # migrate, then the four services
+#   systemctl stop gstbot.target       # all of them, together
 #   systemctl status gstbot.target
 #
 # Every unit here declares PartOf=gstbot.target, which is what makes stopping
 # and restarting the target reach them. Wants= rather than Requires= so a
 # worker that will not start does not also take the API down — a stack that
 # serves reads while extraction is broken is much better than one that does
-# not serve at all.
-Description=GSTBot (API, web, worker and migrations)
+# not serve at all. The same reasoning covers gstbot-beat: a scheduler that
+# will not start costs tomorrow's deadline alerts, which is not a reason to
+# stop serving today.
+Description=GSTBot (API, web, worker, scheduler and migrations)
 Documentation=https://gstbot.aiknol.com
-Wants=gstbot-migrate.service gstbot-api.service gstbot-web.service gstbot-worker.service
+Wants=gstbot-migrate.service gstbot-api.service gstbot-web.service gstbot-worker.service gstbot-beat.service
 After=gstbot-migrate.service
-
-# Deliberately not listed: gstbot-beat. Celery beat exists to run a schedule,
-# and there is no schedule — no task in app/tasks/ is periodic. An idle beat
-# process would report healthy while doing nothing, which is worse than its
-# absence. See deploy/README.md.
 
 [Install]
 WantedBy=multi-user.target

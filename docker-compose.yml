@@ -113,6 +113,25 @@ services:
         condition: service_started
     restart: unless-stopped
 
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["beat"]
+    environment: *api-env
+    # No volume: beat publishes a task name and a timestamp, and never opens an
+    # invoice. Its own schedule file lives inside the container, which is the
+    # right lifetime for it here — a fresh stack should start from a fresh
+    # schedule rather than immediately firing yesterday's missed sweep.
+    depends_on:
+      redis:
+        condition: service_healthy
+      # Beat needs no schema; the worker that runs what it publishes does, and
+      # that one is already ordered behind the API.
+      api:
+        condition: service_started
+    restart: unless-stopped
+
   frontend:
     build:
       context: ./frontend

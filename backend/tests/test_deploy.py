@@ -56,14 +56,32 @@ TARGET = SYSTEMD / "gstbot.target"
 # directory the runbook also tells someone to create.
 BACKUP_DIR = "/var/backups/gstbot"
 
-# The three units that run Python out of the deployed virtualenv.
-PYTHON_UNITS = ("gstbot-migrate.service", "gstbot-api.service", "gstbot-worker.service")
+# The four units that run Python out of the deployed virtualenv.
+PYTHON_UNITS = (
+    "gstbot-migrate.service",
+    "gstbot-api.service",
+    "gstbot-worker.service",
+    "gstbot-beat.service",
+)
 # gstbot-web runs node, so it shares the sandbox and none of the Python
 # plumbing. Kept apart rather than special-cased inside each test, so that the
 # checks that are about "every unit" really are about every unit.
 SERVICE_UNITS = (*PYTHON_UNITS, "gstbot-web.service")
-# The units that stay up and serve, as opposed to the one-shot migration.
-SERVING_UNITS = ("gstbot-api.service", "gstbot-web.service", "gstbot-worker.service")
+# The units that stay up, as opposed to the one-shot migration. gstbot-beat
+# serves nobody, but everything asserted of this group — Restart=always, a
+# start limit in the section systemd reads it from — is about a process that is
+# supposed to still be running tomorrow, which it is.
+SERVING_UNITS = (
+    "gstbot-api.service",
+    "gstbot-web.service",
+    "gstbot-worker.service",
+    "gstbot-beat.service",
+)
+# Where beat keeps its record of when each entry last fired. Under the
+# StateDirectory because /opt is read-only to these units; written out here
+# because the runbook tells someone to delete this file, and a path that only
+# exists in an ExecStart is one the runbook can drift away from.
+BEAT_SCHEDULE_FILE = "/var/lib/gstbot/celerybeat-schedule"
 # The nightly dump. Kept out of SERVICE_UNITS because almost nothing that is
 # true of the four above is true of it: it is not in gstbot.target, it has no
 # [Install] section, and it runs a shell script rather than the application.
@@ -481,6 +499,70 @@ class TestTheUnitsRunThisApplication:
 
         assert celery_app.main == "gstbot"
 
+    def test_the_scheduler_has_a_schedule_to_run(self, units):
+        # The other half of the unit's existence. An idle beat process reports
+        # healthy while doing nothing, which is a worse signal than no process
+        # at all — so if the schedule is ever emptied, this unit goes with it.
+        command = entry(units["gstbot-beat.service"], "Service", "ExecStart")
+        assert "-A app.celery_app beat" in command
+
+        from app.celery_app import celery_app
+
+        assert celery_app.conf.beat_schedule, (
+            "gstbot-beat.service ships with nothing to run"
+        )
+
+    def test_the_scheduler_publishes_tasks_the_worker_will_have_registered(self):
+        # Beat publishes a name. A worker that does not have that name
+        # registered rejects the message as unknown, and the schedule silently
+        # never runs — no failure on either side, just nothing happening.
+        #
+        # What makes the worker have it is ``include=``: both processes run
+        # `celery -A app.celery_app`, so the modules named there are the ones
+        # the worker imports at startup. Importing them here is what that
+        # startup does, and the registry is checked after.
+        from app.celery_app import celery_app
+
+        for module in celery_app.conf.include:
+            __import__(module)
+
+        for name in {e["task"] for e in celery_app.conf.beat_schedule.values()}:
+            assert name in celery_app.tasks, f"{name} is scheduled but not registered"
+
+    def test_the_scheduler_writes_its_state_where_it_is_allowed_to(self, units):
+        # Both of these are defaults that beat writes relative to the working
+        # directory, which is under the read-only /opt. Unset, the unit does
+        # not degrade — it fails to start with an error about a shelve file.
+        command = entry(units["gstbot-beat.service"], "Service", "ExecStart")
+
+        schedule = matched(r"--schedule=(\S+)", command).group(1)
+        assert schedule == BEAT_SCHEDULE_FILE
+        state = entry(units["gstbot-beat.service"], "Service", "StateDirectory")
+        assert schedule.startswith(f"/var/lib/{state}/")
+
+        assert "--pidfile=" in command
+        assert not matched(r"--pidfile=(\S*)", command).group(1), (
+            "a pidfile path would be written into the read-only checkout"
+        )
+
+    def test_only_one_unit_schedules_anything(self, units):
+        # Two beat processes means two of every scheduled run. systemd
+        # guarantees one instance of one unit; it cannot help if a second unit
+        # also runs `celery beat`, and nothing else would notice.
+        scheduling = [
+            name
+            for name, unit in units.items()
+            if any("beat" in v for v in entries(unit, "Service", "ExecStart"))
+        ]
+        assert scheduling == ["gstbot-beat.service"]
+
+    def test_the_scheduler_does_not_wait_for_the_migration(self, units):
+        # It opens no database connection — it publishes a task name and a
+        # timestamp to Redis. The worker that runs the task is ordered behind
+        # the migration, so a sweep published mid-release queues rather than
+        # meeting a half-applied schema.
+        assert not entries(units["gstbot-beat.service"], "Unit", "Requires")
+
     def test_the_web_unit_runs_the_server_this_repo_ships(self, units):
         # The whole reason this unit exists is a file in deploy/. A rename
         # there is otherwise silent until the release restarts it.
@@ -857,15 +939,20 @@ class TestTheDeployScript:
 
     @pytest.fixture(scope="class")
     def commands(self, script) -> str:
-        """The script with its comments stripped.
+        """The script with its comments stripped and its continuations joined.
 
         Several assertions below are about what the script *runs*. The
         comments quote the commands they explain, so searching the whole file
         would pass on a line that only exists in prose.
+
+        Continuations are joined because bash joins them: a command wrapped
+        over two lines to stay readable is one command, and a search that
+        stopped at the newline would report the tail of it as missing.
         """
-        return "\n".join(
+        kept = "\n".join(
             line for line in script.splitlines() if not line.lstrip().startswith("#")
         )
+        return re.sub(r"\\\n\s*", "", kept)
 
     def test_it_is_executable(self):
         assert DEPLOY_SCRIPT.stat().st_mode & stat.S_IXUSR, "chmod +x deploy/deploy.sh"
@@ -1413,19 +1500,17 @@ class TestTheRunbook:
         assert SITE_CONF.name in readme
 
     def test_it_records_what_is_deliberately_absent(self, readme):
-        # gstbot-beat is named in FEATURE_DOC.md as a planned service and is
-        # not deployed. Leaving that unexplained reads as an oversight to the
-        # next person, who then adds an idle beat process.
-        assert "gstbot-beat.service" in readme
+        # Every product this box runs has a list of things it does not do, and
+        # each of them reads as an oversight until it is written down. The
+        # off-host backup copy is the one that would otherwise be discovered
+        # during an incident.
+        assert "Off-host copies" in readme
 
-    def test_the_absent_beat_unit_really_has_no_schedule_to_run(self):
-        # The reason given in the README, asserted rather than trusted: the
-        # day a periodic task lands, this fails and the unit gets written.
-        from app.celery_app import celery_app
-
-        assert not celery_app.conf.beat_schedule, (
-            "a beat schedule now exists — deploy/systemd/ needs a gstbot-beat.service"
-        )
+    def test_it_says_where_beats_schedule_file_lives(self, readme):
+        # The one piece of state on this box that is not in Postgres and not an
+        # uploaded invoice. Somebody debugging "the sweep did not run" needs to
+        # know it exists and that deleting it is safe.
+        assert BEAT_SCHEDULE_FILE in readme
 
     def test_it_names_the_shared_dependencies_as_shared(self, readme):
         # The one thing about this box a newcomer cannot infer from the files:

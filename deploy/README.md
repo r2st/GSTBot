@@ -2,8 +2,8 @@
 
 Target: the shared Hetzner box (Ubuntu 24.04, aarch64, 4 GB) that also runs
 GoSumo, Documedic, Herald and the knol stack, serving `gstbot.aiknol.com`.
-Postgres, Redis, the API, the web server and the Celery worker are host
-processes; the edge is a container.
+Postgres, Redis, the API, the web server, the Celery worker and the scheduler
+are host processes; the edge is a container.
 
 ```
                     ┌──────────────────────────────────────────────┐
@@ -11,7 +11,7 @@ processes; the edge is a container.
        (container)  │ /*      → 172.18.0.1:3009  (static-server)   │
                     └──────────────────────────────────────────────┘
                                      │  docker bridge knol_knol
-                     gstbot-api ─────┼───── gstbot-worker
+                     gstbot-api ─────┼───── gstbot-worker ── gstbot-beat
                                      │
               Postgres :5432 (shared) │ Redis :6379 db 6,7,8 (shared)
 ```
@@ -151,7 +151,7 @@ systemctl enable --now gstbot-backup.timer
 systemctl enable --now gstbot-monitor.timer
 ```
 
-That installs nine units:
+That installs ten units:
 
 | Unit | What it is |
 |---|---|
@@ -160,6 +160,7 @@ That installs nine units:
 | `gstbot-api.service` | uvicorn on `172.18.0.1:3008` |
 | `gstbot-web.service` | the built SPA on `172.18.0.1:3009` |
 | `gstbot-worker.service` | the Celery worker that extracts invoices |
+| `gstbot-beat.service` | the scheduler — see "The daily sweep" |
 | `gstbot-backup.service` | one `pg_dump`, started by the timer — see "Backups" |
 | `gstbot-backup.timer` | 02:30 nightly |
 | `gstbot-monitor.service` | one pass of the health checks — see "Monitoring" |
@@ -389,7 +390,7 @@ tell anybody. So the checks are the failures that are silent by construction:
 
 | Check | The failure it is for |
 |---|---|
-| the three serving units are `active` | one exhausted `StartLimitBurst` and stopped being restarted |
+| the four running units are `active` | one exhausted `StartLimitBurst` and stopped being restarted |
 | `gstbot-backup.timer` is `active` | it was never enabled, or was disabled and not put back |
 | a `*.dump` newer than 48 hours exists | dumps have been failing into a journal with no reader |
 | 1 GiB free where the dumps go | the disk fills, and it takes out four products |
@@ -434,17 +435,43 @@ What it does not do is page anyone, keep history, or notice a trend. It answers
 "is something broken right now", which is the question this box did not have an
 answer to at all.
 
+## The daily sweep
+
+```sh
+journalctl -u gstbot-beat -n 30               # what beat has published
+journalctl -u gstbot-worker -g 'deadline sweep' --since yesterday
+```
+
+`gstbot-beat.service` runs Celery beat, which publishes one task a day:
+`alerts.sweep_filing_deadlines` at **07:00 IST**. The worker executes it. Beat
+holds only the "when" — it opens no database connection, which is why it is the
+one unit here that does not `Requires=gstbot-migrate.service`.
+
+The sweep reads where each business's returns stand and keeps one alert per
+period and return type in step with that. It writes rows; **it sends nothing**.
+No email, SMS or WhatsApp infrastructure exists on this box, so the alert
+appears in the product and its `channel` stays null — which is also how a
+future sender will find what has not been sent.
+
+Two operational facts about it:
+
+**Exactly one beat process may run.** Two means two of every scheduled run.
+systemd guarantees one instance of one unit and this is a single-host
+deployment, so nothing else is needed — but the day a second box appears, the
+schedule does not move with it without a lock, and there is none.
+
+**It keeps a file.** `/var/lib/gstbot/celerybeat-schedule` is beat's record of
+when each entry last fired, and it is the only state on this box outside
+Postgres and the uploaded invoices. It is not in the backups and does not need
+to be: deleting it while beat is stopped costs at most one duplicate run, and
+the sweep is idempotent — it recomputes the day's alerts from the returns
+table, so running it twice, or not at all, converges the next morning.
+
+A missed run is not made up. There is no catch-up on purpose: a box that was
+down overnight would otherwise fire the sweep on boot alongside everything else
+it deferred, and tomorrow's run is the one that matters.
+
 ## What is deliberately not here
-
-**`gstbot-beat.service`.** Celery beat runs a schedule, and there is no
-schedule: nothing in `backend/app/tasks/` is periodic, and nothing defines a
-`beat_schedule`. An idle beat process would sit there reporting healthy while
-doing nothing, which is a worse signal than its absence.
-
-It is worth saying what would need it. `backend/app/models/alert.py` defines
-filing-deadline, mismatch, ITC-at-risk and supplier-risk alerts with delivery
-state on the row — and nothing writes one. Whoever builds that will want a beat
-unit; it belongs in the same change as the schedule it runs, not before.
 
 **Off-host copies of the backups, and the invoice files.** The nightly dump
 below covers the database and lands on the same disk as the database. That is

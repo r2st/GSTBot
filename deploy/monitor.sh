@@ -52,9 +52,15 @@ PUBLIC_URL="${GSTBOT_MONITOR_PUBLIC_URL:-https://gstbot.aiknol.com/api/v1/health
 # person attached. See "Monitoring" in deploy/README.md.
 WEBHOOK="${GSTBOT_ALERT_WEBHOOK:-}"
 
-# The units that serve. gstbot-migrate is not here: it is a oneshot that stays
-# active after exiting, so "active" says only that the last release migrated.
-SERVICES=(gstbot-api.service gstbot-web.service gstbot-worker.service)
+# The units that are supposed to be running right now. gstbot-migrate is not
+# here: it is a oneshot that stays active after exiting, so "active" says only
+# that the last release migrated.
+#
+# gstbot-beat is the one on this list whose death is otherwise completely
+# silent. Nothing queues up behind a stopped scheduler and no request fails —
+# the deadline alerts simply stop being raised, and the first sign of it is a
+# business being penalised for a return nobody reminded them about.
+SERVICES=(gstbot-api.service gstbot-web.service gstbot-worker.service gstbot-beat.service)
 # The timer is checked rather than its service. gstbot-backup.service is
 # inactive between runs, which is the correct state and not a fact about
 # whether backups are happening.

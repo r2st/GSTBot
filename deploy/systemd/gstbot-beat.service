@@ -1,0 +1,94 @@
+[Unit]
+# The scheduler. Publishes one task a day — the filing-deadline sweep in
+# app/tasks/alert_tasks.py — and executes nothing itself; the worker does the
+# work. Splitting them is not ceremony: beat holds the "when", so two of it
+# means two of every scheduled run, and a worker restart during a deploy would
+# otherwise be a missed schedule.
+#
+# **Exactly one of these may run.** systemd guarantees that on this host, and
+# this host is the only one in the deployment. The day a second box appears,
+# the schedule does not move with it — either this unit stays on one machine or
+# beat needs a lock, and nothing here provides one.
+Description=GSTBot Celery beat (scheduled filing-deadline alerts)
+Documentation=https://gstbot.aiknol.com
+Wants=network-online.target
+After=network-online.target redis-server.service
+PartOf=gstbot.target
+
+# Deliberately no Requires=gstbot-migrate.service, unlike the API and the
+# worker. Beat opens no database connection — it publishes a task name and a
+# timestamp to Redis — and the worker that will run the task is already
+# ordered behind the migration, so a sweep published during a release waits in
+# the queue rather than reaching a schema that is half-applied.
+
+# [Unit], not [Service] — see the comment in gstbot-api.service.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=gstbot
+Group=gstbot
+WorkingDirectory=/opt/GSTBot/backend
+
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=PYTHONUNBUFFERED=1
+Environment=CELERY_LOG_LEVEL=info
+EnvironmentFile=/etc/gstbot/gstbot.env
+
+# --schedule and --pidfile both have to be given, and both for the same
+# reason: beat writes them relative to the working directory by default, and
+# /opt is read-only under ProtectSystem=strict. Left at their defaults the unit
+# does not degrade — it fails to start, with an error about a shelve file.
+#
+# /var/lib/gstbot is the StateDirectory below. What lands there is beat's
+# record of when each entry last fired, which is what stops a restart from
+# re-firing the morning's sweep; losing the file costs at most one duplicate
+# run of an idempotent task.
+ExecStart=/opt/GSTBot/.venv/bin/celery -A app.celery_app beat \
+    --loglevel=${CELERY_LOG_LEVEL} \
+    --schedule=/var/lib/gstbot/celerybeat-schedule \
+    --pidfile=
+
+# Nothing is in flight to finish: beat's unit of work is a publish that either
+# happened or did not. The short stop timeout is the honest one.
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+Restart=always
+RestartSec=5
+
+# ---- Sandboxing ----
+# The same set as the API, the worker and the migration. See
+# gstbot-migrate.service for why they are identical rather than tailored.
+StateDirectory=gstbot
+StateDirectoryMode=0750
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gstbot-beat
+
+[Install]
+WantedBy=gstbot.target

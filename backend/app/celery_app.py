@@ -15,6 +15,7 @@ import logging
 from typing import Any
 
 from celery import Celery
+from celery.schedules import crontab
 from celery.signals import (
     before_task_publish,
     setup_logging,
@@ -38,7 +39,7 @@ celery_app = Celery(
     "gstbot",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.tasks.invoice_tasks"],
+    include=["app.tasks.invoice_tasks", "app.tasks.alert_tasks"],
 )
 
 celery_app.conf.update(
@@ -79,6 +80,31 @@ celery_app.conf.update(
     # leaves the invoice visibly unparsed and re-extractable from the UI, which
     # is the better of the two failures.
 )
+
+# The hour, in IST, at which the deadline sweep runs. Early enough that an alert
+# raised this morning is seen on the day it is about, late enough that it is not
+# competing with the nightly dump. ``timezone`` above is Asia/Kolkata and beat
+# reads crontab entries in it, so this is 07:00 in India rather than 07:00 UTC —
+# which would be half past noon there, after most of the working morning the
+# alert exists to reach.
+DEADLINE_SWEEP_HOUR = 7
+
+celery_app.conf.beat_schedule = {
+    # The only periodic task in this application, and the whole reason
+    # gstbot-beat.service exists. Daily rather than hourly because what it
+    # produces is a date-based judgement that cannot change within a day: the
+    # severities are derived from whole days remaining, so twenty-three of every
+    # twenty-four runs would rewrite each row with the values it already had.
+    #
+    # A missed run is not made up. Beat has no catch-up here on purpose — a box
+    # that was down overnight would otherwise fire the sweep on boot alongside
+    # everything else it deferred, and the sweep is idempotent, so the run that
+    # matters is simply tomorrow's.
+    "filing-deadline-sweep": {
+        "task": "alerts.sweep_filing_deadlines",
+        "schedule": crontab(hour=DEADLINE_SWEEP_HOUR, minute=0),
+    },
+}
 
 CORRELATION_HEADER = "correlation_id"
 
