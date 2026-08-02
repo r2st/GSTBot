@@ -46,8 +46,14 @@ SYSTEMD = DEPLOY / "systemd"
 SITE_CONF = DEPLOY / "caddy-gstbot.conf"
 ENV_EXAMPLE = DEPLOY / "gstbot.env.example"
 DEPLOY_SCRIPT = DEPLOY / "deploy.sh"
+BACKUP_SCRIPT = DEPLOY / "backup.sh"
 STATIC_SERVER = DEPLOY / "static-server.mjs"
 TARGET = SYSTEMD / "gstbot.target"
+
+# Where the nightly dump lands. Written out for the same reason SITE is: the
+# unit and the script agreeing is only worth asserting if they agree on a
+# directory the runbook also tells someone to create.
+BACKUP_DIR = "/var/backups/gstbot"
 
 # The three units that run Python out of the deployed virtualenv.
 PYTHON_UNITS = ("gstbot-migrate.service", "gstbot-api.service", "gstbot-worker.service")
@@ -57,6 +63,14 @@ PYTHON_UNITS = ("gstbot-migrate.service", "gstbot-api.service", "gstbot-worker.s
 SERVICE_UNITS = (*PYTHON_UNITS, "gstbot-web.service")
 # The units that stay up and serve, as opposed to the one-shot migration.
 SERVING_UNITS = ("gstbot-api.service", "gstbot-web.service", "gstbot-worker.service")
+# The nightly dump. Kept out of SERVICE_UNITS because almost nothing that is
+# true of the four above is true of it: it is not in gstbot.target, it has no
+# [Install] section, and it runs a shell script rather than the application.
+# What it does share is the sandbox and the service account, which is what
+# SANDBOXED_UNITS below is for.
+BACKUP_SERVICE = "gstbot-backup.service"
+BACKUP_TIMER = "gstbot-backup.timer"
+SANDBOXED_UNITS = (*SERVICE_UNITS, BACKUP_SERVICE)
 
 # The one address this deployment answers on. Written out rather than derived,
 # because "the site block and the CORS list agree" is only interesting if they
@@ -199,7 +213,8 @@ def env_example() -> dict[str, str]:
 
 @pytest.fixture(scope="module")
 def units() -> dict[str, dict]:
-    return {name: parse_unit((SYSTEMD / name).read_text()) for name in SERVICE_UNITS}
+    names = (*SANDBOXED_UNITS, BACKUP_TIMER)
+    return {name: parse_unit((SYSTEMD / name).read_text()) for name in names}
 
 
 @pytest.fixture(scope="module")
@@ -232,7 +247,15 @@ def settings_from(values: dict[str, str], **overrides: str) -> Settings:
 class TestTheManifestsAreThere:
     @pytest.mark.parametrize(
         "path",
-        [SITE_CONF, ENV_EXAMPLE, DEPLOY_SCRIPT, STATIC_SERVER, TARGET, DEPLOY / "README.md"],
+        [
+            SITE_CONF,
+            ENV_EXAMPLE,
+            DEPLOY_SCRIPT,
+            BACKUP_SCRIPT,
+            STATIC_SERVER,
+            TARGET,
+            DEPLOY / "README.md",
+        ],
         ids=lambda p: p.name,
     )
     def test_a_manifest_exists(self, path):
@@ -253,8 +276,19 @@ class TestTheManifestsAreThere:
         # added to SERVICE_UNITS is one that nothing above checks — it would
         # be installed by the README's `install deploy/systemd/*` and then
         # never enabled, or enabled and never hardened.
+        #
+        # gstbot-backup.service is named separately rather than folded into
+        # SERVICE_UNITS: it is started by its timer and belongs to no target,
+        # so the checks above about gstbot.target would be wrong about it.
         shipped = {p.name for p in SYSTEMD.iterdir() if p.suffix == ".service"}
-        assert shipped == set(SERVICE_UNITS)
+        assert shipped == {*SERVICE_UNITS, BACKUP_SERVICE}
+
+    def test_every_timer_starts_a_unit_that_ships(self):
+        # A timer naming a unit that does not exist is enabled without
+        # complaint and fires into nothing, once a night, silently.
+        for path in SYSTEMD.glob("*.timer"):
+            started = entry(parse_unit(path.read_text()), "Timer", "Unit")
+            assert (SYSTEMD / started).is_file(), f"{path.name} starts a missing {started}"
 
     @pytest.mark.parametrize("name", SERVICE_UNITS)
     def test_a_unit_installs_into_the_target(self, name, units):
@@ -265,7 +299,7 @@ class TestTheManifestsAreThere:
         assert entry(units[name], "Install", "WantedBy") == "gstbot.target"
         assert entry(units[name], "Unit", "PartOf") == "gstbot.target"
 
-    @pytest.mark.parametrize("name", SERVICE_UNITS)
+    @pytest.mark.parametrize("name", SANDBOXED_UNITS)
     def test_a_unit_is_identifiable_in_a_shared_journal(self, name, units):
         # journald on this box carries four products. Without an explicit
         # identifier a unit's lines are tagged with the executable's basename,
@@ -281,12 +315,12 @@ class TestTheManifestsAreThere:
 # ---------------------------------------------------------------------------
 
 class TestTheUnitsAreConfined:
-    @pytest.mark.parametrize("name", SERVICE_UNITS)
+    @pytest.mark.parametrize("name", SANDBOXED_UNITS)
     def test_a_unit_runs_as_the_service_account(self, name, units):
         assert entry(units[name], "Service", "User") == "gstbot"
         assert entry(units[name], "Service", "Group") == "gstbot"
 
-    @pytest.mark.parametrize("name", SERVICE_UNITS)
+    @pytest.mark.parametrize("name", SANDBOXED_UNITS)
     @pytest.mark.parametrize("directive", sorted(HARDENING))
     def test_a_unit_sets_a_hardening_directive(self, name, directive, units):
         assert entry(units[name], "Service", directive) == HARDENING[directive]
@@ -926,6 +960,151 @@ class TestTheDeployScript:
                 assert "--max-time" in line, f"curl without a timeout can hang: {line.strip()}"
 
 
+# ---------------------------------------------------------------------------
+# The nightly dump
+# ---------------------------------------------------------------------------
+
+class TestTheBackupJob:
+    """The script, the unit that runs it and the timer that starts it.
+
+    Nothing here proves a dump restores — that needs a database and is a drill,
+    not a unit test. What it proves is the set of things that make a backup job
+    quietly useless: dumping the wrong database, writing somewhere the sandbox
+    forbids, keeping a file nobody checked was readable, or a timer that names
+    a unit which does not exist.
+    """
+
+    @pytest.fixture(scope="class")
+    def script(self) -> str:
+        return BACKUP_SCRIPT.read_text()
+
+    @pytest.fixture(scope="class")
+    def commands(self, script) -> str:
+        """The script without its comments — see TestTheDeployScript."""
+        return "\n".join(
+            line for line in script.splitlines() if not line.lstrip().startswith("#")
+        )
+
+    @pytest.fixture(scope="class")
+    def unit(self) -> dict:
+        return parse_unit((SYSTEMD / BACKUP_SERVICE).read_text())
+
+    @pytest.fixture(scope="class")
+    def timer(self) -> dict:
+        return parse_unit((SYSTEMD / BACKUP_TIMER).read_text())
+
+    def test_the_script_is_executable(self):
+        assert BACKUP_SCRIPT.stat().st_mode & stat.S_IXUSR, "chmod +x deploy/backup.sh"
+
+    def test_the_script_is_valid_bash(self):
+        result = subprocess.run(
+            ["bash", "-n", str(BACKUP_SCRIPT)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_it_stops_at_the_first_failure(self, script):
+        # Without it, a failed pg_dump carries on to the rename and publishes
+        # a truncated file under the name of a good backup.
+        assert "set -euo pipefail" in script
+
+    def test_it_dumps_one_database_and_not_the_cluster(self, commands):
+        # Postgres here is shared with Herald and HomeNex. `pg_dumpall` would
+        # write their tables into a file owned by GSTBot's service account,
+        # which is a data-sharing incident dressed as a backup.
+        assert "pg_dumpall" not in commands
+        assert "pg_dump " in commands
+
+    def test_it_writes_a_format_that_can_be_restored_selectively(self, commands):
+        # Plain SQL restores all-or-nothing. During an incident the thing
+        # actually wanted is usually one table as it was last night.
+        dump = matched(r"^pg_dump .*", commands, flags=re.M).group(0)
+        assert "--format=custom" in dump
+
+    def test_the_password_never_reaches_a_command_line(self, commands):
+        # `ps` on this box is readable by four products. libpq takes the
+        # password from the environment, so there is no reason for it to be in
+        # argv — and DATABASE_URL carries it.
+        dump = matched(r"^pg_dump .*", commands, flags=re.M).group(0)
+        assert "DATABASE_URL" not in dump
+        assert "PGPASSWORD" in commands, "the password has to reach libpq somehow"
+
+    def test_it_reads_the_database_url_the_application_uses(self, commands, unit):
+        # Not a second copy of the connection details in the unit or the
+        # script. A backup of the database the app used to point at is the
+        # failure that is only discovered on the day of a restore.
+        assert entry(unit, "Service", "EnvironmentFile") == "/etc/gstbot/gstbot.env"
+        assert "/etc/gstbot/gstbot.env" in commands
+
+    def test_it_proves_the_dump_is_readable_before_keeping_it(self, commands):
+        # pg_dump exits 0 on a dump truncated by a full disk. Reading the TOC
+        # back is what separates having backups from believing you do.
+        assert "pg_restore --list" in commands
+        assert commands.index("pg_restore --list") < commands.index("mv ")
+
+    def test_a_half_written_dump_is_not_named_like_a_finished_one(self, commands):
+        # The retention sweep deletes by glob. If an interrupted run left a
+        # *.dump behind, the sweep would treat it as a backup and age out a
+        # good one in its place.
+        assert ".partial" in commands
+        assert matched(r'trap .*rm -f "\$partial"', commands)
+
+    def test_it_keeps_more_than_one_night(self, commands):
+        # A single rotating dump is one bad night away from being a copy of
+        # the damage rather than of the data.
+        days = matched(r'RETENTION_DAYS="?\$\{GSTBOT_BACKUP_RETENTION_DAYS:-(\d+)\}', commands)
+        assert int(days.group(1)) >= 7
+
+    def test_the_script_and_the_sandbox_agree_on_where_dumps_go(self, commands, unit):
+        # ProtectSystem=strict makes the filesystem read-only, so a directory
+        # the script writes to and the unit does not name is an EROFS at 02:30
+        # — and the only sign of it is a unit that failed while nobody looked.
+        default = matched(r'DEST="?\$\{GSTBOT_BACKUP_DIR:-([^}]+)\}', commands).group(1)
+        assert default == BACKUP_DIR
+        assert entry(unit, "Service", "ReadWritePaths") == BACKUP_DIR
+
+    def test_the_dumps_do_not_share_a_directory_with_the_originals(self, unit):
+        # /var/lib/gstbot is the StateDirectory the application units get, and
+        # it holds the uploaded invoices. Backups written into it are lost by
+        # whatever loses those.
+        assert not entries(unit, "Service", "StateDirectory")
+
+    def test_the_dumps_are_not_world_readable(self, unit):
+        # They contain every invoice, every GSTIN and the user table.
+        assert entry(unit, "Service", "UMask") == "0077"
+
+    def test_a_failed_dump_is_not_retried_into_a_loop(self, unit):
+        assert entry(unit, "Service", "Type") == "oneshot"
+        assert entry(unit, "Service", "Restart") == "no"
+        # And it does not hold "active" afterwards the way gstbot-migrate does:
+        # the timer needs the unit to be inactive to start it again tomorrow.
+        assert not entries(unit, "Service", "RemainAfterExit")
+
+    def test_the_unit_runs_the_script_that_ships_with_the_release(self, unit):
+        assert entry(unit, "Service", "ExecStart") == f"{INSTALL_ROOT}/deploy/backup.sh"
+
+    def test_a_release_does_not_fire_a_backup(self, unit):
+        # `systemctl restart gstbot.target` runs several times on a bad
+        # afternoon. PartOf= here would make each of those a full pg_dump
+        # against a database the release is already migrating.
+        assert not entries(unit, "Unit", "PartOf")
+        assert not entries(unit, "Install", "WantedBy")
+
+    def test_the_timer_starts_the_backup_unit(self, timer):
+        assert entry(timer, "Timer", "Unit") == BACKUP_SERVICE
+        assert entry(timer, "Install", "WantedBy") == "timers.target"
+
+    def test_the_timer_runs_at_least_nightly(self, timer):
+        # OnCalendar rather than OnUnitActiveSec: the latter drifts by the
+        # runtime of the dump and eventually walks into the working day.
+        assert matched(r"\d\d:\d\d:\d\d", entry(timer, "Timer", "OnCalendar"))
+
+    def test_a_missed_night_is_caught_up(self, timer):
+        # The box reboots for kernel updates. Without Persistent= a dump whose
+        # 02:30 fell inside the window is simply never taken, and the gap is
+        # invisible until someone lists the directory.
+        assert entry(timer, "Timer", "Persistent") == "true"
+
+
 class TestTheRunbook:
     @pytest.fixture(scope="class")
     def readme(self) -> str:
@@ -933,7 +1112,9 @@ class TestTheRunbook:
 
     def test_it_documents_every_unit_it_ships(self, readme):
         # A unit added without a line here is one nobody knows to install.
-        for name in (*SERVICE_UNITS, "gstbot.target"):
+        # The timer especially: it is the one unit that does nothing at all
+        # until `systemctl enable` is run against it by hand.
+        for name in (*SANDBOXED_UNITS, BACKUP_TIMER, "gstbot.target"):
             assert name in readme, f"{name} is undocumented"
 
     def test_it_documents_the_edge_file_by_the_name_it_has(self, readme):

@@ -125,8 +125,14 @@ class TestEveryManifestIsRunThroughItsOwnTool:
         # starts, reports active, and confines nothing.
         assert "systemd-analyze verify" in deploy_job
 
-    def test_the_release_script_is_shellchecked(self, deploy_job):
-        assert "shellcheck deploy/deploy.sh" in deploy_job
+    def test_every_shell_script_that_ships_is_shellchecked(self, deploy_job):
+        # `bash -n` in test_deploy.py proves these parse. Only shellcheck
+        # catches the unquoted expansion and the exit status swallowed by a
+        # pipeline — and a script added here and left out of the line below is
+        # one whose first real run is on the server.
+        shellcheck = next(line for line in deploy_job.splitlines() if "shellcheck" in line)
+        for script in sorted(p.name for p in DEPLOY.glob("*.sh")):
+            assert f"deploy/{script}" in shellcheck, f"{script} is not shellchecked"
 
     def test_every_unit_that_ships_is_covered_by_the_verify(self, deploy_job):
         # A glob rather than the four names, so a unit added tomorrow is

@@ -1,0 +1,21 @@
+[Unit]
+Description=Nightly GSTBot database backup
+Documentation=https://gstbot.aiknol.com
+
+[Timer]
+Unit=gstbot-backup.service
+# 02:30 local. The other products on this box run their own nightly work
+# around midnight and 01:00; this sits after them so four dumps are not
+# competing for the same disk.
+OnCalendar=*-*-* 02:30:00
+# The box is not always up at 02:30, and a backup skipped because of a reboot
+# window is the backup somebody wanted. Persistent= runs it once shortly after
+# boot instead, from the timestamp systemd keeps in /var/lib/systemd/timers.
+Persistent=true
+# Nothing here needs the minute it says, and a spread start keeps the dump off
+# the same second as whatever else the host wakes up to do.
+RandomizedDelaySec=15m
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

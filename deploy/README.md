@@ -41,6 +41,7 @@ databases, and db0 (GoSumo's BullMQ), db1 (Herald's Celery broker) and db3/4/5
 | `/opt/GSTBot/.venv` | backend virtualenv | `root` |
 | `/opt/GSTBot/frontend/dist` | built SPA, served by `gstbot-web` | `root` |
 | `/var/lib/gstbot/invoices` | uploaded invoices | `gstbot` |
+| `/var/backups/gstbot` | nightly `pg_dump` output, `0700` | `gstbot` |
 | `/etc/gstbot/gstbot.env` | configuration and secrets, `0640 root:gstbot` | `root` |
 
 The application user owns exactly one of these. It uploads invoices; it does
@@ -75,11 +76,18 @@ without it, which reads like a broken interpreter rather than a missing package.
 ```sh
 useradd --system --home-dir /var/lib/gstbot --shell /usr/sbin/nologin gstbot
 install -d -m 0750 -o root -g gstbot /etc/gstbot
+install -d -m 0700 -o gstbot -g gstbot /var/backups/gstbot
 ```
 
 `/var/lib/gstbot` is not created here: `StateDirectory=gstbot` in the units
 creates it with the right owner and mode the first time a unit starts, and a
 hand-made one with the wrong owner is a confusing way to discover that.
+
+`/var/backups/gstbot` is the exception, because systemd has no equivalent for
+it: `gstbot-backup.service` names it in `ReadWritePaths=`, which fails to
+start if the directory does not exist rather than creating it. `0700`, because
+a dump is every invoice, every GSTIN and the user table in one file on a box
+four products can read.
 
 **3. Database**
 
@@ -139,9 +147,10 @@ template somebody would have left alone.
 install -m 0644 /opt/GSTBot/deploy/systemd/* /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now gstbot.target
+systemctl enable --now gstbot-backup.timer
 ```
 
-That installs five units:
+That installs seven units:
 
 | Unit | What it is |
 |---|---|
@@ -150,11 +159,20 @@ That installs five units:
 | `gstbot-api.service` | uvicorn on `172.18.0.1:3008` |
 | `gstbot-web.service` | the built SPA on `172.18.0.1:3009` |
 | `gstbot-worker.service` | the Celery worker that extracts invoices |
+| `gstbot-backup.service` | one `pg_dump`, started by the timer — see "Backups" |
+| `gstbot-backup.timer` | 02:30 nightly |
 
 `gstbot-migrate.service` is a `oneshot` that stays active after it exits, and
 both serving units `Requires=` it. That is what stops two processes running
 `alembic upgrade` against one database at the same time — the same rule the
 container entrypoint follows when it refuses to migrate from the worker.
+
+The backup timer is enabled separately and on purpose. It is not in
+`gstbot.target`, so `systemctl restart gstbot.target` during a release does
+not fire a dump — and the price of that is a unit `enable --now gstbot.target`
+does not reach. Enabling the target and forgetting the timer is the way this
+box ends up with no backups and no sign of it, so the line above is part of
+step 6 rather than a footnote.
 
 **7. Edge**
 
@@ -293,6 +311,48 @@ progress.
 Until the deploy key exists, naming a sha does not work — see "Releasing" — so
 a rollback is the same two commands as a release, run from a workstation that
 has checked out the revision being rolled back to.
+
+## Backups
+
+```sh
+systemctl list-timers gstbot-backup.timer     # when it last ran, when it next will
+journalctl -u gstbot-backup --since -7d       # what happened on each of those nights
+ls -lh /var/backups/gstbot                    # what is actually on disk
+systemctl start gstbot-backup.service         # take one now, synchronously
+```
+
+`gstbot-backup.timer` runs `deploy/backup.sh` at 02:30 with up to 15 minutes of
+jitter, and `Persistent=true` catches up a night missed to a reboot. Each run
+writes `gstbot-<timestamp>.dump` to `/var/backups/gstbot`, reads it back with
+`pg_restore --list` before keeping it, and deletes dumps older than 14 days.
+Nothing is deleted by a run that failed, and a dump only takes its final name
+once it has been verified — so every `*.dump` in there is one that was
+readable at the moment it was written.
+
+The knobs are environment variables with defaults in the script
+(`GSTBOT_BACKUP_DIR`, `GSTBOT_BACKUP_RETENTION_DAYS`, `GSTBOT_BACKUP_MIN_FREE_MB`),
+which is what makes a restore drill into a scratch directory a one-liner rather
+than an edit. The connection details are not among them: the script reads
+`DATABASE_URL` from `/etc/gstbot/gstbot.env`, so it cannot end up dumping a
+database the application no longer uses.
+
+To restore — into a scratch database first, always:
+
+```sh
+sudo -u postgres createdb gstbot_restore --owner gstbot
+sudo -u gstbot pg_restore --dbname gstbot_restore --no-owner \
+    /var/backups/gstbot/gstbot-20260802T023014Z.dump
+```
+
+`--format=custom` means `pg_restore --list` can be filtered down to one table
+and fed back with `--use-list`, which is usually what an incident actually
+needs. Restoring over the live `gstbot` database is a decision to take with
+the stack stopped, not a step to copy from a runbook.
+
+Two limits, repeated here because they are the ones that matter at 3am: the
+dumps are on the same disk as the database, and the uploaded invoice files in
+`/var/lib/gstbot/invoices` are not in them.
+
 ## What is deliberately not here
 
 **`gstbot-beat.service`.** Celery beat runs a schedule, and there is no
@@ -305,10 +365,13 @@ filing-deadline, mismatch, ITC-at-risk and supplier-risk alerts with delivery
 state on the row — and nothing writes one. Whoever builds that will want a beat
 unit; it belongs in the same change as the schedule it runs, not before.
 
-**Backups.** Out of scope for this directory and genuinely not done. The
-database holds tax documents with a statutory retention period, and
-`/var/lib/gstbot/invoices` holds the originals. Neither is backed up by
-anything here, and the shared Postgres cluster has no dump job either.
+**Off-host copies of the backups, and the invoice files.** The nightly dump
+below covers the database and lands on the same disk as the database. That is
+the cover for a bad migration or a mistaken delete; it is not cover for losing
+the box, and nothing here copies `/var/backups/gstbot` anywhere else.
+`/var/lib/gstbot/invoices` — the uploaded originals, under the same statutory
+retention as the rows that point at them — is not dumped at all. A restore
+gives back every row, including the paths of files that are no longer there.
 
 **Isolation from the other products.** Postgres, Redis and the edge are shared.
 A `FLUSHALL`, a runaway connection count, or a bad `/opt/knol/Caddyfile` edit

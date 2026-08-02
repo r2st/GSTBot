@@ -263,10 +263,11 @@ jobs:
           for binary in uvicorn celery alembic; do
             sudo install -m 0755 /dev/null "/srv/gstbot/venv/bin/$binary"
           done
-          systemd-analyze verify deploy/systemd/gstbot.target deploy/systemd/*.service
+          systemd-analyze verify deploy/systemd/gstbot.target deploy/systemd/*.service deploy/systemd/*.timer
 
-      - name: Release script is sound
-        # The suite runs `bash -n`, which only proves it parses. shellcheck is
+      - name: Release scripts are sound
+        # The suite runs `bash -n`, which only proves they parse. shellcheck is
         # what catches the unquoted expansion and the swallowed exit status —
-        # the failures a release script has in the one situation it exists for.
-        run: shellcheck deploy/deploy.sh
+        # the failures a release script has in the one situation it exists for,
+        # and a backup script has at 02:30 with nobody watching.
+        run: shellcheck deploy/deploy.sh deploy/backup.sh

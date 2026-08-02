@@ -1,0 +1,78 @@
+[Unit]
+# Database dump, started by gstbot-backup.timer.
+#
+# Deliberately not PartOf=gstbot.target and deliberately not in the target's
+# Wants=. A backup is not part of the running stack: `systemctl restart
+# gstbot.target` during a release must not fire a dump, and stopping the stack
+# for maintenance must not stop the thing that would have captured its state
+# beforehand. The timer is the only thing that starts this.
+Description=GSTBot database backup
+Documentation=https://gstbot.aiknol.com
+Wants=network-online.target
+After=network-online.target postgresql.service
+# Not Requires=postgresql.service, for the same reason gstbot-migrate is not:
+# the cluster may be on another host, where that unit does not exist here.
+# A dump against a Postgres that is down fails on its own, with a message that
+# names the connection rather than the dependency.
+
+[Service]
+Type=oneshot
+
+User=gstbot
+Group=gstbot
+# DATABASE_URL, so the script dumps the database the application uses rather
+# than one named a second time here and free to drift from it.
+EnvironmentFile=/etc/gstbot/gstbot.env
+ExecStart=/opt/GSTBot/deploy/backup.sh
+
+# A failed dump must be visible, not retried into a loop at 02:30. The timer
+# comes back tomorrow; what matters is that the failure is in the journal with
+# a non-zero result on `systemctl status gstbot-backup`.
+Restart=no
+TimeoutStartSec=1800
+
+# Postgres, the API and three other products share this box. A dump is the
+# one job here with no deadline, so it yields to all of them.
+Nice=10
+IOSchedulingClass=idle
+
+# ---- Sandboxing ----
+# The same set as the three application units. ProtectSystem=strict makes the
+# whole filesystem read-only, so the dump directory has to be named — and
+# naming it is also what stops a mistake in the script writing anywhere else.
+# It is not a StateDirectory=: /var/lib/gstbot holds the uploaded invoices,
+# and backups written beside the originals share their failure.
+ReadWritePaths=/var/backups/gstbot
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+# AF_UNIX alongside the inet families: libpq reads the resolver even for the
+# loopback literal in DATABASE_URL, and without it the dump fails with what
+# reads as a DNS outage.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+# `journalctl -u gstbot-backup` is how anyone checks whether last night ran.
+# Without this the lines are tagged "backup.sh" on a box where that name is
+# not reserved to this product.
+SyslogIdentifier=gstbot-backup
