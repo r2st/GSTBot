@@ -504,7 +504,7 @@ class TestTheUnitsRunThisApplication:
         assert root == f"{INSTALL_ROOT}/frontend/dist"
         # And that is the path the release script proves it wrote before it
         # restarts anything.
-        assert f'[ -f "$ROOT/frontend/dist/index.html" ]' in DEPLOY_SCRIPT.read_text()
+        assert '[ -f "$ROOT/frontend/dist/index.html" ]' in DEPLOY_SCRIPT.read_text()
 
     @pytest.mark.parametrize(
         ("name", "variable"),
@@ -654,7 +654,7 @@ class TestTheSiteBlock:
         # options block at the top. A second one — or any global directive at
         # the file's left margin — makes the whole shared file invalid, which
         # takes down every site on the box and not only this one.
-        assert not matched(rf"\A(?:#[^\n]*\n|\s*\n)*{re.escape(SITE)} \{{", site_conf)is None
+        assert matched(rf"\A(?:#[^\n]*\n|\s*\n)*{re.escape(SITE)} \{{", site_conf) is not None
         top_level = re.findall(r"^(\S.*?)\s*\{", site_conf, flags=re.M)
         assert top_level == [SITE], f"unexpected top-level block(s): {top_level}"
 

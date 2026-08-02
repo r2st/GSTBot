@@ -109,7 +109,7 @@ class TestEveryManifestIsRunThroughItsOwnTool:
 
     def test_the_caddyfile_is_validated_by_caddy(self, deploy_job):
         assert "caddy validate" in deploy_job
-        assert "deploy/Caddyfile" in deploy_job
+        assert "deploy/caddy-gstbot.conf" in deploy_job
 
     def test_the_caddyfile_is_held_to_caddys_own_formatting(self, deploy_job):
         # Not tidiness. `caddy validate` downgrades a formatting complaint to a

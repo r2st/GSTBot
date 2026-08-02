@@ -236,7 +236,7 @@ jobs:
         # is the only thing wanted from it, and the tag is the version the
         # server runs.
         run: |
-          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+          docker run --rm -v "$PWD/deploy/caddy-gstbot.conf:/etc/caddy/Caddyfile:ro" \
             caddy:2-alpine caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
 
       - name: Caddyfile is formatted
@@ -244,8 +244,8 @@ jobs:
         # — which is how the file ends up with a warning nobody reads attached
         # to it. Comparing against `caddy fmt` is the assertion that has teeth.
         run: |
-          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
-            caddy:2-alpine caddy fmt /etc/caddy/Caddyfile | diff -u deploy/Caddyfile -
+          docker run --rm -v "$PWD/deploy/caddy-gstbot.conf:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy fmt /etc/caddy/Caddyfile | diff -u deploy/caddy-gstbot.conf -
 
       - name: Units are valid
         # systemd-analyze runs the same parser the server does, which is the
