@@ -5,15 +5,16 @@ top of it, and the product's claim is that an invoice still uploads and parses
 with Redis dead — which is only true if `get_redis` returns ``None`` quietly
 instead of propagating a ConnectionError into a request.
 
-The suite's own Redis URL points at a closed port, so the unreachable case is
-real here rather than mocked. The reachable case is the one that needs a
-double, since a passing test must not depend on a developer happening to have
-Redis running.
+The suite's own Redis URL points at a Unix socket that cannot exist, so the
+unreachable case is real here rather than mocked. The reachable case is the one
+that needs a double, since a passing test must not depend on a developer
+happening to have Redis running.
 """
 from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -102,9 +103,25 @@ class TestReachableRedis:
 
 
 class TestUnreachableRedis:
-    def test_the_suites_own_closed_port_degrades_to_none(self):
-        # Not a double: conftest points REDIS_URL at a port nothing listens on.
+    def test_the_suites_own_configuration_degrades_to_none(self):
+        # Not a double: conftest points REDIS_URL at a socket that cannot exist.
         assert get_redis() is None
+
+    def test_the_suite_cannot_be_pointed_at_a_server_by_accident(self):
+        """The isolation above has to be a guarantee, not a coincidence.
+
+        It used to be a TCP port picked for being free, which held right up
+        until something was started on it — then this file failed while the
+        code it covers was fine. A path under a directory that does not exist
+        cannot be bound by a stray container or a developer's local Redis.
+        """
+        assert redis_client.settings.redis_url.startswith("unix://")
+
+        path = redis_client.settings.redis_url.removeprefix("unix://").split("?")[0]
+        assert not Path(path).exists()
+        assert not Path(path).parent.exists(), (
+            "the socket's directory exists, so something could bind the path"
+        )
 
     def test_a_failure_to_connect_is_remembered(self, monkeypatch):
         calls = _install_fake_redis(

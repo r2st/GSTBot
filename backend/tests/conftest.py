@@ -26,7 +26,17 @@ os.environ.setdefault("CELERY_ENABLED", "false")
 os.environ.setdefault("UPLOAD_DIR", tempfile.mkdtemp(prefix="gstbot-uploads-"))
 # Deliberately unreachable: the suite must never touch a real Redis, and the
 # limiter's degraded path is what runs here.
-os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:6399/15")
+#
+# A Unix socket that does not exist rather than a TCP port assumed to be free.
+# A closed port is only closed until somebody runs a container on it — and the
+# compose file's REDIS_PORT is exactly the kind of knob that lands one there,
+# at which point these tests start talking to a real server and two of them
+# fail for a reason that has nothing to do with the code. Nothing can bind a
+# path under a directory that does not exist, and the connect fails instantly
+# rather than waiting out a timeout.
+os.environ.setdefault(
+    "REDIS_URL", "unix:///nonexistent/gstbot-tests-must-not-reach-redis.sock"
+)
 # Off by default. The suite registers a business per test, and a 10/hour
 # sign-up limit would fail the twentieth test rather than the code under it.
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")

@@ -31,7 +31,7 @@ branch = true
 # A gate rather than a target. It is set just under where the suite actually
 # sits so that deleting tests, or adding a module with none, fails CI — not so
 # that anyone writes a test purely to move it.
-fail_under = 97
+fail_under = 98
 show_missing = true
 skip_covered = true
 exclude_also = [

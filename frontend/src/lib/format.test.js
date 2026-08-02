@@ -59,6 +59,28 @@ describe("dateLabel", () => {
   it("shows a dash for nothing", () => {
     expect(dateLabel(null)).toBe("—");
   });
+
+  it("does not shift an ISO date backwards in a western timezone", () => {
+    // The reason toLocalDate exists: `new Date("2026-04-15")` is UTC midnight,
+    // which is the 14th anywhere west of Greenwich. A GST invoice date is a
+    // calendar date, and showing the wrong one moves it into another period.
+    expect(dateLabel("2026-04-15")).toBe("15 Apr 2026");
+    expect(dateLabel("2026-01-01")).toBe("01 Jan 2026");
+  });
+
+  it("formats a Date it is handed directly", () => {
+    expect(dateLabel(new Date(2026, 3, 15))).toBe("15 Apr 2026");
+  });
+
+  it("leaves a full timestamp to the engine", () => {
+    // created_at comes back as an instant rather than a calendar date, so it
+    // keeps the normal parse — the date-only workaround would drop the time.
+    expect(dateLabel("2026-04-15T09:30:00Z")).toMatch(/2026$/);
+  });
+
+  it("returns the original value when it is not a date at all", () => {
+    expect(dateLabel("not a date")).toBe("not a date");
+  });
 });
 
 describe("currentPeriod", () => {

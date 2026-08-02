@@ -14,6 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -272,9 +273,20 @@ def process_invoice(db: Session, invoice: Invoice) -> Invoice:
     propagating: this runs on a Celery worker where an exception would be a
     log line nobody reads, and the user needs to see which of their fifty
     uploads needs attention.
+
+    The write-back is inside the guarded block as well as the parse. Committing
+    outside it is what leaves a row stuck in ``PROCESSING``: the parse can
+    succeed and the *insert* still fail, and the user is then watching a
+    spinner for a document nothing is coming back to.
     """
     invoice.status = InvoiceStatus.PROCESSING
     db.commit()
+
+    # Captured as soon as they are known. A rollback reverts them on the
+    # instance, and they are the only detail that makes the message below
+    # worth reading.
+    number: str | None = None
+    counterparty: str | None = None
 
     try:
         path = Path(invoice.storage_path) if invoice.storage_path else None
@@ -289,14 +301,52 @@ def process_invoice(db: Session, invoice: Invoice) -> Invoice:
             text=invoice.raw_text,
         )
         apply_parsed(db, invoice, parsed)
+        number, counterparty = invoice.invoice_number, invoice.counterparty_gstin
+        db.commit()
+    except IntegrityError:
+        # The same invoice number from the same counterparty is already on
+        # file. Only discoverable here: the number is not known until the
+        # document has been read, so the dedup at upload time can compare
+        # nothing but file hashes — and a re-scan of a paper invoice is a
+        # different file every time.
+        db.rollback()
+        existing = find_duplicate(
+            db,
+            invoice.business_id,
+            invoice_type=invoice.invoice_type,
+            counterparty_gstin=counterparty,
+            invoice_number=number,
+        )
+        logger.info(
+            "Invoice %s duplicates invoice %s", invoice.id, existing.id if existing else "?"
+        )
+        invoice.status = InvoiceStatus.FAILED
+        invoice.parse_error = _duplicate_message(number, existing)
+        db.commit()
     except Exception as exc:  # noqa: BLE001 - the row is the error channel
+        # Rollback before writing the failure: a half-applied extraction is
+        # worse than none, and after a failed flush the session refuses to
+        # commit anything at all until it is cleared.
+        db.rollback()
         logger.exception("Invoice %s failed to parse", invoice.id)
         invoice.status = InvoiceStatus.FAILED
         invoice.parse_error = str(exc)[:2000]
+        db.commit()
 
-    db.commit()
     db.refresh(invoice)
     return invoice
+
+
+def _duplicate_message(number: str | None, existing: Invoice | None) -> str:
+    """Why the row failed, in the words of someone who uploaded a document.
+
+    The constraint name and the psycopg traceback are true and useless; what
+    the user needs is which invoice this repeats so they can delete one.
+    """
+    named = f"Invoice {number}" if number else "This invoice"
+    if existing is not None:
+        return f"{named} is already on file as invoice {existing.id}."
+    return f"{named} is already on file."
 
 
 def tax_summary(

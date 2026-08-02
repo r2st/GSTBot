@@ -296,4 +296,89 @@ describe("SuppliersPage", () => {
 
     expect(await screen.findByText("Business is inactive")).toBeInTheDocument();
   });
+
+  /**
+   * The list loads, and a later call fails. `mockApi`'s `fail` breaks every
+   * request, which would never get us past the placeholder — so these route
+   * the failure at one URL and leave the rest working.
+   */
+  describe("when a follow-up call fails after the list is on screen", () => {
+    function mockApiFailing(predicate, { status = 500, message = "Server error" } = {}) {
+      global.fetch = vi.fn(async (url, options = {}) => {
+        const target = String(url);
+        const json = (body, code = 200) => ({
+          ok: code < 400,
+          status: code,
+          statusText: code < 400 ? "OK" : "Error",
+          text: async () => JSON.stringify(body),
+        });
+
+        if (predicate(target, options)) return json({ detail: message }, status);
+        if (options.method === "POST" && target.includes("/suppliers/rescore")) {
+          return json({ rescored: 3, items: [] });
+        }
+        if (/\/suppliers\/\d+/.test(target)) return json(detail());
+        return json({ items: [supplier()], total: 1 });
+      });
+    }
+
+    it("keeps the list when one supplier's detail cannot be opened", async () => {
+      const user = userEvent.setup();
+      mockApiFailing((url) => /\/suppliers\/\d+/.test(url), {
+        status: 404,
+        message: "Supplier not found",
+      });
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      expect(await screen.findByText("Supplier not found")).toBeInTheDocument();
+      // The row it was opened from is still there — a failed drill-down must
+      // not take the register with it.
+      expect(screen.getByText("Northwind Supplies Pvt Ltd")).toBeInTheDocument();
+    });
+
+    it("reports a rescore that did not run", async () => {
+      const user = userEvent.setup();
+      mockApiFailing(
+        (url, options) => options.method === "POST" && url.includes("/suppliers/rescore"),
+        { status: 503, message: "Scoring is backed up, try again shortly" },
+      );
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Rescore all" }));
+
+      expect(
+        await screen.findByText("Scoring is backed up, try again shortly"),
+      ).toBeInTheDocument();
+      // No success notice alongside the error, and the button is usable again.
+      expect(screen.queryByText(/Rescored/)).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Rescore all" })).not.toBeDisabled(),
+      );
+    });
+  });
+
+  describe("the last-filed column", () => {
+    it("falls back to when the supplier was last seen if they have never filed", async () => {
+      mockApi({
+        items: [supplier({ last_filed_period: null, last_seen_at: "2026-03-09" })],
+      });
+      renderPage();
+
+      await loaded();
+      expect(screen.getByText("09 Mar 2026")).toBeInTheDocument();
+    });
+
+    it("shows a dash for a supplier that has neither filed nor been seen", async () => {
+      mockApi({ items: [supplier({ last_filed_period: null, last_seen_at: null })] });
+      renderPage();
+
+      await loaded();
+      const row = screen.getByText("29AAGCB7383J1Z4").closest("tr");
+      expect(within(row).getByText("—")).toBeInTheDocument();
+    });
+  });
 });

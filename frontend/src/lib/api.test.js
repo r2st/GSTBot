@@ -35,6 +35,17 @@ describe("errorMessage", () => {
   it("falls back when there is no detail", () => {
     expect(errorMessage(null, "Request failed")).toBe("Request failed");
   });
+
+  it("stringifies a detail that is neither text, list nor object", () => {
+    // Nothing we send looks like this, but an upstream proxy erroring with
+    // `{"detail": 502}` should still read as something rather than crash the
+    // banner that renders it.
+    expect(errorMessage({ detail: 502 })).toBe("502");
+  });
+
+  it("falls back to JSON for a structured detail with no message", () => {
+    expect(errorMessage({ detail: { code: "rate_limited" } })).toBe('{"code":"rate_limited"}');
+  });
 });
 
 describe("api", () => {
@@ -200,5 +211,82 @@ describe("api", () => {
     global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
     await api.listReconciliations();
     expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/reconciliation");
+  });
+
+  // downloadExport does not go through `request` — it needs the raw response
+  // to get at the blob and the Content-Disposition — so it carries its own
+  // copy of the auth and error handling, and that copy needs its own tests.
+  describe("downloadExport", () => {
+    function fileResponse(body, { status = 200, disposition = null } = {}) {
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        statusText: "",
+        text: async () => (body === null ? "" : JSON.stringify(body)),
+        blob: async () => new Blob(["csv,data"]),
+        headers: { get: () => disposition },
+      };
+    }
+
+    it("sends the bearer token a plain link could not carry", async () => {
+      setToken("tok-1");
+      global.fetch.mockResolvedValueOnce(fileResponse(null));
+
+      await api.downloadExport("gstr1", "csv", "2026-04");
+
+      const [url, options] = global.fetch.mock.calls[0];
+      expect(url).toBe("/api/v1/filing/export/gstr1.csv?period=2026-04");
+      expect(options.headers.Authorization).toBe("Bearer tok-1");
+    });
+
+    it("reads the filename out of the Content-Disposition", async () => {
+      global.fetch.mockResolvedValueOnce(
+        fileResponse(null, { disposition: 'attachment; filename="gstr1-2026-04.csv"' }),
+      );
+
+      const { filename } = await api.downloadExport("gstr1", "csv", "2026-04");
+
+      expect(filename).toBe("gstr1-2026-04.csv");
+    });
+
+    it("names the file itself when the server did not", async () => {
+      global.fetch.mockResolvedValueOnce(fileResponse(null));
+
+      const { filename } = await api.downloadExport("gstr1", "csv", "2026-04");
+
+      expect(filename).toBe("gstbot-export");
+    });
+
+    it("raises the server's reason when the export is refused", async () => {
+      // A period with no invoices is a 400 with a detail worth showing —
+      // saving that JSON to disk as "gstbot-export.csv" would be worse than
+      // any error message.
+      global.fetch.mockResolvedValueOnce(
+        fileResponse({ detail: "Nothing to export for 2026-04" }, { status: 400 }),
+      );
+
+      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow(
+        "Nothing to export for 2026-04",
+      );
+    });
+
+    it("falls back to the status text when the error body is empty", async () => {
+      global.fetch.mockResolvedValueOnce({
+        ...fileResponse(null, { status: 502 }),
+        statusText: "Bad Gateway",
+      });
+
+      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow("Bad Gateway");
+    });
+
+    it("drops a token the export endpoint rejected", async () => {
+      setToken("stale");
+      global.fetch.mockResolvedValueOnce(fileResponse({ detail: "Not authenticated" }, { status: 401 }));
+
+      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow();
+
+      // Same rule as `request`: a refused credential is not retried.
+      expect(getToken()).toBeNull();
+    });
   });
 });
