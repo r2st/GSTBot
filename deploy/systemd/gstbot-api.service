@@ -1,12 +1,17 @@
 [Unit]
 Description=GSTBot API (uvicorn)
 Documentation=https://gstbot.aiknol.com/api/v1/health
-Wants=network-online.target
-After=network-online.target postgresql.service redis-server.service gstbot-migrate.service
+Wants=network-online.target docker.service
+After=network-online.target docker.service postgresql.service redis-server.service gstbot-migrate.service
 # Requires only the migration: Postgres and Redis may be remote, and the app
 # already degrades correctly while they come up — the readiness probe holds
 # traffic back. A schema that has not been migrated is different in kind: the
 # process would start and then 500 on every query.
+#
+# docker.service is Wants=/After= rather than Requires= because it is not a
+# dependency of the application, only of the address it binds (see ExecStart).
+# If the bridge is not up yet the bind fails and Restart=always retries, which
+# reaches the same place as Requires= with less coupling.
 Requires=gstbot-migrate.service
 PartOf=gstbot.target
 
@@ -24,31 +29,37 @@ StartLimitBurst=5
 Type=exec
 User=gstbot
 Group=gstbot
-WorkingDirectory=/srv/gstbot/src/backend
+WorkingDirectory=/opt/GSTBot/backend
 
 # Order matters. Environment= lines are defaults; the EnvironmentFile below
 # is read afterwards and overrides them, so an operator can retune the worker
 # count in /etc/gstbot/gstbot.env without editing a unit.
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
-Environment=WEB_CONCURRENCY=4
+Environment=WEB_CONCURRENCY=2
 EnvironmentFile=/etc/gstbot/gstbot.env
 
-# 127.0.0.1, not 0.0.0.0: Caddy is on this host and is the only thing that
-# should be able to reach the API. Bound to every interface, the Hetzner
-# public address would serve the API unencrypted on port 8000 alongside the
-# TLS one, and every rate limit keyed on a forwarded header would be
-# forgeable by connecting directly.
+# 172.18.0.1, not 0.0.0.0 and not 127.0.0.1.
 #
-# --forwarded-allow-ips is the loopback for the same reason: uvicorn only
-# honours X-Forwarded-* from a peer on that list, so the app's
-# TRUST_PROXY_HEADERS=true is only ever acted on for traffic that came
-# through Caddy.
-ExecStart=/srv/gstbot/venv/bin/uvicorn app.main:app \
-    --host 127.0.0.1 \
-    --port 8000 \
+# Caddy terminates TLS for this host from inside a container (`knol-caddy`),
+# so it reaches host services across the `knol_knol` bridge — 127.0.0.1 there
+# is the container itself, and an API on loopback would be unreachable from
+# the edge. 172.18.0.1 is the bridge gateway: containers on that network can
+# reach it and the public internet cannot, because RFC1918 space is not routed
+# to this box. 0.0.0.0 would additionally publish the API unencrypted on the
+# public address alongside the TLS one, and make every rate limit keyed on a
+# forwarded header forgeable by connecting to it directly.
+#
+# --forwarded-allow-ips is the Caddy container's address for the same reason:
+# uvicorn only honours X-Forwarded-* from a peer on that list, so the app's
+# TRUST_PROXY_HEADERS=true is only ever acted on for traffic that came through
+# the edge. Widening this to the bridge subnet would let any container on
+# knol_knol forge a client address, which is what the rate limiter buckets on.
+ExecStart=/opt/GSTBot/.venv/bin/uvicorn app.main:app \
+    --host 172.18.0.1 \
+    --port 3008 \
     --proxy-headers \
-    --forwarded-allow-ips=127.0.0.1 \
+    --forwarded-allow-ips=172.18.0.6 \
     --workers ${WEB_CONCURRENCY}
 
 ExecReload=/bin/kill -HUP $MAINPID
@@ -61,8 +72,7 @@ Restart=always
 RestartSec=5
 
 # ---- Sandboxing ----
-# See gstbot-migrate.service for why this block is identical across the three
-# units.
+# See gstbot-migrate.service for why this block is identical across the units.
 StateDirectory=gstbot
 StateDirectoryMode=0750
 NoNewPrivileges=yes
@@ -87,6 +97,10 @@ SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 CapabilityBoundingSet=
 AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gstbot-api
 
 [Install]
 WantedBy=gstbot.target

@@ -16,7 +16,7 @@ StartLimitBurst=5
 Type=exec
 User=gstbot
 Group=gstbot
-WorkingDirectory=/srv/gstbot/src/backend
+WorkingDirectory=/opt/GSTBot/backend
 
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
@@ -26,7 +26,7 @@ EnvironmentFile=/etc/gstbot/gstbot.env
 
 # The same command the container entrypoint runs, so a bug reproduces the
 # same way under compose and under systemd.
-ExecStart=/srv/gstbot/venv/bin/celery -A app.celery_app worker \
+ExecStart=/opt/GSTBot/.venv/bin/celery -A app.celery_app worker \
     --loglevel=${CELERY_LOG_LEVEL} \
     --concurrency=${CELERY_CONCURRENCY}
 
@@ -67,6 +67,10 @@ SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
 CapabilityBoundingSet=
 AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gstbot-worker
 
 [Install]
 WantedBy=gstbot.target

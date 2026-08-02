@@ -22,14 +22,14 @@ RemainAfterExit=yes
 
 User=gstbot
 Group=gstbot
-WorkingDirectory=/srv/gstbot/src/backend
+WorkingDirectory=/opt/GSTBot/backend
 EnvironmentFile=/etc/gstbot/gstbot.env
-# /srv is read-only under ProtectSystem=strict, so a stray .pyc write would
+# /opt is read-only under ProtectSystem=strict, so a stray .pyc write would
 # be an error rather than a cache.
 Environment=PYTHONDONTWRITEBYTECODE=1
 Environment=PYTHONUNBUFFERED=1
 
-ExecStart=/srv/gstbot/venv/bin/alembic upgrade head
+ExecStart=/opt/GSTBot/.venv/bin/alembic upgrade head
 
 # A migration that fails must stop the release, not retry into a loop.
 Restart=no
@@ -67,6 +67,14 @@ AmbientCapabilities=
 # Deliberately no MemoryDenyWriteExecute=: it breaks any dependency that maps
 # executable pages, and the set of those is a property of the wheels pip
 # resolved rather than of anything reviewable here.
+
+StandardOutput=journal
+StandardError=journal
+# Without this, alembic's output is tagged with the basename of the executable
+# it runs under — "python3" — which on this box also selects Herald's and
+# Documedic's processes. The runbook greps `journalctl -t gstbot-migrate` to
+# read a release's schema step; that has to mean this unit alone.
+SyslogIdentifier=gstbot-migrate
 
 [Install]
 WantedBy=gstbot.target

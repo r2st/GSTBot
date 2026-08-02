@@ -1,0 +1,69 @@
+[Unit]
+# Serves the built SPA out of frontend/dist.
+#
+# This unit exists because of where Caddy runs, not because the frontend needs
+# a server of its own. `knol-caddy` is a container; it cannot read
+# /opt/GSTBot/frontend/dist, so `root * <dist>` + `file_server` at the edge —
+# which is what a host Caddy would do, with one less process to supervise —
+# is not available here. Mounting the build into the container would work too,
+# and was not chosen: it couples the release to a container restart and puts
+# the app's files inside another product's compose project.
+Description=GSTBot Web (static SPA server)
+Documentation=https://gstbot.aiknol.com
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+PartOf=gstbot.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=gstbot
+Group=gstbot
+WorkingDirectory=/opt/GSTBot
+
+# Same bind reasoning as gstbot-api.service: the Docker bridge gateway is
+# reachable from the Caddy container and not from the internet.
+ExecStart=/usr/bin/node /opt/GSTBot/deploy/static-server.mjs \
+    --root /opt/GSTBot/frontend/dist \
+    --host 172.18.0.1 \
+    --port 3009
+
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=always
+RestartSec=5
+
+# ---- Sandboxing ----
+# No StateDirectory=: this process only ever reads, and the one thing it reads
+# is under /opt, which ProtectSystem=strict leaves readable and read-only.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectClock=yes
+ProtectHostname=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=gstbot-web
+
+[Install]
+WantedBy=gstbot.target
