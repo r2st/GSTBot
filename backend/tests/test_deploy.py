@@ -889,6 +889,45 @@ class TestTheDeployScript:
             "systemctl restart gstbot-api.service"
         )
 
+    def test_it_takes_a_restore_point_before_it_migrates(self, commands):
+        # Deploying the previous revision undoes the code. It does not undo a
+        # dropped column, and the migration is the only step of a release with
+        # that property — so the dump belongs immediately before it rather
+        # than at 02:30, twelve hours after the change it would undo.
+        assert commands.index("gstbot-backup.service") < commands.index(
+            "systemctl restart gstbot-migrate.service"
+        )
+
+    def test_the_restore_point_is_the_same_dump_the_timer_takes(self, commands):
+        # Through the unit, not by calling backup.sh. The unit carries the
+        # service account, the sandbox and the EnvironmentFile; a direct call
+        # from a root-run release would share none of those and could succeed
+        # in a way the nightly one does not — which is the copy that matters.
+        assert "systemctl start gstbot-backup.service" in commands
+        assert "backup.sh" not in commands
+
+    def test_it_builds_before_it_takes_the_restore_point(self, commands):
+        # The build is the step most likely to fail, and a dump taken for a
+        # release that then does not happen is pure IO on a shared disk.
+        assert commands.index("npm ci") < commands.index("gstbot-backup.service")
+
+    def test_a_failed_backup_stops_the_release(self, commands):
+        # The reason to take it is that the next step is unrecoverable. A dump
+        # that failed and was carried past is worse than no dump: the release
+        # reports a restore point it does not have.
+        backup = matched(r"systemctl start gstbot-backup\.service[^\n]*\n?[^\n]*", commands)
+        assert "die" in backup.group(0)
+
+    def test_skipping_the_backup_is_possible_and_loud(self, script):
+        # The disk being full is a real reason to deploy without a dump, and a
+        # release path with no way past a failing backup is one somebody edits
+        # under pressure. It warns, because every other use of it is a
+        # migration applied with no way back.
+        assert "GSTBOT_SKIP_BACKUP" in script
+        assert matched(
+            r"warn [^\n]*GSTBOT_SKIP_BACKUP|GSTBOT_SKIP_BACKUP[^\n]*\n[^\n]*warn ", script
+        )
+
     def test_it_restarts_the_migration_rather_than_starting_it(self, commands):
         # gstbot-migrate is RemainAfterExit=yes, so it is already "active"
         # from the last release and `systemctl start` is a silent no-op — the

@@ -210,9 +210,22 @@ rsync -az --delete --no-owner --no-group \
 /opt/GSTBot/deploy/deploy.sh
 ```
 
-The script installs the locked dependencies, builds the frontend, migrates,
-restarts the services and then checks readiness on the bridge and
-`/health/live` through Caddy. Anything that fails stops the release.
+The script installs the locked dependencies, builds the frontend, takes a
+database dump, migrates, restarts the services and then checks readiness on the
+bridge and `/health/live` through Caddy. Anything that fails stops the release.
+
+The dump is the nightly backup unit, started synchronously — see "Backups". It
+runs because the migration is the one step of a release that redeploying the
+previous revision does not undo: the code goes back, a dropped column does not.
+A dump that fails stops the release before anything is migrated, on the
+grounds that the next step is the unrecoverable one. When that is the wrong
+call — the disk is full and this release is the fix — the way past it is
+
+```sh
+GSTBOT_SKIP_BACKUP=1 /opt/GSTBot/deploy/deploy.sh
+```
+
+which migrates with no restore point and says so.
 
 **It does not fetch, because this box cannot.** The repository is private and
 the box holds no credential, so `git fetch origin` answers 401. What ships is
@@ -322,7 +335,9 @@ systemctl start gstbot-backup.service         # take one now, synchronously
 ```
 
 `gstbot-backup.timer` runs `deploy/backup.sh` at 02:30 with up to 15 minutes of
-jitter, and `Persistent=true` catches up a night missed to a reboot. Each run
+jitter, and `Persistent=true` catches up a night missed to a reboot. `deploy.sh`
+starts the same unit before every migration, so the dumps in that directory are
+a mix of nightly ones and one per release. Each run
 writes `gstbot-<timestamp>.dump` to `/var/backups/gstbot`, reads it back with
 `pg_restore --list` before keeping it, and deletes dumps older than 14 days.
 Nothing is deleted by a run that failed, and a dump only takes its final name

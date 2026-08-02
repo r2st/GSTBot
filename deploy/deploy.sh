@@ -109,6 +109,32 @@ log "Building the frontend"
     && NODE_OPTIONS=--max-old-space-size=768 npm run build )
 [ -f "$ROOT/frontend/dist/index.html" ] || die "build produced no index.html"
 
+log "Taking a restore point"
+# The migration below is the one step of a release that is not undone by
+# deploying the previous revision: code goes back, a dropped column does not.
+# So the dump happens here, immediately before it, rather than being left to
+# tonight's timer — a restore point taken twelve hours before the change it
+# exists to undo is not a restore point.
+#
+# `systemctl start`, not a call to backup.sh: the unit carries the service
+# account, the sandbox and the EnvironmentFile, so this is the same dump the
+# timer takes rather than a second code path that could work when that one
+# does not. Type=oneshot, so this blocks until the dump has been written and
+# read back, and reports its exit status.
+#
+# After the build on purpose. A frontend that does not compile should cost
+# nothing, and the dump is only worth taking once the release is otherwise
+# going to happen.
+if [ -n "${GSTBOT_SKIP_BACKUP:-}" ]; then
+    # The escape hatch exists for one situation: the disk is full and this
+    # release is the fix. It is loud because every other use of it is a
+    # migration applied with no way back.
+    warn "GSTBOT_SKIP_BACKUP is set — migrating with no restore point"
+else
+    systemctl start gstbot-backup.service \
+        || die "backup failed, so nothing is migrated; journalctl -u gstbot-backup -n 50"
+fi
+
 log "Applying migrations"
 # Ahead of the restart, and on its own, so a migration that fails stops the
 # release rather than leaving a half-started stack behind it. `restart` rather
