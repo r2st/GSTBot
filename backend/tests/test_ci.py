@@ -140,6 +140,72 @@ class TestEveryManifestIsRunThroughItsOwnTool:
             assert covered, f"{unit} is not passed to systemd-analyze verify"
 
 
+class TestTheMigrationsAreCheckedAgainstTheDatabaseTheyDeployAgainst:
+    """The suite migrates SQLite; the server migrates Postgres.
+
+    ``tests/test_migrations.py`` runs on a throwaway SQLite file by default and
+    switches to whatever ``MIGRATION_TEST_DATABASE_URL`` names. That second run
+    is the only place the rollback assertions ever meet a real ``ALTER TABLE``,
+    and it lives entirely in the workflow — so it is the kind of check that can
+    be dropped in an edit here without a single test going red.
+    """
+
+    @pytest.fixture(scope="class")
+    def backend_job(self, jobs) -> dict:
+        return jobs["backend"]
+
+    def test_the_migration_module_is_re_run_against_postgres(self, backend_job):
+        step = self._rerun_step(backend_job)
+        assert step is not None, (
+            "no step runs tests/test_migrations.py with MIGRATION_TEST_DATABASE_URL; "
+            "the rollback checks only ever see SQLite"
+        )
+
+    def test_it_points_at_the_postgres_service_the_job_starts(self, backend_job):
+        # A URL naming a database nothing started fails the step outright, but
+        # one naming the *wrong* reachable database would quietly test somewhere
+        # else. The service block is the only Postgres in this job.
+        step = self._rerun_step(backend_job)
+        assert step is not None
+        url = step["env"]["MIGRATION_TEST_DATABASE_URL"]
+        service = backend_job["services"]["postgres"]["env"]
+        assert service["POSTGRES_DB"] in url
+        assert service["POSTGRES_USER"] in url
+
+    def test_it_runs_after_the_steps_that_need_a_migrated_database(self, backend_job):
+        """Ordering is load-bearing, and silently so.
+
+        The module's fixture wipes the shared database on the way out. Any step
+        ordered after it that expects a schema — `alembic check`, today — finds
+        an empty database and fails for a reason with nothing to do with it.
+        """
+        steps = backend_job["steps"]
+        rerun = steps.index(self._rerun_step(backend_job))
+        needs_schema = [
+            index
+            for index, step in enumerate(steps)
+            if "run" in step and "alembic check" in step["run"]
+        ]
+
+        assert needs_schema, "expected an `alembic check` step to order against"
+        assert all(index < rerun for index in needs_schema), (
+            "the migration module wipes the database it is given; steps that "
+            "need a migrated one have to come before it"
+        )
+
+    @staticmethod
+    def _rerun_step(job: dict) -> dict | None:
+        return next(
+            (
+                step
+                for step in job["steps"]
+                if "MIGRATION_TEST_DATABASE_URL" in (step.get("env") or {})
+                and "tests/test_migrations.py" in step.get("run", "")
+            ),
+            None,
+        )
+
+
 # ---------------------------------------------------------------------------
 # One runtime version, written down in four places
 # ---------------------------------------------------------------------------
