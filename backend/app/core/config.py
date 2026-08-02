@@ -89,6 +89,12 @@ class Settings(BaseSettings):
     # ---- Redis / Celery ----
     redis_url: str = "redis://localhost:6379/0"
     redis_timeout_seconds: float = Field(default=2.0, gt=0, le=30)
+    # How long a discovered outage is believed before Redis is probed again.
+    # This is the whole cost of an outage: one connect attempt per interval per
+    # process. Too low and a dead server is a timeout on a request every few
+    # seconds; too high and a Redis that came back stays unused, with rate
+    # limiting per-process, for that long after.
+    redis_retry_interval_seconds: float = Field(default=30.0, gt=0, le=3600)
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
     # When False, invoice parsing runs inline in the upload request instead of

@@ -187,6 +187,86 @@ class TestLifespan:
         assert "Shutting down" in caplog.text
 
 
+@pytest.mark.asyncio
+class TestShutdownReleasesItsDependencies:
+    """SIGTERM, then ``TimeoutStopSec``, then SIGKILL.
+
+    uvicorn drains in-flight requests before lifespan teardown runs, so by the
+    time these fire the pools are idle and every connection still open is one
+    the *server* has to reap on its own schedule. That matters on a rolling
+    restart, where the outgoing process's connections and the incoming one's are
+    both counted against ``max_connections`` until Postgres notices — and the
+    deploy that trips that limit is the one where the new process cannot start.
+    """
+
+    @pytest.fixture()
+    def shutdown(self, monkeypatch, tmp_path):
+        """Run a lifespan to completion with the two releases observable."""
+        monkeypatch.setattr(main, "configure_logging", lambda *_a, **_kw: None)
+        monkeypatch.setattr(main.settings, "upload_dir", str(tmp_path / "uploads"))
+        monkeypatch.setattr(main, "check_database", lambda: (True, None))
+        monkeypatch.setattr(main, "redis_ping", lambda: True)
+
+        called: list[str] = []
+
+        async def run(*, redis_error=None, dispose_error=None):
+            def close_redis():
+                called.append("redis")
+                if redis_error is not None:
+                    raise redis_error
+
+            def dispose():
+                called.append("engine")
+                if dispose_error is not None:
+                    raise dispose_error
+
+            monkeypatch.setattr(main, "redis_close", close_redis)
+            monkeypatch.setattr(main.engine, "dispose", dispose)
+            async with main.lifespan(app):
+                assert called == [], "released a pool while still serving"
+            return called
+
+        return run
+
+    async def test_the_database_pool_is_disposed(self, shutdown):
+        assert "engine" in await shutdown()
+
+    async def test_the_redis_client_is_closed(self, shutdown):
+        assert "redis" in await shutdown()
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            ({"redis_error": OSError("broken pipe")}, "Redis client did not close"),
+            ({"dispose_error": OSError("already closed")}, "Database pool did not dispose"),
+        ],
+    )
+    async def test_a_failure_to_release_is_logged_not_raised(
+        self, shutdown, caplog, kwargs, expected
+    ):
+        """An exception out of lifespan teardown is a non-zero exit, which
+        systemd records as a failed unit — so an ordinary deploy would page
+        someone, and the thing that "failed" was the shutdown of a process that
+        was already on its way out."""
+        with caplog.at_level(logging.WARNING):
+            await shutdown(**kwargs)
+
+        assert expected in caplog.text
+
+    async def test_one_failing_release_does_not_skip_the_other(self, shutdown):
+        # They are independent, and the engine is the one that matters more —
+        # so it must not be reachable only through a clean Redis close.
+        assert "engine" in await shutdown(redis_error=OSError("broken pipe"))
+
+    async def test_shutdown_reports_that_it_finished(self, shutdown, caplog):
+        # "Shutting down" is written before the releases, so on its own it
+        # cannot distinguish a clean stop from one that hung releasing a pool.
+        with caplog.at_level(logging.INFO):
+            await shutdown()
+
+        assert "Shutdown complete" in caplog.text
+
+
 def test_the_upload_dir_setting_is_a_path_the_app_can_use():
     """Guards against the setting drifting to a type Path() cannot take."""
     assert Path(main.settings.upload_dir).name

@@ -394,6 +394,35 @@ class TestRedisBackedCounters:
         assert not [rate_limit._hit("uploads:user:1", Rate(2, 60)) for _ in range(3)][-1].allowed
         rate_limit.reset()
 
+    def test_a_failure_takes_redis_out_of_the_path_for_the_next_request(
+        self, monkeypatch
+    ):
+        """Degrading once is not enough — it has to stop *re-*discovering it.
+
+        The global limit is middleware, so this runs in front of every request.
+        A dead-but-cached client that is only ever caught and shrugged off costs
+        each of those requests a connect timeout plus a socket timeout before
+        the fallback, which is 4s of added latency on every call at the default
+        settings. Reporting it to the breaker is what bounds that to one slow
+        request per cooldown.
+        """
+        from app.core import rate_limit, redis_client
+
+        rate_limit.reset()
+        redis_client.reset()
+        # A client that connected fine and then lost its server. get_redis()
+        # hands it out without a probe, so this failure is only visible here.
+        monkeypatch.setattr(redis_client, "_client", self.FakeRedis(fail=True))
+
+        rate_limit._hit("uploads:user:1", Rate(2, 60))
+
+        assert redis_client.get_redis() is None, "the dead client is still cached"
+        assert redis_client._down_until > 0, "the breaker was never tripped"
+
+        monkeypatch.undo()
+        redis_client.reset()
+        rate_limit.reset()
+
     def test_reset_clears_the_redis_keys_too(self, fake_redis):
         """Otherwise one test's counters leak into the next one's budget."""
         from app.core import rate_limit

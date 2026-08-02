@@ -89,7 +89,7 @@ def _hit(key: str, rate: Rate) -> Decision:
     bucket = f"ratelimit:{key}:{window_start}"
 
     count: int | None = None
-    from app.core.redis_client import get_redis
+    from app.core.redis_client import get_redis, mark_unavailable
 
     client = get_redis()
     if client is not None:
@@ -100,6 +100,13 @@ def _hit(key: str, rate: Rate) -> Decision:
             count = int(pipe.execute()[0])
         except Exception as exc:  # noqa: BLE001 - fall back, never fail the request
             logger.warning("Rate limiter degraded to in-process counters: %s", exc)
+            # This runs in front of every request, so "catch it and carry on"
+            # is not enough on its own: the client is cached and still dead, so
+            # without tripping the breaker the *next* request pays the same
+            # socket timeout, and so does every one after it. Reporting the
+            # failure to the breaker is what turns a Redis outage into one slow
+            # request per cooldown instead of every request being slow.
+            mark_unavailable(f"{type(exc).__name__}: {exc}")
             count = None
 
     if count is None:

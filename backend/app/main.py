@@ -12,7 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 
 import app.models  # noqa: F401  (registers every model on Base.metadata)
 from app.core.config import settings, validate_startup_config
-from app.core.database import check_database
+from app.core.database import check_database, engine
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import (
@@ -21,6 +21,7 @@ from app.core.middleware import (
     RateLimitMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.core.redis_client import close as redis_close
 from app.core.redis_client import ping as redis_ping
 from app.routers import (
     auth,
@@ -200,7 +201,29 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
     yield
 
+    # Shutdown. systemd sends SIGTERM and waits TimeoutStopSec before SIGKILL;
+    # uvicorn drains in-flight requests first, so by here the pools are idle and
+    # releasing them is the difference between a socket closed now and one the
+    # server reaps on its own schedule. On a rolling restart that overlap is
+    # counted against Postgres's max_connections and Redis's maxclients by both
+    # the old process and the new one at once.
+    #
+    # Neither of these may raise: an exception escaping lifespan shutdown turns
+    # a clean stop into a non-zero exit, which systemd records as a failed unit
+    # and which makes an ordinary deploy look like a crash.
     logger.info("Shutting down %s", settings.app_name)
+
+    try:
+        redis_close()
+    except Exception as exc:  # noqa: BLE001 - shutdown is not a place to fail
+        logger.warning("Redis client did not close cleanly: %s", exc)
+
+    try:
+        engine.dispose()
+    except Exception as exc:  # noqa: BLE001 - shutdown is not a place to fail
+        logger.warning("Database pool did not dispose cleanly: %s", exc)
+
+    logger.info("Shutdown complete")
 
 
 def create_app() -> FastAPI:

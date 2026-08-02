@@ -154,14 +154,18 @@ class TestTheRuntimeVersionsAgree:
     def with_python(self, jobs) -> str:
         """The Python the suite is actually run on in CI."""
         step = next(
-            s for s in jobs["backend"]["steps"] if s.get("uses", "").startswith("actions/setup-python")
+            s
+            for s in jobs["backend"]["steps"]
+            if s.get("uses", "").startswith("actions/setup-python")
         )
         return str(step["with"]["python-version"])
 
     @pytest.fixture(scope="class")
     def with_node(self, jobs) -> str:
         step = next(
-            s for s in jobs["frontend"]["steps"] if s.get("uses", "").startswith("actions/setup-node")
+            s
+            for s in jobs["frontend"]["steps"]
+            if s.get("uses", "").startswith("actions/setup-node")
         )
         return str(step["with"]["node-version"])
 
