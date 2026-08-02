@@ -1,0 +1,70 @@
+# Automated dependency updates.
+#
+# This exists because of how the dependencies are written rather than in spite
+# of it. `requirements.txt` pins floors (`fastapi>=0.115`), so a rebuild picks
+# up whatever has been published since — the version that ships is decided by
+# the clock, not by the repository. npm is the opposite: `package-lock.json`
+# pins exactly, so the frontend never moves at all until somebody moves it, and
+# an advisory against a locked version sits there indefinitely.
+#
+# Both failure modes are the same thing from CI's point of view: nobody is
+# looking. A pull request per update puts the change in front of the full suite
+# — backend tests, frontend tests, both images, and the migration round-trip —
+# which is the only place a dependency bump gets to prove itself.
+#
+# Deliberately not a CI gate. An advisory can be published against code nobody
+# touched, and a check that turns unrelated pull requests red teaches people to
+# merge past it. GitHub's advisory surface reports; this raises the fix.
+version: 2
+
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # One pull request for the routine noise, individual ones for anything
+    # that can plausibly break at runtime. A grouped patch bump that fails CI
+    # is still readable; a grouped major bump is a bisect.
+    groups:
+      backend-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "deps(backend)"
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      frontend-minor-and-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "deps(frontend)"
+
+  # The base images carry far more code than either requirements file, and it
+  # is the half nothing else here watches: `python:3.12-slim` and
+  # `nginx:1.27-alpine` are moving tags, so the CVE count in a deployed image
+  # is a function of when it was last built.
+  - package-ecosystem: docker
+    directories: ["/backend", "/frontend"]
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "deps(docker)"
+
+  # Actions run with a token against this repository. Pinned to major tags
+  # (`actions/checkout@v4`), which float, so this mostly catches the majors —
+  # the ones that would otherwise be found when a runner image drops support.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
