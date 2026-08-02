@@ -599,3 +599,38 @@ def test_supplier_endpoints_require_authentication(client):
 def test_rescore_is_not_shadowed_by_the_detail_route(auth_client):
     """``/suppliers/rescore`` must not be read as ``/suppliers/{id}``."""
     assert auth_client.post("/api/v1/suppliers/rescore").status_code == 200
+
+
+class TestTheCurrentPeriodIsAnIndianOne:
+    """Recency measures a gap back from "now", so "now" is a calendar question.
+
+    Read off a UTC clock, the current period is still the month that closed
+    until 05:30 IST on the 1st. That shortens every supplier's silence by a
+    whole period, and recency is the component that is meant to notice a
+    supplier who has stopped filing.
+    """
+
+    def test_it_follows_the_indian_clock(self, monkeypatch):
+        # 00:30 IST on 1 May 2026 — still 30 April in UTC.
+        monkeypatch.setattr(
+            scoring.gst_calendar, "today_ist", lambda: date(2026, 5, 1)
+        )
+        assert scoring.current_period() == "2026-05"
+
+    def test_a_supplier_last_seen_in_march_is_two_periods_silent_in_may(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(
+            scoring.gst_calendar, "today_ist", lambda: date(2026, 5, 1)
+        )
+        supplier = Supplier(
+            business_id=1,
+            gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            filing_history=[{"period": "2026-03", "matched": 4}],
+        )
+
+        score = scoring.score_supplier(supplier)
+        recency = next(c for c in score.components if c.name == "recency")
+
+        # Two, not the one a UTC reading of the same instant would give.
+        assert recency.detail == "Last filed 2 period(s) ago"

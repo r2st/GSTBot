@@ -44,7 +44,6 @@ from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import select
@@ -52,6 +51,7 @@ from sqlalchemy.orm import Session
 
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.supplier import RiskLevel, Supplier
+from app.services import gst_calendar
 
 ZERO = Decimal("0.00")
 
@@ -416,7 +416,13 @@ def observations_from_history(supplier: Supplier) -> list[Observation]:
 
 
 def current_period() -> str:
-    return datetime.now(UTC).strftime("%Y-%m")
+    """The period the recency component measures the gap back from, in India.
+
+    Read in UTC this is still last month until 05:30 IST on the 1st, which
+    shortens every supplier's silence by a period and quietly marks a supplier
+    who has stopped filing as more recent than they are.
+    """
+    return gst_calendar.period_of(gst_calendar.today_ist())
 
 
 def score_supplier(supplier: Supplier, *, as_of_period: str | None = None) -> SupplierScore:
