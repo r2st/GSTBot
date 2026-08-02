@@ -34,6 +34,7 @@ from enum import Enum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.sanitize import csv_safe
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
@@ -885,6 +886,12 @@ def to_csv(db: Session, business: Business, period: str, invoice_type: InvoiceTy
     ``\\r\\n`` line endings and quoting on every non-numeric field: this is
     opened in Excel far more often than it is parsed, and Excel is where a
     stray comma in a trade name silently shifts a row.
+
+    Being opened in Excel is also why every text column goes through
+    :func:`~app.core.sanitize.csv_safe`. The fields here are free text off an
+    uploaded invoice, and Excel runs a cell that starts with ``=``. The numeric
+    columns are deliberately not put through it: this application formats them,
+    and a credit note's leading ``-`` is a minus sign.
     """
     buffer = io.StringIO()
     writer = csv.DictWriter(
@@ -894,12 +901,12 @@ def to_csv(db: Session, business: Business, period: str, invoice_type: InvoiceTy
     for invoice in _invoices(db, business.id, period, invoice_type):
         writer.writerow(
             {
-                "invoice_number": invoice.invoice_number or "",
+                "invoice_number": csv_safe(invoice.invoice_number),
                 "invoice_date": to_portal_date(invoice.invoice_date) or "",
-                "counterparty_gstin": invoice.counterparty_gstin or "",
-                "counterparty_name": invoice.counterparty_name or "",
-                "place_of_supply": invoice.place_of_supply or "",
-                "hsn_code": invoice.hsn_code or "",
+                "counterparty_gstin": csv_safe(invoice.counterparty_gstin),
+                "counterparty_name": csv_safe(invoice.counterparty_name),
+                "place_of_supply": csv_safe(invoice.place_of_supply),
+                "hsn_code": csv_safe(invoice.hsn_code),
                 "tax_rate": str(invoice.tax_rate) if invoice.tax_rate is not None else "",
                 "taxable_value": str(_q(invoice.taxable_value or ZERO)),
                 "cgst": str(_q(invoice.cgst or ZERO)),

