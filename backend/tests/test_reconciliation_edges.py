@@ -20,6 +20,7 @@ from decimal import Decimal
 import pytest
 
 from app.models.gstr_return import GSTRReturn, ReturnType
+from app.models.invoice import InvoiceStatus
 from app.models.reconciliation_run import MatchCategory, ReconciliationStatus
 from app.models.supplier import Supplier
 from app.services import reconciliation
@@ -405,6 +406,112 @@ class TestAFailedRun:
             db_session.get(ReconciliationRun, good.id).status
             is ReconciliationStatus.COMPLETED
         )
+
+
+class TestAFailedRunLeavesNothingBehind:
+    """A run that dies partway through must not half-reconcile the books.
+
+    The tests above all fail inside ``match``, which is before anything has
+    been written. The dangerous failure is the later one: ``_apply_statuses``
+    has already rewritten every matched invoice's status, and
+    ``_score_suppliers`` rewrites suppliers one at a time. Committing that
+    beside a row saying the run failed leaves invoices reading MATCHED against
+    a statement nobody finished comparing them to — and the next ITC summary
+    reads those statuses as evidence.
+    """
+
+    @staticmethod
+    def _explode_after_matching(monkeypatch, where: str):
+        monkeypatch.setattr(
+            reconciliation,
+            where,
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("scoring exploded")),
+        )
+
+    def test_invoice_statuses_are_rolled_back(self, monkeypatch, db_session, business):
+        invoice = save(db_session, business.id, invoice_number="INV-1")
+        import_2b(db_session, business.id, [portal(invoice_number="INV-1")])
+        before = invoice.status
+        self._explode_after_matching(monkeypatch, "_score_suppliers")
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.status is ReconciliationStatus.FAILED
+        db_session.expire_all()
+        from app.models.invoice import Invoice
+
+        # Not MATCHED: _apply_statuses had already set that before the failure.
+        assert db_session.get(Invoice, invoice.id).status is before
+
+    def test_supplier_scores_are_rolled_back(self, monkeypatch, db_session, business):
+        supplier = Supplier(
+            business_id=business.id,
+            gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            compliance_score=90,
+            filing_history=[],
+        )
+        db_session.add(supplier)
+        db_session.commit()
+        save(db_session, business.id, invoice_number="INV-1")
+        import_2b(db_session, business.id, [portal(invoice_number="INV-1")])
+
+        # Fail *after* the scoring pass has written the supplier's history.
+        real_score = reconciliation._score_suppliers
+
+        def score_then_die(*args, **kwargs):
+            real_score(*args, **kwargs)
+            raise RuntimeError("exploded after scoring")
+
+        monkeypatch.setattr(reconciliation, "_score_suppliers", score_then_die)
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.status is ReconciliationStatus.FAILED
+        db_session.expire_all()
+        reloaded = db_session.get(Supplier, supplier.id)
+        assert reloaded.compliance_score == 90
+        assert reloaded.filing_history == []
+        assert reloaded.last_filed_period is None
+
+    def test_the_failure_receipt_still_survives_the_rollback(
+        self, monkeypatch, db_session, business
+    ):
+        """The rollback discards the run row too, so it has to be re-recorded.
+
+        A period with no row at all looks exactly like one nobody reconciled,
+        which is the ambiguity the row exists to remove.
+        """
+        save(db_session, business.id, invoice_number="INV-1")
+        import_2b(db_session, business.id, [portal(invoice_number="INV-1")])
+        self._explode_after_matching(monkeypatch, "_score_suppliers")
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        run_id = run.id
+
+        db_session.expire_all()
+        from app.models.reconciliation_run import ReconciliationRun
+
+        reloaded = db_session.get(ReconciliationRun, run_id)
+        assert reloaded is not None
+        assert reloaded.status is ReconciliationStatus.FAILED
+        assert "scoring exploded" in reloaded.error
+        assert reloaded.period == PERIOD
+        assert reloaded.business_id == business.id
+        assert reloaded.started_at is not None
+        assert reloaded.completed_at is not None
+
+    def test_a_successful_run_still_commits_its_statuses(self, db_session, business):
+        """The guard against over-correcting: the good path must still write."""
+        invoice = save(db_session, business.id, invoice_number="INV-1")
+        import_2b(db_session, business.id, [portal(invoice_number="INV-1")])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.status is ReconciliationStatus.COMPLETED
+        db_session.expire_all()
+        from app.models.invoice import Invoice
+
+        assert db_session.get(Invoice, invoice.id).status is InvoiceStatus.MATCHED
 
 
 # ---------------------------------------------------------------------------

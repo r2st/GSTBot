@@ -600,11 +600,12 @@ def run_reconciliation(
             f"No GSTR-2B has been imported for {period}. Import one before reconciling."
         )
 
+    started_at = datetime.now(UTC)
     run = ReconciliationRun(
         business_id=business_id,
         period=period,
         status=ReconciliationStatus.RUNNING,
-        started_at=datetime.now(UTC),
+        started_at=started_at,
     )
     db.add(run)
     db.flush()
@@ -636,13 +637,33 @@ def run_reconciliation(
         }
         run.status = ReconciliationStatus.COMPLETED
         run.completed_at = datetime.now(UTC)
+        db.commit()
     except Exception as exc:  # noqa: BLE001 - the run row is the error channel
         logger.exception("Reconciliation failed for business %s period %s", business_id, period)
-        run.status = ReconciliationStatus.FAILED
-        run.error = str(exc)[:2000]
-        run.completed_at = datetime.now(UTC)
+        # Throw away everything the half-finished run wrote. By the time this
+        # is reached ``_apply_statuses`` has already rewritten every matched
+        # invoice's status, and ``_score_suppliers`` may have rewritten some
+        # suppliers' filing history and compliance score but not others'.
+        # Committing that beside a row that says the run failed leaves the
+        # books asserting a reconciliation that never finished: invoices
+        # reading MATCHED against a 2B nobody finished comparing them to, and
+        # scores computed from a history only partly brought up to date.
+        #
+        # A failed run must be a no-op with a receipt, and the receipt is the
+        # only thing that survives — a period with no row at all looks like one
+        # nobody reconciled, which is the ambiguity this row exists to remove.
+        db.rollback()
+        run = ReconciliationRun(
+            business_id=business_id,
+            period=period,
+            status=ReconciliationStatus.FAILED,
+            started_at=started_at,
+            completed_at=datetime.now(UTC),
+            error=str(exc)[:2000],
+        )
+        db.add(run)
+        db.commit()
 
-    db.commit()
     db.refresh(run)
     return run
 
