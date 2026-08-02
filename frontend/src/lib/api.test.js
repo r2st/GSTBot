@@ -213,6 +213,78 @@ describe("api", () => {
     expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/reconciliation");
   });
 
+  // What the user reads when the answer did not come from the application.
+  // Both of these are invisible to a test that mocks an HTTP/1.1-shaped
+  // response, and both are what production actually serves.
+  describe("a response the application did not write", () => {
+    it("explains a 502 whose body is an HTML page from the edge", async () => {
+      // `JSON.parse` on this throws `Unexpected token '<'`, and that string is
+      // what would otherwise land in the error banner.
+      global.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: "",
+        text: async () => "<html><head><title>502</title></head></html>",
+      });
+
+      await expect(api.me()).rejects.toThrow(
+        "The server is having trouble (502). Please try again in a moment.",
+      );
+    });
+
+    it("never raises an empty message when the body carries no detail", async () => {
+      // HTTP/2 dropped the reason phrase, so `statusText` is "" in production.
+      global.fetch.mockResolvedValueOnce(jsonResponse({ error: "nope" }, { status: 500 }));
+
+      await expect(api.me()).rejects.toThrow("The server is having trouble (500)");
+    });
+
+    it("keeps the reason phrase when there is one", async () => {
+      global.fetch.mockResolvedValueOnce({
+        ...jsonResponse(null, { status: 503 }),
+        statusText: "Service Unavailable",
+      });
+
+      await expect(api.me()).rejects.toThrow("503 Service Unavailable");
+    });
+
+    it("still prefers the server's own detail over the generic message", async () => {
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "Business is inactive" }, { status: 403 }),
+      );
+
+      await expect(api.me()).rejects.toThrow("Business is inactive");
+    });
+
+    it("names a rate limit as one", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse({}, { status: 429 }));
+
+      await expect(api.me()).rejects.toThrow("Too many requests (429)");
+    });
+
+    it("reports a 2xx whose body is not JSON rather than throwing a parse error", async () => {
+      // A truncated response, or a proxy that replaced the body on the way
+      // back. The request succeeded; the answer is unusable, and saying so is
+      // more use than `Unexpected end of JSON input`.
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "",
+        text: async () => "{partial",
+      });
+
+      await expect(api.me()).rejects.toThrow(
+        "The server sent a response this app could not read (200).",
+      );
+    });
+
+    it("treats an empty body on a 2xx as no content rather than unreadable", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse(null));
+
+      await expect(api.me()).resolves.toBeNull();
+    });
+  });
+
   // downloadExport does not go through `request` — it needs the raw response
   // to get at the blob and the Content-Disposition — so it carries its own
   // copy of the auth and error handling, and that copy needs its own tests.
@@ -277,6 +349,28 @@ describe("api", () => {
       });
 
       await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow("Bad Gateway");
+    });
+
+    it("still says something when the error body is empty over HTTP/2", async () => {
+      // The reason phrase does not exist in HTTP/2 or HTTP/3, so `statusText`
+      // is "" against the server this actually deploys behind. Falling back to
+      // it alone renders an error banner with nothing in it.
+      global.fetch.mockResolvedValueOnce(fileResponse(null, { status: 502 }));
+
+      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow(
+        "The server is having trouble (502)",
+      );
+    });
+
+    it("does not surface a JSON parse error when the edge returns HTML", async () => {
+      global.fetch.mockResolvedValueOnce({
+        ...fileResponse(null, { status: 502 }),
+        text: async () => "<html><body>502 Bad Gateway</body></html>",
+      });
+
+      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow(
+        "The server is having trouble (502)",
+      );
     });
 
     it("drops a token the export endpoint rejected", async () => {

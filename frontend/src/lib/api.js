@@ -35,10 +35,63 @@ async function request(path, { method = "GET", body, form, auth = true } = {}) {
   if (res.status === 204) return null;
 
   const text = await res.text();
-  const data = text ? JSON.parse(text) : null;
+  const { data, readable } = readBody(text);
 
-  if (!res.ok) throw new Error(errorMessage(data, res.statusText));
+  if (!res.ok) {
+    throw new Error(readable ? errorMessage(data, statusMessage(res)) : statusMessage(res));
+  }
+  if (!readable) throw new Error(unreadableMessage(res));
   return data;
+}
+
+/**
+ * Parse a response body, reporting failure rather than throwing.
+ *
+ * Not every response comes from the application. A 502 from Caddy, a captive
+ * portal, or a corporate middlebox all answer with HTML, and `JSON.parse` on
+ * that throws a SyntaxError whose message is `Unexpected token '<'` — which is
+ * what the user then reads in the error banner, on the one occasion they most
+ * need to be told the server is unreachable.
+ *
+ * `readable` distinguishes "the body was empty" (legitimate: a 201 with no
+ * content) from "the body was not JSON" (the server is not who we think).
+ */
+function readBody(text) {
+  if (!text) return { data: null, readable: true };
+  try {
+    return { data: JSON.parse(text), readable: true };
+  } catch {
+    return { data: null, readable: false };
+  }
+}
+
+/**
+ * A last-resort description of a response, which is never the empty string.
+ *
+ * `res.statusText` cannot carry this alone. HTTP/2 and HTTP/3 removed the
+ * reason phrase from the wire format, so `statusText` is always `""` there —
+ * and HTTP/2 and HTTP/3 are exactly what production serves. Using it as the
+ * fallback means a body with no `detail` renders an error banner with nothing
+ * in it, while every test that mocks an HTTP/1.1-shaped response passes.
+ */
+function statusMessage(res) {
+  const code = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
+  if (res.status >= 500) {
+    return `The server is having trouble (${code}). Please try again in a moment.`;
+  }
+  if (res.status === 429) {
+    return `Too many requests (${code}). Please wait a moment and try again.`;
+  }
+  if (res.status === 401 || res.status === 403) {
+    return `You are not signed in (${code}). Please sign in again.`;
+  }
+  return `Request failed (${code}).`;
+}
+
+/** A 2xx whose body was not JSON: the request worked, the answer did not. */
+function unreadableMessage(res) {
+  const code = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
+  return `The server sent a response this app could not read (${code}).`;
 }
 
 /** Flatten whatever FastAPI put in `detail` into one readable line. */
@@ -182,8 +235,11 @@ export const api = {
     const res = await fetch(api.exportUrl(returnType, extension, period), { headers });
     if (res.status === 401) setToken(null);
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(errorMessage(text ? JSON.parse(text) : null, res.statusText));
+      // Same two hazards as `request`: an HTML error page from the edge must
+      // not surface as a JSON parse error, and `statusText` is empty over
+      // HTTP/2 so it cannot be the fallback on its own.
+      const { data, readable } = readBody(await res.text());
+      throw new Error(readable ? errorMessage(data, statusMessage(res)) : statusMessage(res));
     }
     return {
       blob: await res.blob(),
