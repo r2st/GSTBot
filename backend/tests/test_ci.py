@@ -70,9 +70,10 @@ def triggers(workflow: dict) -> dict:
 
 class TestTheWorkflowIsWiredUp:
     def test_it_gates_the_branch_that_gets_deployed(self, workflow):
-        # deploy.sh takes origin/main by default. A workflow that only ran on
-        # pull requests would leave the branch the server installs from as the
-        # one thing nothing checks.
+        # main is what reaches the server: deploy.sh releases the tree rsync'd
+        # from it, and fetches origin/main when the box can reach the remote.
+        # A workflow that only ran on pull requests would leave the branch the
+        # server installs from as the one thing nothing checks.
         on = triggers(workflow)
         assert "main" in on["push"]["branches"]
         assert "main" in on["pull_request"]["branches"]

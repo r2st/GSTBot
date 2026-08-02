@@ -876,6 +876,17 @@ class TestTheDeployScript:
         # whole site. Cheaper to notice here.
         assert commands.index("index.html") < commands.index("systemctl restart")
 
+    def test_it_installs_the_backend_from_the_lock(self, commands):
+        # The mirror of `npm ci` for Python. requirements.txt is floors, so
+        # installing from it resolves whatever PyPI published that morning and
+        # the release is not the thing CI ran. --require-hashes is what makes
+        # the pin an assertion rather than a preference.
+        assert "requirements.lock" in commands
+        assert "--require-hashes" in commands
+        assert not re.search(r"-r \S*requirements\.txt", commands), (
+            "a release must not resolve the floors; that is what the lock is for"
+        )
+
     def test_it_installs_the_frontend_from_the_lockfile(self, commands):
         # `npm install` would resolve versions that were never tested. The
         # comment above that line in the script says so and names it, so the

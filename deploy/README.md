@@ -105,8 +105,13 @@ rsync -az --delete --no-owner --no-group \
 
 # on the server
 python3.12 -m venv /opt/GSTBot/.venv
-/opt/GSTBot/.venv/bin/pip install -r /opt/GSTBot/backend/requirements.txt
+/opt/GSTBot/.venv/bin/pip install --require-hashes -r /opt/GSTBot/backend/requirements.lock
 ```
+
+`requirements.lock`, not `requirements.txt`. The latter is floors (`>=`), so
+installing from it resolves whatever PyPI published that morning; the lock is
+the exact set, with hashes, and is the only thing a release installs. It is
+compiled from the floors on a workstation — see "Dependencies" below.
 
 `--no-owner --no-group` matters. Without them rsync running as root recreates
 the *sender's* numeric ids, and a macOS workstation's `501:staff` is not a user
@@ -173,36 +178,79 @@ fails and Caddy retries with a backoff.
 
 ## Releasing
 
+A release is two commands: push the tree, then run the script.
+
 ```sh
-/opt/GSTBot/deploy/deploy.sh              # origin/main
-/opt/GSTBot/deploy/deploy.sh v1.2.0       # a tag or sha
+# from a workstation, in the repository root — the step-4 rsync
+rsync -az --delete --no-owner --no-group \
+    --exclude .venv --exclude node_modules --exclude dist \
+    --exclude __pycache__ --exclude .pytest_cache \
+    -e "ssh -i path/to/hetzner_deploy_ed25519" \
+    ./ root@89.167.8.178:/opt/GSTBot/
+
+# on the server
+/opt/GSTBot/deploy/deploy.sh
 ```
 
-The script fetches, installs dependencies, builds the frontend, migrates,
+The script installs the locked dependencies, builds the frontend, migrates,
 restarts the services and then checks readiness on the bridge and
 `/health/live` through Caddy. Anything that fails stops the release.
 
-**Its first step does not work on this box yet.** `/opt/GSTBot` is a real
-checkout — the tree in step 4 is rsync'd with its `.git` — but the repository
-is private and the box holds no credential, so `git fetch origin` answers 401
-and the script stops there, before it has changed anything. Until a read-only
-deploy key is installed for `r2st/GSTBot`, release by repeating the step-4
-rsync and then running the rest of what the script does:
+**It does not fetch, because this box cannot.** The repository is private and
+the box holds no credential, so `git fetch origin` answers 401. What ships is
+therefore the tree in `/opt/GSTBot` exactly as rsync left it, and the script
+says so on the way past:
 
-```sh
-/opt/GSTBot/.venv/bin/pip install -r /opt/GSTBot/backend/requirements.txt
-( cd /opt/GSTBot/frontend && npm ci --no-audit --no-fund \
-    && NODE_OPTIONS=--max-old-space-size=768 npm run build )
-systemctl restart gstbot-migrate.service
-systemctl restart gstbot-api.service gstbot-web.service gstbot-worker.service
+```
+==> Selecting the release source
+No reachable remote — releasing the tree already in /opt/GSTBot
+Deploying ff2412c
 ```
 
-Adding the deploy key is the better end state: it makes the revision on the box
-a thing you can name, and rollback below assumes it.
+The revision is still a real one: the rsync copies `.git` along with
+everything else, so `HEAD` on the box is the workstation's `HEAD`. If the tree
+had uncommitted changes when it was pushed, the line reads `ff2412c-dirty` and
+a warning goes with it — which is the whole reason to release from a clean
+checkout of `main`.
+
+Installing a read-only deploy key for `r2st/GSTBot` in
+`/root/.ssh` is still the better end state, and nothing has to change here to
+take it: the script tries the fetch first and only falls back when it fails.
+With a key, `deploy.sh` releases `origin/main` on its own and
+
+```sh
+/opt/GSTBot/deploy/deploy.sh v1.2.0       # a tag or sha
+```
+
+starts working — an explicit ref is the one thing rsync cannot substitute for,
+and the script refuses it with a message rather than releasing the wrong tree.
+The rollback below assumes it too.
 
 It builds in place rather than blue/green. On a 4 GB box shared with three
 other products, keeping N releases of `node_modules` and a second copy of the
 tree costs more than the seconds of downtime it removes.
+
+## Dependencies
+
+`backend/requirements.txt` holds floors (`>=`) and is what CI installs — that
+is deliberate, and it is what makes a Dependabot bump self-verifying. The
+server installs `backend/requirements.lock` instead: the same set resolved to
+exact versions, with hashes, so a release cannot quietly differ from the one
+the suite ran against.
+
+Recompile the lock on a workstation whenever `requirements.txt` changes, and
+commit both in the same change:
+
+```sh
+uv pip compile backend/requirements.txt --universal --python-version 3.12 \
+    --generate-hashes -o backend/requirements.lock
+```
+
+`--python-version 3.12` is the interpreter on the server, not the one on the
+workstation; `--universal` keeps the markers that let the same file resolve on
+both. `backend/tests/test_requirements.py` fails if a floor is raised without
+the lock being recompiled, or if the lock stops being a complete hash-checked
+closure — the two ways this arrangement rots.
 
 ## Operating
 
@@ -242,6 +290,9 @@ in both directions, so it works — but it is a decision to take with the data i
 front of you, not something a deploy script should do while an incident is in
 progress.
 
+Until the deploy key exists, naming a sha does not work — see "Releasing" — so
+a rollback is the same two commands as a release, run from a workstation that
+has checked out the revision being rolled back to.
 ## What is deliberately not here
 
 **`gstbot-beat.service`.** Celery beat runs a schedule, and there is no
