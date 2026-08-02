@@ -12,6 +12,9 @@ Redis would test Celery's transport rather than this code.
 """
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import pytest
 
 from app.celery_app import (
@@ -21,6 +24,8 @@ from app.celery_app import (
     _clear_task_correlation_id,
 )
 from app.core.logging import bind_correlation_id, get_correlation_id, set_correlation_id
+
+BACKEND = Path(__file__).resolve().parent.parent
 
 
 @pytest.fixture(autouse=True)
@@ -172,3 +177,139 @@ class TestCeleryConfiguration:
         from app.celery_app import celery_app
 
         assert celery_app.conf.task_acks_late is True
+
+
+class TestTheWorkerSurvivesItsOwnUptime:
+    """A worker process is long-lived, and everything that leaks in it is
+    permanent. These are the three settings that bound that."""
+
+    def test_it_retries_the_broker_it_started_before(self):
+        # Explicit, not inherited. Unset, Celery decides the first connection's
+        # retry behaviour from broker_connection_retry, and 6.0 drops that
+        # fallback — so the version upgrade would silently change what a worker
+        # does when it starts while Redis is still coming up. Which it does:
+        # the unit is ordered After=redis-server.service but does not require
+        # it, and the alternative to retrying is a unit that burns its five
+        # restarts before Redis has finished booting.
+        from app.celery_app import celery_app
+
+        assert celery_app.conf.broker_connection_retry_on_startup is True
+
+    def test_a_child_is_recycled_before_it_grows_without_bound(self):
+        # Parsing runs pdf extraction, PIL and tesseract in-process. Those
+        # fragment rather than return, so a child that never recycles is
+        # eventually OOM-killed — and it is killed *mid-invoice*, taking a
+        # user's upload with it, rather than between tasks.
+        from app.celery_app import celery_app
+
+        limit = celery_app.conf.worker_max_tasks_per_child
+        assert limit is not None, "children are never recycled"
+        assert 0 < limit <= 10_000, "a limit this high is not a limit"
+
+    def test_the_recycle_limit_comes_from_the_environment(self):
+        """The right number depends on the box, and the deployment that needs
+        to change it is the one already having the problem.
+
+        In a subprocess because the setting is read at import time, so this is
+        the only way to see a value other than the default — and comparing the
+        conf against ``settings`` in-process would pass just as happily against
+        a hardcoded 200, which is what the default happens to be.
+        """
+        import os
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "from app.celery_app import celery_app;"
+                "print(celery_app.conf.worker_max_tasks_per_child)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=str(BACKEND),
+            env={**os.environ, "CELERY_MAX_TASKS_PER_CHILD": "7"},
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip() == "7", (
+            "CELERY_MAX_TASKS_PER_CHILD did not reach the worker config"
+        )
+
+    def test_a_lost_child_does_not_requeue_its_task(self):
+        """Pinned as a decision, not an oversight.
+
+        Requeueing on worker loss sounds strictly safer and is not: redelivery
+        after a lost child does not count against max_retries, so an invoice
+        that reliably exhausts memory would go back on the queue forever and
+        take the worker down each time round. Losing that one task leaves the
+        invoice visibly unparsed and re-extractable.
+        """
+        from app.celery_app import celery_app
+
+        assert not celery_app.conf.task_reject_on_worker_lost
+
+
+class TestTheWorkerReleasesItsPools:
+    """The analogue of the API's lifespan teardown, and it matters more here:
+    TimeoutStopSec=300 lets a long parse finish, so a redeployed worker and the
+    outgoing one hold connections concurrently for up to five minutes."""
+
+    @pytest.fixture()
+    def release(self, monkeypatch):
+        from app import celery_app as module
+
+        called: list[str] = []
+
+        def run(*, redis_error=None, dispose_error=None):
+            def close_redis():
+                called.append("redis")
+                if redis_error is not None:
+                    raise redis_error
+
+            def dispose():
+                called.append("engine")
+                if dispose_error is not None:
+                    raise dispose_error
+
+            monkeypatch.setattr(module, "redis_close", close_redis)
+            monkeypatch.setattr(module.engine, "dispose", dispose)
+            module._release_pools()
+            return called
+
+        return run
+
+    def test_it_is_wired_to_the_shutdown_signal(self):
+        # Defining the handler is not connecting it.
+        from celery.signals import worker_shutdown
+
+        assert worker_shutdown.receivers, "nothing runs on worker shutdown"
+
+    def test_the_database_pool_is_disposed(self, release):
+        assert "engine" in release()
+
+    def test_the_redis_client_is_closed(self, release):
+        assert "redis" in release()
+
+    @pytest.mark.parametrize(
+        ("kwargs", "expected"),
+        [
+            ({"redis_error": OSError("broken pipe")}, "Redis client did not close"),
+            ({"dispose_error": OSError("gone")}, "Database pool did not dispose"),
+        ],
+    )
+    def test_a_failure_to_release_is_logged_not_raised(
+        self, release, caplog, kwargs, expected
+    ):
+        # An exception out of a shutdown signal is a non-zero exit, and systemd
+        # records that as a failed unit — so a routine restart would page
+        # someone about a process that was already leaving.
+        with caplog.at_level(logging.WARNING):
+            release(**kwargs)
+
+        assert expected in caplog.text
+
+    def test_one_failing_release_does_not_skip_the_other(self, release):
+        assert "engine" in release(redis_error=OSError("broken pipe"))

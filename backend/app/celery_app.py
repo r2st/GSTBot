@@ -20,9 +20,11 @@ from celery.signals import (
     setup_logging,
     task_postrun,
     task_prerun,
+    worker_shutdown,
 )
 
 from app.core.config import settings
+from app.core.database import engine
 from app.core.logging import (
     bind_correlation_id,
     configure_logging,
@@ -30,6 +32,7 @@ from app.core.logging import (
     new_correlation_id,
     set_correlation_id,
 )
+from app.core.redis_client import close as redis_close
 
 celery_app = Celery(
     "gstbot",
@@ -52,6 +55,29 @@ celery_app.conf.update(
     # Free-tier models rate-limit, so a retry a minute later usually succeeds.
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    # Explicit rather than inherited. Left unset, Celery falls back to
+    # broker_connection_retry to decide whether to retry the *first* broker
+    # connection, and 6.0 drops that fallback. The behaviour it decides is the
+    # one that matters here: the unit is ordered After=redis-server.service but
+    # does not require it, so a worker starting while Redis is still coming up
+    # is ordinary, and the alternative to retrying is a unit that exits and
+    # takes its five restarts before Redis has finished booting.
+    broker_connection_retry_on_startup=True,
+    # Recycle the child after this many tasks. Parsing runs pdf text extraction,
+    # PIL, and tesseract in-process — C libraries whose arenas fragment rather
+    # than return, so a worker that never recycles grows for as long as it runs
+    # and is eventually OOM-killed mid-invoice.
+    worker_max_tasks_per_child=settings.celery_max_tasks_per_child,
+    # Deliberately *not* set: task_reject_on_worker_lost. It covers a narrower
+    # case than acks_late does. Killing the whole worker drops the broker
+    # connection, so the unacked message goes back on the queue either way; this
+    # setting is only about a prefork *child* dying while the parent lives,
+    # which is the OOM killer's usual choice because the child is the one
+    # holding the decoded PDF. Requeueing there would put an invoice that
+    # reliably exhausts memory back on the queue forever, since redelivery after
+    # worker loss does not count against max_retries. Failing that one task
+    # leaves the invoice visibly unparsed and re-extractable from the UI, which
+    # is the better of the two failures.
 )
 
 CORRELATION_HEADER = "correlation_id"
@@ -98,6 +124,35 @@ def _clear_task_correlation_id(**_: Any) -> None:
     an unrelated upload.
     """
     set_correlation_id("")
+
+
+@worker_shutdown.connect
+def _release_pools(**_: Any) -> None:
+    """Drop the database and Redis pools on the way out.
+
+    The same reasoning as the API's lifespan teardown, and it matters more here:
+    the worker unit allows TimeoutStopSec=300 so a long parse can finish, which
+    is five minutes during which a redeployed worker's connections and the
+    outgoing one's are both live. Tasks open their own sessions from the same
+    module-level engine, so it is this process's pool that is holding them.
+
+    Nothing here may raise. An exception out of a shutdown signal is a non-zero
+    exit, which systemd records as a failed unit — turning an ordinary stop into
+    something that looks like a crash.
+    """
+    logger = logging.getLogger(__name__)
+
+    try:
+        redis_close()
+    except Exception as exc:  # noqa: BLE001 - shutdown is not a place to fail
+        logger.warning("Redis client did not close cleanly: %s", exc)
+
+    try:
+        engine.dispose()
+    except Exception as exc:  # noqa: BLE001 - shutdown is not a place to fail
+        logger.warning("Database pool did not dispose cleanly: %s", exc)
+
+    logger.info("Worker pools released")
 
 
 logging.getLogger(__name__).debug("Celery configured with correlation propagation")

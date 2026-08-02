@@ -101,6 +101,12 @@ class Settings(BaseSettings):
     # being handed to a worker. Intended for single-process deployments and
     # tests; production runs workers and leaves this on.
     celery_enabled: bool = True
+    # Tasks a worker child handles before it is replaced. Parsing links C
+    # libraries (pdf extraction, PIL, tesseract) whose allocations fragment
+    # rather than return, so an un-recycled child grows until it is OOM-killed
+    # mid-invoice. Low enough to bound that, high enough that fork cost stays
+    # noise next to a model call.
+    celery_max_tasks_per_child: int = Field(default=200, ge=1, le=100_000)
 
     # ---- Rate limiting ----
     rate_limit_enabled: bool = True
