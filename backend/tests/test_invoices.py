@@ -1,12 +1,13 @@
 """The invoice API: upload, tenancy, dedup, plan limits, review."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from app.models.business import BusinessPlan
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.supplier import Supplier
+from app.services import invoice_service
 from tests.conftest import BUSINESS_GSTIN, SUPPLIER_GSTIN_OTHER_STATE, SUPPLIER_GSTIN_SAME_STATE
 
 
@@ -188,6 +189,59 @@ def test_soft_deleted_invoices_do_not_count_against_the_plan(
     auth_client.delete(f"/api/v1/invoices/{first.json()['invoice']['id']}")
     assert upload(auth_client, "Invoice No: C-2\nTotal Amount: 100.00",
                   name="c2.txt").status_code == 201
+
+
+class TestThePlanMonthIsTheIndianMonth:
+    """A business's allowance resets when *their* month rolls over.
+
+    Counted against UTC midnight, the reset is 05:30 IST on the 1st: a business
+    that used up October is told to upgrade for five and a half hours of a
+    November they have already entered, and whatever they do upload in that
+    window is charged to the month that closed.
+    """
+
+    def test_the_month_starts_at_midnight_in_india(self):
+        start, end = invoice_service.month_bounds("2026-05")
+
+        # 00:00 IST on 1 May is 18:30 UTC on 30 April.
+        assert start == datetime(2026, 4, 30, 18, 30, tzinfo=UTC)
+        assert end == datetime(2026, 5, 31, 18, 30, tzinfo=UTC)
+
+    def test_december_rolls_into_january(self):
+        start, end = invoice_service.month_bounds("2026-12")
+
+        assert start == datetime(2026, 11, 30, 18, 30, tzinfo=UTC)
+        assert end == datetime(2026, 12, 31, 18, 30, tzinfo=UTC)
+
+    def test_the_bounds_are_utc_because_the_stored_timestamps_are(self):
+        """Not merely cosmetic — an IST-aware bound is wrong on SQLite.
+
+        SQLAlchemy's SQLite DateTime formats whatever wall clock the value
+        carries and drops the offset, so handing the query 00:00+05:30 would
+        compare "00:00" against UTC-stored rows: right on Postgres, five and a
+        half hours out in the suite, and nothing would catch it.
+        """
+        start, end = invoice_service.month_bounds("2026-05")
+        assert start.utcoffset() == timedelta(0)
+        assert end.utcoffset() == timedelta(0)
+
+    def test_an_upload_just_after_midnight_ist_counts_against_the_new_month(
+        self, db_session, business
+    ):
+        db_session.add(
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.PURCHASE,
+                status=InvoiceStatus.PARSED,
+                # 00:30 IST on 1 May 2026 — still 30 April in UTC.
+                created_at=datetime(2026, 4, 30, 19, 0, tzinfo=UTC),
+                updated_at=datetime(2026, 4, 30, 19, 0, tzinfo=UTC),
+            )
+        )
+        db_session.commit()
+
+        assert invoice_service.monthly_usage(db_session, business.id, "2026-05") == 1
+        assert invoice_service.monthly_usage(db_session, business.id, "2026-04") == 0
 
 
 # --------------------------------------------------------------------------

@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.models.business import Business
 from app.models.invoice import Invoice, InvoiceSource, InvoiceStatus, InvoiceType
 from app.models.supplier import Supplier
+from app.services import gst_calendar
 from app.services import gstin as gstin_service
 from app.services.invoice_parser import ParsedInvoice, parse_invoice
 
@@ -40,8 +41,44 @@ class DuplicateInvoice(RuntimeError):
 
 
 def month_of(moment: datetime | None = None) -> str:
-    """The current filing period as ``YYYY-MM``."""
-    return (moment or datetime.now(UTC)).strftime("%Y-%m")
+    """The current filing period as ``YYYY-MM``, in India.
+
+    This is the period the dashboard, the ITC screen and the filing endpoints
+    fall back to when the caller names none, so it is a question about the
+    Indian calendar and not about the server's. A box on UTC still reads last
+    month until 05:30 IST on the 1st, which would open the new month's
+    dashboard on the month that has just closed.
+
+    An explicit *moment* is converted rather than read as-is, so a caller that
+    passes a UTC instant gets the Indian date it fell on.
+    """
+    return gst_calendar.period_of(
+        gst_calendar.ist_date(moment) if moment else gst_calendar.today_ist()
+    )
+
+
+def month_bounds(period: str) -> tuple[datetime, datetime]:
+    """The instants a ``YYYY-MM`` period begins and ends, as UTC.
+
+    The boundary is midnight *in India* — that is when a business's month rolls
+    over and when their plan's allowance should reset — but it is returned in
+    UTC because that is what the stored timestamps are.
+
+    Converting rather than handing an IST-aware value straight to the query is
+    load-bearing. On Postgres a ``timestamptz`` comparison normalises either
+    one correctly; SQLAlchemy's SQLite type formats whatever wall clock the
+    value carries and drops the offset, so an IST-aware bound would compare
+    ``00:00`` against UTC-stored rows and be five and a half hours out — right
+    in production, wrong in the suite, which is the split nothing catches.
+    """
+    year, month = (int(part) for part in period.split("-"))
+    start = datetime(year, month, 1, tzinfo=gst_calendar.IST)
+    end = (
+        datetime(year + 1, 1, 1, tzinfo=gst_calendar.IST)
+        if month == 12
+        else datetime(year, month + 1, 1, tzinfo=gst_calendar.IST)
+    )
+    return start.astimezone(UTC), end.astimezone(UTC)
 
 
 def monthly_usage(db: Session, business_id: int, period: str | None = None) -> int:
@@ -50,14 +87,15 @@ def monthly_usage(db: Session, business_id: int, period: str | None = None) -> i
     Counts by upload month rather than by invoice date, because the plan sells
     processing capacity — a business catching up on last quarter's paperwork is
     using this month's capacity to do it.
+
+    The month is the Indian one. Counted against UTC midnight instead, a
+    business that used up October's allowance stays blocked until 05:30 IST on
+    1 November — they are told to upgrade on a day their plan has already
+    reset — and the invoices they upload in those hours are charged to the
+    month that closed.
     """
     period = period or month_of()
-    start = datetime.strptime(period, "%Y-%m").replace(tzinfo=UTC)
-    end = (
-        start.replace(year=start.year + 1, month=1)
-        if start.month == 12
-        else start.replace(month=start.month + 1)
-    )
+    start, end = month_bounds(period)
     return int(
         db.scalar(
             select(func.count(Invoice.id)).where(
