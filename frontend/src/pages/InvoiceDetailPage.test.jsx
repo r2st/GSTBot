@@ -232,4 +232,95 @@ describe("InvoiceDetailPage", () => {
     await renderPage(invoice({ warnings: ["No valid supplier GSTIN found"] }));
     expect(screen.getByText("No valid supplier GSTIN found")).toBeInTheDocument();
   });
+
+  describe("re-extracting from the stored file", () => {
+    it("replaces the form with what the second pass found", async () => {
+      // The point of the button: the first extraction read the wrong GSTIN,
+      // the user re-runs it, and the form must show the new value rather than
+      // the stale one they were about to correct by hand.
+      const user = userEvent.setup();
+      await renderPage();
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse(invoice({ counterparty_gstin: "29AAGCB7383J1Z4", parsed_with: "model" })),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Re-extract" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("Re-extracted from the stored file.")).toBeInTheDocument(),
+      );
+      const [url, options] = global.fetch.mock.calls.at(-1);
+      expect(String(url)).toContain("/invoices/42/reparse");
+      expect(options.method).toBe("POST");
+    });
+
+    it("surfaces a failure instead of leaving the button spinning", async () => {
+      const user = userEvent.setup();
+      await renderPage();
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "Original file is no longer stored" }, { status: 409 }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Re-extract" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent("Original file is no longer stored"),
+      );
+      // busy must be cleared in `finally`, or the only way to retry is a reload.
+      expect(screen.getByRole("button", { name: "Re-extract" })).toBeEnabled();
+    });
+  });
+
+  describe("deleting the invoice", () => {
+    it("asks before removing anything", async () => {
+      // Deleting an invoice changes a filed period's figures, so the confirm
+      // is the guard rail and a stray click must not get past it.
+      const user = userEvent.setup();
+      const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+      await renderPage();
+      const callsBefore = global.fetch.mock.calls.length;
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      expect(confirm).toHaveBeenCalled();
+      expect(global.fetch.mock.calls).toHaveLength(callsBefore);
+      expect(screen.getByLabelText("Counterparty GSTIN")).toBeInTheDocument();
+    });
+
+    it("deletes and returns to the list once confirmed", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      await renderPage();
+      global.fetch.mockResolvedValueOnce(jsonResponse({}, { status: 204 }));
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      await waitFor(() => {
+        const [url, options] = global.fetch.mock.calls.at(-1);
+        expect(String(url)).toContain("/invoices/42");
+        expect(options.method).toBe("DELETE");
+      });
+      // Staying on the detail page for a record that no longer exists would
+      // show a form whose every save 404s.
+      await waitFor(() =>
+        expect(screen.queryByLabelText("Counterparty GSTIN")).not.toBeInTheDocument(),
+      );
+    });
+
+    it("keeps the user on the page when the delete is refused", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      await renderPage();
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "Invoice is part of a filed return" }, { status: 409 }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("alert")).toHaveTextContent("Invoice is part of a filed return"),
+      );
+      expect(screen.getByLabelText("Counterparty GSTIN")).toBeInTheDocument();
+    });
+  });
 });

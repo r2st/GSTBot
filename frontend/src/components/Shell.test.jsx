@@ -1,8 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AuthProvider } from "../hooks/useAuth";
+import { getToken, setToken } from "../lib/api";
 import Shell from "./Shell";
 
 function jsonResponse(body, { status = 200 } = {}) {
@@ -148,5 +149,82 @@ describe("Shell", () => {
       "aria-current",
       "page",
     );
+  });
+
+  describe("the business it says you are signed in as", () => {
+    // A stored token is what makes AuthProvider fetch /auth/me at all; without
+    // one it settles on anonymous and the identity block never renders.
+    function signedInAs(business) {
+      setToken("stored-token");
+      global.fetch = vi
+        .fn()
+        .mockResolvedValue(jsonResponse({ id: 1, email: "owner@acme.in", business }));
+    }
+
+    it("prefers the trade name over the legal name", async () => {
+      // A business is known by the name on its signboard, not the one on its
+      // registration certificate. Showing "Private Limited" to someone who
+      // has three firms reads as the wrong account being open.
+      signedInAs({
+        gstin: "27AAPFU0939F1ZV",
+        legal_name: "Umang Traders Private Limited",
+        trade_name: "Umang Traders",
+      });
+      renderShell();
+
+      expect(await screen.findByText("Umang Traders")).toBeInTheDocument();
+      expect(screen.queryByText("Umang Traders Private Limited")).not.toBeInTheDocument();
+    });
+
+    it("falls back to the legal name when no trade name is registered", async () => {
+      signedInAs({ gstin: "27AAPFU0939F1ZV", legal_name: "Umang Traders Private Limited" });
+      renderShell();
+
+      expect(await screen.findByText("Umang Traders Private Limited")).toBeInTheDocument();
+    });
+
+    it("shows the GSTIN alongside it", async () => {
+      // One login can hold several registrations, and the state code is the
+      // only thing that tells two of them apart.
+      signedInAs({ gstin: "27AAPFU0939F1ZV", legal_name: "Umang Traders Private Limited" });
+      renderShell();
+
+      expect(await screen.findByText("27AAPFU0939F1ZV")).toBeInTheDocument();
+    });
+
+    it("shows nothing at all for a user with no business yet", async () => {
+      // Registration creates the user before the GSTIN is verified, so this
+      // is a real state and not just a defensive guard.
+      signedInAs(null);
+      const { container } = renderShell();
+
+      await screen.findByRole("button", { name: "Sign out" });
+      expect(container.querySelector(".shell-business")).toBeNull();
+    });
+  });
+
+  describe("signing out", () => {
+    it("drops the token and leaves for the login page", async () => {
+      setToken("stored-token");
+      const user = userEvent.setup();
+      render(
+        <MemoryRouter initialEntries={["/invoices"]}>
+          <AuthProvider>
+            <Routes>
+              <Route path="/login" element={<p>Login screen</p>} />
+              <Route path="*" element={<Shell><p>Page body</p></Shell>} />
+            </Routes>
+          </AuthProvider>
+        </MemoryRouter>,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Sign out" }));
+
+      // Both halves matter: clearing the token without navigating leaves the
+      // signed-out user staring at a page they can no longer load, and
+      // navigating without clearing it puts them back in on the next refresh.
+      await waitFor(() => expect(screen.getByText("Login screen")).toBeInTheDocument());
+      expect(getToken()).toBeNull();
+    });
   });
 });

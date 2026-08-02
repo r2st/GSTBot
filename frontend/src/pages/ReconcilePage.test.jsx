@@ -348,4 +348,79 @@ describe("ReconcilePage", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/still be downloading/);
   });
+
+  it("reloads the summary when the file was for the period on screen", async () => {
+    // The period did not change, so nothing re-renders on its own — the page
+    // has to refetch, or the freshly imported statement is invisible until a
+    // manual reload.
+    const user = userEvent.setup();
+    const gstr2bGets = [];
+    // The page opens on the current month, so the file has to come back
+    // stamped with whatever that is for the periods to agree.
+    const onScreen = () => screen.getByLabelText(/Period/).value;
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const ok = (body) => ({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => JSON.stringify(body),
+      });
+      if (options.method === "POST") return ok(imported({ period: onScreen() }));
+      if (String(url).includes("/gstr2b/")) {
+        gstr2bGets.push(url);
+        // Not imported on the first look, imported afterwards.
+        return gstr2bGets.length === 1
+          ? { ok: false, status: 404, statusText: "Not Found", text: async () => "{}" }
+          : ok(imported({ period: onScreen() }));
+      }
+      return { ok: false, status: 404, statusText: "Not Found", text: async () => "{}" };
+    });
+    renderPage();
+    await screen.findByText(/No GSTR-2B imported yet/);
+    const before = onScreen();
+
+    const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
+    await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
+
+    await waitFor(() => expect(gstr2bGets.length).toBeGreaterThan(1));
+    expect(screen.getByLabelText(/Period/)).toHaveValue(before);
+  });
+
+  it("explains a rejected import rather than reporting a silent success", async () => {
+    const user = userEvent.setup();
+    global.fetch = vi.fn(async (url, options = {}) => {
+      if (options.method === "POST") {
+        return {
+          ok: false,
+          status: 422,
+          statusText: "Unprocessable Entity",
+          text: async () =>
+            JSON.stringify({ detail: "That file is a GSTR-2A, not a GSTR-2B" }),
+        };
+      }
+      return { ok: false, status: 404, statusText: "Not Found", text: async () => "{}" };
+    });
+    renderPage();
+    await screen.findByText(/No GSTR-2B imported yet/);
+
+    const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
+    await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "That file is a GSTR-2A, not a GSTR-2B",
+    );
+  });
+
+  it("says a category is empty rather than showing a bare table", async () => {
+    // A clean run has no duplicates, and an empty table under the "Duplicates"
+    // heading reads as a page that failed to load.
+    const user = userEvent.setup();
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage();
+    await screen.findByText("INV-2026-0042");
+
+    await user.click(screen.getByRole("button", { name: /Duplicate \(0\)/ }));
+
+    expect(screen.getByText("Nothing in this category.")).toBeInTheDocument();
+  });
 });

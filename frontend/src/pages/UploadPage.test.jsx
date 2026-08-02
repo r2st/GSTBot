@@ -236,4 +236,61 @@ describe("UploadPage", () => {
 
     expect(await screen.findByText(/Upgrade to continue uploading/)).toBeInTheDocument();
   });
+
+  describe("dragging files onto the dropzone", () => {
+    // Dragging a scanned bill straight out of the mail client is the way most
+    // of these arrive, so the drop path deserves the same cover as the picker.
+    function dropzone(container) {
+      return container.querySelector(".dropzone");
+    }
+
+    it("highlights the target while a file is over it", () => {
+      const { container } = renderPage();
+
+      fireEvent.dragOver(dropzone(container));
+
+      expect(dropzone(container)).toHaveClass("is-dragging");
+    });
+
+    it("drops the highlight when the file is dragged away again", () => {
+      const { container } = renderPage();
+      fireEvent.dragOver(dropzone(container));
+
+      fireEvent.dragLeave(dropzone(container));
+
+      expect(dropzone(container)).not.toHaveClass("is-dragging");
+    });
+
+    it("uploads what was dropped", async () => {
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(invoiceResponse()));
+      const { container } = renderPage();
+
+      fireEvent.drop(dropzone(container), { dataTransfer: { files: [file("dropped.txt")] } });
+
+      expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("clears the highlight once the drop is handled", async () => {
+      // Otherwise the zone stays lit after the drop and looks stuck.
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(invoiceResponse()));
+      const { container } = renderPage();
+      fireEvent.dragOver(dropzone(container));
+
+      fireEvent.drop(dropzone(container), { dataTransfer: { files: [file("dropped.txt")] } });
+
+      await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
+    });
+
+    it("ignores a drop that carries no files", async () => {
+      // Dragging selected text or a link onto the page fires the same event.
+      global.fetch = vi.fn();
+      const { container } = renderPage();
+
+      fireEvent.drop(dropzone(container), { dataTransfer: { files: [] } });
+
+      await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
 });

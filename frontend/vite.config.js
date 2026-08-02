@@ -19,5 +19,27 @@ export default defineConfig({
     globals: true,
     setupFiles: "./src/test/setup.js",
     css: false,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      include: ["src/**/*.{js,jsx}"],
+      exclude: [
+        "src/**/*.test.{js,jsx}",
+        "src/test/**",
+        // The entry point is three lines of createRoot with nothing to assert
+        // that rendering the app in a test does not already assert.
+        "src/main.jsx",
+      ],
+      // A ratchet against tests being deleted or a component landing with
+      // none — not a target to code towards. Raise it in the commit that
+      // earns it, the same way backend/pyproject.toml does.
+      //
+      // `functions` sits well below the rest on purpose. v8 counts every
+      // inline JSX arrow as its own function, so a component whose lines are
+      // fully covered still scores ~70% when it renders a row of handlers
+      // that no single test clicks. Statements and lines are the honest
+      // signal here; functions is kept only as a floor.
+      thresholds: { statements: 99, branches: 90, functions: 87, lines: 99 },
+    },
   },
 });

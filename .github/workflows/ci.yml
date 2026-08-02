@@ -122,7 +122,20 @@ jobs:
         run: npm run lint
 
       - name: Test
-        run: npm run test
+        # Thresholds live in vite.config.js, the same ratchet the backend
+        # keeps in pyproject.toml. `functions` is deliberately the loosest of
+        # the four — see the comment there for why v8 undercounts it on JSX.
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        # Kept on failure too: a run that tripped the threshold is exactly
+        # when someone wants to see which lines went uncovered.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/lcov.info
+          if-no-files-found: warn
 
       - name: Build
         run: npm run build

@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DashboardPage from "./DashboardPage";
@@ -139,5 +140,170 @@ describe("DashboardPage", () => {
     });
     renderPage();
     expect(await screen.findByRole("alert")).toHaveTextContent("Database unavailable");
+  });
+
+  describe("the GSTR-3B due date notice", () => {
+    // The due date in the fixture is 20 May 2026; each case moves "today"
+    // relative to it. A missed 3B carries interest at 18% and a per-day late
+    // fee, so how loud this gets is the point of the component.
+    afterEach(() => vi.useRealTimers());
+
+    async function noticeOn(year, monthIndex, day, body = dashboard()) {
+      vi.setSystemTime(new Date(year, monthIndex, day));
+      mockDashboard(body);
+      renderPage();
+      return screen.findByRole("status");
+    }
+
+    it("stays quiet in tone when the deadline is comfortably away", async () => {
+      const notice = await noticeOn(2026, 4, 1); // 19 days out.
+
+      expect(notice).toHaveClass("banner-neutral");
+      expect(notice).toHaveTextContent(/19 days left/);
+    });
+
+    it("turns to a warning inside a week", async () => {
+      const notice = await noticeOn(2026, 4, 15); // 5 days out.
+
+      expect(notice).toHaveClass("banner-warn");
+      expect(notice).toHaveTextContent(/5 days left/);
+    });
+
+    it("escalates to the overdue styling inside three days", async () => {
+      // Filing needs the books closed first, so three days out is already
+      // the point of no return for most businesses — it gets the same red as
+      // a missed deadline rather than the amber of the week before.
+      const notice = await noticeOn(2026, 4, 18); // 2 days out.
+
+      expect(notice).toHaveClass("banner-bad");
+      expect(notice).toHaveTextContent(/2 days left/);
+    });
+
+    it("counts the day itself as still open", async () => {
+      const notice = await noticeOn(2026, 4, 20); // The due date.
+
+      expect(notice).toHaveClass("banner-bad");
+      expect(notice).toHaveTextContent(/0 days left/);
+      expect(notice).not.toHaveTextContent(/overdue/);
+    });
+
+    it("says nothing at all when no deadline is known", async () => {
+      // A business registered mid-period has no computed due date yet, and
+      // an empty banner is worse than no banner.
+      vi.setSystemTime(new Date(2026, 4, 1));
+      mockDashboard(dashboard({ next_due_date: null }));
+      renderPage();
+
+      await screen.findByText(/Umang Traders/);
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the net liability trend", () => {
+    const trend = [
+      { period: "2026-02", net_liability: { total: "4000.00" } },
+      { period: "2026-03", net_liability: { total: "8000.00" } },
+      { period: "2026-04", net_liability: { total: "0.00" } },
+    ];
+
+    it("is hidden until there is more than one period to compare", async () => {
+      mockDashboard(dashboard({ recent_periods: [] }));
+      renderPage();
+
+      await screen.findByText(/Umang Traders/);
+      expect(screen.queryByText("Net liability trend")).not.toBeInTheDocument();
+    });
+
+    it("plots a bar per period, labelled by month", async () => {
+      mockDashboard(dashboard({ recent_periods: trend }));
+      const { container } = renderPage();
+
+      expect(await screen.findByText("Net liability trend")).toBeInTheDocument();
+      expect(container.querySelectorAll(".chart-col")).toHaveLength(3);
+      expect([...container.querySelectorAll(".chart-label")].map((n) => n.textContent)).toEqual([
+        "02",
+        "03",
+        "04",
+      ]);
+    });
+
+    it("scales the bars against the tallest period, not against the total", async () => {
+      mockDashboard(dashboard({ recent_periods: trend }));
+      const { container } = renderPage();
+
+      await screen.findByText("Net liability trend");
+      const bars = [...container.querySelectorAll(".chart-bar")];
+      expect(bars[1].style.height).toBe("100%"); // The peak.
+      expect(bars[0].style.height).toBe("50%"); // Half of it.
+    });
+
+    it("still draws a sliver for a period with nothing owed", async () => {
+      // A zero-height bar is indistinguishable from a missing month, which
+      // reads as lost data rather than a nil return.
+      mockDashboard(dashboard({ recent_periods: trend }));
+      const { container } = renderPage();
+
+      await screen.findByText("Net liability trend");
+      expect([...container.querySelectorAll(".chart-bar")][2].style.height).toBe("2%");
+    });
+
+    it("gives each bar a readable figure on hover", async () => {
+      mockDashboard(dashboard({ recent_periods: trend }));
+      const { container } = renderPage();
+
+      await screen.findByText("Net liability trend");
+      // The bar itself only carries a height; the exact figure lives in the
+      // tooltip, spelled out in full rather than the abbreviated axis label.
+      expect(container.querySelector(".chart-bar")).toHaveAttribute(
+        "title",
+        "February 2026: ₹4,000.00",
+      );
+    });
+  });
+
+  describe("the period picker", () => {
+    it("refetches for the chosen period", async () => {
+      vi.setSystemTime(new Date(2026, 4, 1));
+      mockDashboard(dashboard());
+      renderPage();
+      await screen.findByText(/Umang Traders/);
+
+      await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-03");
+
+      await waitFor(() =>
+        expect(global.fetch.mock.calls.at(-1)[0]).toContain("period=2026-03"),
+      );
+      vi.useRealTimers();
+    });
+
+    it("keeps the previous figures on screen while the new period loads", async () => {
+      // Replacing a populated dashboard with skeletons reads as "your data is
+      // gone"; the page dims instead and marks itself busy.
+      vi.setSystemTime(new Date(2026, 4, 1));
+      mockDashboard(dashboard());
+      const { container } = renderPage();
+      await screen.findByText(/Umang Traders/);
+
+      let release;
+      global.fetch = vi.fn(
+        () => new Promise((resolve) => {
+          release = () => resolve({
+            ok: true,
+            status: 200,
+            statusText: "",
+            text: async () => JSON.stringify(dashboard({ period: "2026-03" })),
+          });
+        }),
+      );
+      await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-03");
+
+      await waitFor(() =>
+        expect(container.querySelector(".page")).toHaveAttribute("aria-busy", "true"),
+      );
+      expect(screen.getByText(/Umang Traders/)).toBeInTheDocument();
+
+      release();
+      vi.useRealTimers();
+    });
   });
 });
