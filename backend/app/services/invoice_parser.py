@@ -175,10 +175,14 @@ def to_date(value: object) -> date | None:
     ambiguity only ever shifts the filing period by a month rather than
     corrupting the amount.
     """
-    if isinstance(value, date):
-        return value
+    # datetime subclasses date, so it has to be narrowed first — the other
+    # order makes this branch unreachable and returns the datetime unchanged,
+    # which is not what the signature promises and puts a time on a column
+    # that has no room for one.
     if isinstance(value, datetime):
         return value.date()
+    if isinstance(value, date):
+        return value
     if not value:
         return None
     text = str(value).strip()
