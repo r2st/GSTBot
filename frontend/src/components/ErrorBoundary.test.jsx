@@ -1,0 +1,155 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import ErrorBoundary from "./ErrorBoundary";
+
+/** Throws on render when `explode` is true. */
+function Bomb({ explode, message = "Cannot read properties of null" }) {
+  if (explode) throw new Error(message);
+  return <p>Everything is fine</p>;
+}
+
+describe("ErrorBoundary", () => {
+  beforeEach(() => {
+    // The boundary logs to console.error by design — it is the only reporting
+    // channel this app has. Silenced so a passing run is not full of stacks.
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders its children when nothing throws", () => {
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode={false} />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("Everything is fine")).toBeInTheDocument();
+  });
+
+  it("catches a render crash instead of blanking the app", () => {
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByText("This screen hit an error")).toBeInTheDocument();
+  });
+
+  it("tells the user their data is safe", () => {
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+
+    // The fear after a crash mid-upload is "did my invoice save?". The
+    // fallback answers it, because the boundary only catches render failures.
+    expect(screen.getByText(/Nothing you have entered was lost/)).toBeInTheDocument();
+  });
+
+  it("shows the underlying message rather than swallowing it", () => {
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode message="total_value of null" />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/total_value of null/)).toBeInTheDocument();
+  });
+
+  it("still logs, so there is something to debug from", () => {
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("recovers when Try again is clicked and the cause is gone", async () => {
+    const user = userEvent.setup();
+
+    function Flaky() {
+      const [explode, setExplode] = useState(true);
+      return (
+        <>
+          <button type="button" onClick={() => setExplode(false)}>
+            Fix it
+          </button>
+          <ErrorBoundary>
+            <Bomb explode={explode} />
+          </ErrorBoundary>
+        </>
+      );
+    }
+
+    render(
+      <MemoryRouter>
+        <Flaky />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("This screen hit an error")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Fix it" }));
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    expect(screen.getByText("Everything is fine")).toBeInTheDocument();
+  });
+
+  it("clears itself on navigation", async () => {
+    const user = userEvent.setup();
+
+    function Nav() {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate("/safe")}>
+          Go elsewhere
+        </button>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/broken"]}>
+        <Nav />
+        <ErrorBoundary>
+          <Routes>
+            <Route path="/broken" element={<Bomb explode />} />
+            <Route path="/safe" element={<p>A different screen</p>} />
+          </Routes>
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("This screen hit an error")).toBeInTheDocument();
+
+    // Without the reset-on-navigation the boundary stays broken and every
+    // later route renders the fallback, which looks like the whole app died.
+    await user.click(screen.getByRole("button", { name: "Go elsewhere" }));
+    expect(screen.getByText("A different screen")).toBeInTheDocument();
+  });
+
+  it("offers a reload as the second escape hatch", () => {
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("button", { name: "Reload the app" })).toBeInTheDocument();
+  });
+});

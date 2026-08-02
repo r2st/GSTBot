@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonTable } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { dateLabel, periodLabel } from "../lib/format";
 
@@ -271,7 +272,7 @@ export default function SuppliersPage() {
       <section className="panel">
         <h2>{total} supplier{total === 1 ? "" : "s"}</h2>
         {loading ? (
-          <p className="muted">Loading…</p>
+          <SkeletonTable rows={6} columns={5} label="Loading suppliers" />
         ) : items.length === 0 ? (
           <p className="muted">
             No suppliers yet. They are created as purchase invoices are parsed, and scored

@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from "react-router-dom";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Shell from "./components/Shell";
+import { SkeletonPanel } from "./components/Skeleton";
 import { useAuth } from "./hooks/useAuth";
 import DashboardPage from "./pages/DashboardPage";
 import FilingPage from "./pages/FilingPage";
@@ -15,9 +17,21 @@ function Protected({ children }) {
   const { user, loading } = useAuth();
   // Waiting on /auth/me — rendering the redirect now would bounce a signed-in
   // user to the login page on every refresh.
-  if (loading) return <p className="muted centered">Loading…</p>;
+  if (loading) {
+    return (
+      <div className="shell-main">
+        <SkeletonPanel lines={5} label="Checking your session" />
+      </div>
+    );
+  }
   if (!user) return <Navigate to="/login" replace />;
-  return <Shell>{children}</Shell>;
+  // The boundary sits inside the Shell rather than around it, so a page that
+  // crashes leaves the navigation intact and the user can click away from it.
+  return (
+    <Shell>
+      <ErrorBoundary>{children}</ErrorBoundary>
+    </Shell>
+  );
 }
 
 export default function App() {

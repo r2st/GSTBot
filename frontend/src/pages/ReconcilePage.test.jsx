@@ -315,4 +315,37 @@ describe("ReconcilePage", () => {
 
     expect(await screen.findByText(/Replace GSTR-2B/)).toBeInTheDocument();
   });
+
+  it("refuses an oversized 2B without asking the server", async () => {
+    const user = userEvent.setup();
+    let posted = false;
+    mockApi({
+      onPost: async () => {
+        posted = true;
+        return imported();
+      },
+    });
+    renderPage();
+    await screen.findByText(/No GSTR-2B imported yet/);
+
+    const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
+    Object.defineProperty(file, "size", { value: 41 * 1024 * 1024 });
+    await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/over the 15 MB limit/);
+    expect(posted).toBe(false);
+  });
+
+  it("refuses an empty 2B file", async () => {
+    const user = userEvent.setup();
+    mockApi({});
+    renderPage();
+    await screen.findByText(/No GSTR-2B imported yet/);
+
+    const file = new File([""], "gstr2b.json", { type: "application/json" });
+    Object.defineProperty(file, "size", { value: 0 });
+    await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/still be downloading/);
+  });
 });

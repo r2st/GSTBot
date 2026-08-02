@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonTable } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 
@@ -83,7 +84,7 @@ export default function InvoicesPage() {
       </div>
 
       {loading && !data ? (
-        <p className="muted">Loading invoices…</p>
+        <SkeletonTable rows={8} columns={5} label="Loading invoices" />
       ) : items.length === 0 ? (
         <div className="empty">
           <p>No invoices yet.</p>
@@ -93,7 +94,8 @@ export default function InvoicesPage() {
         </div>
       ) : (
         <>
-          <table className="table table-invoices">
+          <div className="table-scroll">
+            <table className="table table-invoices">
             <thead>
               <tr>
                 <th scope="col">Invoice</th>
@@ -137,7 +139,8 @@ export default function InvoicesPage() {
                 );
               })}
             </tbody>
-          </table>
+            </table>
+          </div>
 
           <div className="pager">
             <button

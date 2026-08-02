@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../lib/api";
+import { gstinShapeError, normalizeGstin, registrationErrors } from "../lib/validate";
 
 const EMPTY = {
   email: "",
@@ -18,6 +19,8 @@ export default function LoginPage() {
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  // Per-field registration messages, cleared on every submit attempt.
+  const [fieldErrors, setFieldErrors] = useState({});
   // What the server said about the typed GSTIN: {valid, state_name} or null.
   const [gstinCheck, setGstinCheck] = useState(null);
 
@@ -29,18 +32,27 @@ export default function LoginPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  // Checked against the server rather than a regex in the browser: the check
-  // digit is the part that catches a typo, and duplicating that arithmetic in
-  // two languages is how the two come to disagree.
+  // The check digit is checked against the server rather than by a regex in
+  // the browser: that arithmetic is the part which catches a typo, and
+  // duplicating it in two languages is how the two come to disagree. The shape
+  // is checked locally first, so an obviously wrong string gets an answer
+  // without a round trip — and so a 15-character string of the wrong shape is
+  // not sent at all.
   async function checkGstin(value) {
-    const cleaned = value.replace(/\s/g, "").toUpperCase();
+    const cleaned = normalizeGstin(value);
     if (cleaned.length !== 15) {
       setGstinCheck(null);
+      return;
+    }
+    const shape = gstinShapeError(cleaned);
+    if (shape) {
+      setGstinCheck({ valid: false, error: shape });
       return;
     }
     try {
       setGstinCheck(await api.validateGstin(cleaned));
     } catch {
+      // A failed check is not a verdict — the server decides again on submit.
       setGstinCheck(null);
     }
   }
@@ -48,6 +60,35 @@ export default function LoginPage() {
   async function handleSubmit(event) {
     event.preventDefault();
     setError("");
+
+    setFieldErrors({});
+
+    if (!registering) {
+      // `noValidate` turned off the browser's own required-field check, so the
+      // empty case is handled here rather than being sent as a doomed 401.
+      const problems = {};
+      if (!form.email.trim()) problems.email = "Enter your email.";
+      if (!form.password) problems.password = "Enter your password.";
+      if (Object.keys(problems).length > 0) {
+        setFieldErrors(problems);
+        return;
+      }
+    }
+
+    if (registering) {
+      const problems = registrationErrors(form);
+      // A GSTIN the server has already rejected blocks the submit too. Letting
+      // it through costs a round trip to be told the same thing, and the reply
+      // to a failed registration is a generic 400 rather than this sentence.
+      if (!problems.gstin && gstinCheck && !gstinCheck.valid) {
+        problems.gstin = gstinCheck.error || "That GSTIN is not valid.";
+      }
+      if (Object.keys(problems).length > 0) {
+        setFieldErrors(problems);
+        return;
+      }
+    }
+
     setBusy(true);
     try {
       if (registering) {
@@ -110,7 +151,10 @@ export default function LoginPage() {
 
         <ErrorBanner message={error} onDismiss={() => setError("")} />
 
-        <form onSubmit={handleSubmit} className="auth-form">
+        {/* noValidate: the browser's own bubbles say "Please fill in this
+            field" with no reference to what the field is for, and they cannot
+            be styled or read by the tests. The rules are enforced above. */}
+        <form onSubmit={handleSubmit} className="auth-form" noValidate>
           {registering && (
             <>
               <label htmlFor="gstin">GSTIN</label>
@@ -122,17 +166,25 @@ export default function LoginPage() {
                 spellCheck="false"
                 placeholder="27AAPFU0939F1ZV"
                 value={form.gstin}
+                aria-invalid={fieldErrors.gstin ? true : undefined}
+                aria-describedby={fieldErrors.gstin ? "gstin-error" : undefined}
                 onChange={(e) => {
                   update("gstin", e.target.value);
                   checkGstin(e.target.value);
                 }}
               />
-              {gstinCheck && (
-                <p className={gstinCheck.valid ? "field-hint is-good" : "field-hint is-bad"}>
-                  {gstinCheck.valid
-                    ? `Valid — ${gstinCheck.state_name} (PAN ${gstinCheck.pan})`
-                    : gstinCheck.error}
+              {fieldErrors.gstin ? (
+                <p className="field-error" id="gstin-error" role="alert">
+                  {fieldErrors.gstin}
                 </p>
+              ) : (
+                gstinCheck && (
+                  <p className={gstinCheck.valid ? "field-hint is-good" : "field-hint is-bad"}>
+                    {gstinCheck.valid
+                      ? `Valid — ${gstinCheck.state_name} (PAN ${gstinCheck.pan})`
+                      : gstinCheck.error}
+                  </p>
+                )
               )}
 
               <label htmlFor="legal_name">Legal name</label>
@@ -141,8 +193,15 @@ export default function LoginPage() {
                 name="legal_name"
                 required
                 value={form.legal_name}
+                aria-invalid={fieldErrors.legal_name ? true : undefined}
+                aria-describedby={fieldErrors.legal_name ? "legal_name-error" : undefined}
                 onChange={(e) => update("legal_name", e.target.value)}
               />
+              {fieldErrors.legal_name && (
+                <p className="field-error" id="legal_name-error" role="alert">
+                  {fieldErrors.legal_name}
+                </p>
+              )}
 
               <label htmlFor="trade_name">Trade name (optional)</label>
               <input
@@ -170,8 +229,15 @@ export default function LoginPage() {
             required
             autoComplete="email"
             value={form.email}
+            aria-invalid={fieldErrors.email ? true : undefined}
+            aria-describedby={fieldErrors.email ? "email-error" : undefined}
             onChange={(e) => update("email", e.target.value)}
           />
+          {fieldErrors.email && (
+            <p className="field-error" id="email-error" role="alert">
+              {fieldErrors.email}
+            </p>
+          )}
 
           <label htmlFor="password">Password</label>
           <input
@@ -182,9 +248,17 @@ export default function LoginPage() {
             minLength={registering ? 8 : undefined}
             autoComplete={registering ? "new-password" : "current-password"}
             value={form.password}
+            aria-invalid={fieldErrors.password ? true : undefined}
+            aria-describedby={fieldErrors.password ? "password-error" : undefined}
             onChange={(e) => update("password", e.target.value)}
           />
-          {registering && <p className="field-hint">At least 8 characters.</p>}
+          {fieldErrors.password ? (
+            <p className="field-error" id="password-error" role="alert">
+              {fieldErrors.password}
+            </p>
+          ) : (
+            registering && <p className="field-hint">At least 8 characters.</p>
+          )}
 
           <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
             {busy ? "Please wait…" : registering ? "Create account" : "Sign in"}

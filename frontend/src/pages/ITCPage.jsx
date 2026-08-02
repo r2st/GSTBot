@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import { api } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
@@ -115,7 +116,7 @@ export default function ITCPage() {
       <ErrorBanner message={error} onDismiss={() => setError("")} />
 
       {loading ? (
-        <p className="muted">Loading…</p>
+        <SkeletonStats count={4} label="Loading the ITC position" />
       ) : !summary ? null : (
         <>
           {!summary.reconciled && (
@@ -186,7 +187,7 @@ export default function ITCPage() {
               credit can never settle SGST, or the reverse.
             </p>
             {setOff.steps.length === 0 ? (
-              <p className="muted">No credit could be applied to this period's liability.</p>
+              <p className="muted">No credit could be applied to this period’s liability.</p>
             ) : (
               <ul className="result-list">
                 {setOff.steps.map((step) => (

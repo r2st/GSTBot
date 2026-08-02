@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import { api } from "../lib/api";
 import { currentPeriod, periodLabel, rupees } from "../lib/format";
@@ -152,7 +153,7 @@ export default function FilingPage() {
       <p className="muted small">{meta.help}</p>
 
       {loading ? (
-        <p className="muted">Loading…</p>
+        <SkeletonStats count={4} label="Loading the return preview" />
       ) : !preview ? null : (
         <>
           <section className="stat-grid">
@@ -184,7 +185,7 @@ export default function FilingPage() {
           <section className="panel">
             <h2>Export</h2>
             <p className="muted small">
-              JSON goes into the government's offline utility. CSV is for reading, or for
+              JSON goes into the government’s offline utility. CSV is for reading, or for
               a CA to check before anything is filed.
             </p>
             <div className="button-row">

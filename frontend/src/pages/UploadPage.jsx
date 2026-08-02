@@ -1,10 +1,12 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { Spinner } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { dateLabel, rupees } from "../lib/format";
+import { INVOICE_EXTENSIONS, MAX_UPLOAD_MB, partitionFiles } from "../lib/validate";
 
-const ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.heic,.txt,.csv,.xlsx,.xls";
+const ACCEPT = INVOICE_EXTENSIONS.join(",");
 
 /** One row per file, so a 40-file batch reports per document rather than as a whole. */
 function ResultRow({ result }) {
@@ -49,18 +51,43 @@ export default function UploadPage() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
+  // {done, total, current} while a batch is in flight, null otherwise.
+  const [progress, setProgress] = useState(null);
   const inputRef = useRef(null);
 
   async function uploadFiles(files) {
     const list = Array.from(files ?? []);
     if (list.length === 0) return;
 
+    // Checked here rather than left to the server so an oversized scan is
+    // refused before it is read off disk and pushed over a phone connection.
+    // A rejected file is reported in the same result list as a failed one:
+    // dropping it silently is how a 40-file batch quietly becomes 38.
+    const { accepted, rejected } = partitionFiles(list);
+    if (rejected.length > 0) {
+      setResults((prev) => [
+        ...rejected.map(({ file, error: reason }) => ({
+          filename: file.name,
+          status: "error",
+          error: reason,
+        })),
+        ...prev,
+      ]);
+    }
+    if (accepted.length === 0) {
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+
     setBusy(true);
     setError("");
     // Sequential rather than concurrent: each upload costs a model call, and
     // the free tier rate-limits a burst — which would turn a 40-file batch
     // into 40 heuristic-only extractions.
-    for (const file of list) {
+    for (const [index, file] of accepted.entries()) {
+      // Named rather than counted alone: on a long batch the file that is
+      // taking the time is the one the user wants to know about.
+      setProgress({ done: index, total: accepted.length, current: file.name });
       try {
         const response = await api.uploadInvoice(file, invoiceType);
         setResults((prev) => [
@@ -74,6 +101,7 @@ export default function UploadPage() {
         ]);
       }
     }
+    setProgress(null);
     setBusy(false);
     if (inputRef.current) inputRef.current.value = "";
   }
@@ -140,10 +168,19 @@ export default function UploadPage() {
           disabled={busy}
           onChange={(e) => uploadFiles(e.target.files)}
         />
-        <p className="muted small">Up to 15 MB per file.</p>
+        <p className="muted small">
+          Up to {MAX_UPLOAD_MB} MB per file · {INVOICE_EXTENSIONS.join(" ")}
+        </p>
       </div>
 
-      {busy && <p className="muted" role="status">Extracting…</p>}
+      {busy && (
+        <p className="muted upload-progress" role="status">
+          <Spinner label="Extracting" />
+          {progress
+            ? `Extracting ${progress.done + 1} of ${progress.total} — ${progress.current}`
+            : "Extracting…"}
+        </p>
+      )}
 
       {results.length > 0 && (
         <section className="panel">

@@ -365,6 +365,10 @@ def reparse_invoice(
 @router.delete(
     "/{invoice_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    # `from __future__ import annotations` turns the `-> None` below into the
+    # NoneType *class*, which FastAPI reads as a real response model and then
+    # rejects for a 204. Saying "no model" explicitly keeps the annotation honest.
+    response_model=None,
     summary="Remove an invoice from the books",
     description=(
         "A soft delete: `deleted_at` is set, and the row and the stored file "

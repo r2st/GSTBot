@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonText } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import { api } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
+import { GSTR2B_EXTENSIONS, fileError } from "../lib/validate";
 
-const ACCEPT = ".json,.csv,.txt";
+const ACCEPT = GSTR2B_EXTENSIONS.join(",");
 
 /** The last 12 filing periods, newest first. */
 function recentPeriodOptions(now = new Date()) {
@@ -131,6 +133,16 @@ export default function ReconcilePage() {
     const file = Array.from(files ?? [])[0];
     if (!file) return;
 
+    // The portal hands out the 2B as a zip containing the JSON, and uploading
+    // the zip is the single most common mistake here. Catching it in the
+    // browser makes the message about the zip rather than a generic 400.
+    const invalid = fileError(file, { extensions: GSTR2B_EXTENSIONS });
+    if (invalid) {
+      setError(invalid);
+      if (inputRef.current) inputRef.current.value = "";
+      return;
+    }
+
     setBusy(true);
     setError("");
     setNotice("");
@@ -207,7 +219,7 @@ export default function ReconcilePage() {
       <section className="panel">
         <h2>GSTR-2B for {periodLabel(period)}</h2>
         {loading ? (
-          <p className="muted">Loading…</p>
+          <SkeletonText lines={2} label="Loading the GSTR-2B" />
         ) : imported ? (
           <p>
             <strong>{imported.invoice_count}</strong> invoices imported{" "}

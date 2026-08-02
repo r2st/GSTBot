@@ -15,8 +15,15 @@ With Redis down the limiter falls back to a per-process in-memory window. That
 is deliberately weaker — four API processes means four times the limit — but a
 weak limit that stays up beats a strong one that takes the API down with the
 cache.
+
+Note the absence of ``from __future__ import annotations`` here, unlike the
+rest of the package. ``RateLimit`` is a *callable class*, and FastAPI resolves
+string annotations against ``call.__globals__`` — which a class instance does
+not have. With postponed evaluation on, ``__call__``'s ``request: Request``
+stays an unresolved ForwardRef, FastAPI stops recognising it as the request,
+and every rate-limited route sprouts a mandatory ``request`` query parameter.
+Real annotations keep the dependency wired to the real Request.
 """
-from __future__ import annotations
 
 import logging
 import threading

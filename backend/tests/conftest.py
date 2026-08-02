@@ -116,6 +116,26 @@ def client(db_session):
 
 
 @pytest.fixture()
+def raw_client(db_session):
+    """A client that returns the 500 rather than re-raising the exception.
+
+    TestClient defaults to ``raise_server_exceptions=True``, which re-raises an
+    unhandled exception into the test instead of letting the handler turn it
+    into a response. That default is right for most tests — a stack trace beats
+    an assertion failure — but it means the "a bug must not leak the exception"
+    tests would never reach the code they are about.
+    """
+
+    def _override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    with TestClient(app, raise_server_exceptions=False) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture()
 def rate_limited(monkeypatch):
     """Turn the limiter on for one test, with counters starting empty.
 

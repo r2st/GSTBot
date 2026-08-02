@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonPanel, SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import { api } from "../lib/api";
 import {
@@ -96,10 +97,26 @@ export default function DashboardPage() {
     load(period);
   }, [load, period]);
 
-  if (loading && !data) return <p className="muted">Loading dashboard…</p>;
+  // Only on the first load. A period change keeps the previous figures on
+  // screen and dims them, because replacing a populated dashboard with
+  // placeholders reads as "your data is gone".
+  if (loading && !data) {
+    return (
+      <div className="page">
+        <div className="page-head">
+          <h1>Dashboard</h1>
+        </div>
+        <SkeletonStats count={4} label="Loading dashboard" />
+        <div className="panel-row">
+          <SkeletonPanel lines={5} label="Loading invoice counts" />
+          <SkeletonPanel lines={6} label="Loading tax breakdown" />
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="page">
+    <div className={loading ? "page is-refreshing" : "page"} aria-busy={loading}>
       <div className="page-head">
         <div>
           <h1>Dashboard</h1>
@@ -182,7 +199,8 @@ export default function DashboardPage() {
 
             <div className="panel">
               <h2>Tax breakdown — {periodLabel(data.period)}</h2>
-              <table className="table">
+              <div className="table-scroll">
+                <table className="table">
                 <thead>
                   <tr>
                     <th scope="col">Head</th>
@@ -201,7 +219,8 @@ export default function DashboardPage() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
               <p className="muted small">
                 Credit is tracked per head: IGST credit can offset CGST and SGST, but CGST
                 credit can never discharge an SGST liability.

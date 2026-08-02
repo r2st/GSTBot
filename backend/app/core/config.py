@@ -14,7 +14,6 @@ Two rules this module enforces, both at startup rather than at first use:
 """
 from __future__ import annotations
 
-import os
 import warnings
 from functools import lru_cache
 
@@ -191,24 +190,6 @@ class Settings(BaseSettings):
             raise ValueError(f"expected a redis:// URL, got '{url.split(':', 1)[0]}'")
         return url
 
-    @field_validator("jwt_secret")
-    @classmethod
-    def _jwt_secret_is_usable(cls, v: str) -> str:
-        env = os.getenv("ENVIRONMENT", "development").strip().lower()
-        if env in _PRODUCTION_LIKE:
-            if v == _DEFAULT_JWT_SECRET:
-                raise ValueError(
-                    "JWT_SECRET must be set to a strong random value in production. "
-                    'Generate one with: python -c "import secrets; '
-                    'print(secrets.token_urlsafe(64))"'
-                )
-            if len(v) < _MIN_JWT_SECRET_LENGTH:
-                raise ValueError(
-                    f"JWT_SECRET must be at least {_MIN_JWT_SECRET_LENGTH} characters "
-                    f"in production (got {len(v)})."
-                )
-        return v
-
     @field_validator("rate_limit_default")
     @classmethod
     def _parseable_rate(cls, v: str) -> str:
@@ -219,9 +200,32 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _production_invariants(self) -> Settings:
-        """Rules that need more than one field, run once the model is built."""
+        """Rules that need more than one field, run once the model is built.
+
+        Every environment-dependent rule belongs here rather than in a
+        ``field_validator``. A field validator cannot see ``self.environment``
+        and has to read ``os.getenv("ENVIRONMENT")`` instead — which is *not*
+        the same value, because Settings also reads ``.env``. A deployment that
+        sets ENVIRONMENT=production in its .env file rather than exporting it
+        would satisfy every check keyed on the field while silently skipping
+        every check keyed on the variable.
+        """
         if not self.is_production:
             return self
+
+        # Checked here, not on the field, for the reason above: this is what
+        # signs every token, and .env is the ordinary way to configure it.
+        if self.jwt_secret == _DEFAULT_JWT_SECRET:
+            raise ValueError(
+                "JWT_SECRET must be set to a strong random value in production. "
+                'Generate one with: python -c "import secrets; '
+                'print(secrets.token_urlsafe(64))"'
+            )
+        if len(self.jwt_secret) < _MIN_JWT_SECRET_LENGTH:
+            raise ValueError(
+                f"JWT_SECRET must be at least {_MIN_JWT_SECRET_LENGTH} characters "
+                f"in production (got {len(self.jwt_secret)})."
+            )
 
         if self.debug:
             raise ValueError(

@@ -1,0 +1,335 @@
+// Client-side validation.
+//
+// Every rule here exists on the server too, and the server stays the authority
+// — these functions only move the "no" forward in time. A 15 MB scan that is
+// going to be refused should be refused before it is read off disk and pushed
+// over a phone connection, and a negative CGST should be caught while the
+// cursor is still in the field rather than after a round trip.
+//
+// Two consequences of "the server is still the authority", both deliberate:
+//
+//   * Nothing here is a security control. The API re-checks all of it.
+//   * When a rule is expensive to keep in sync, it is not duplicated at all.
+//     The GSTIN checksum is the example: it lives on the server, and the
+//     browser only checks the shape. See `gstinShapeError` below.
+
+/**
+ * Mirrors MAX_UPLOAD_MB, whose server default is 15.
+ *
+ * A deployment can raise its own limit, which would make this too strict. That
+ * failure is the safe direction — the file is refused with a clear message
+ * rather than accepted and then 413'd — and the callers still handle the
+ * server's 413, so a raised limit degrades to "the old behaviour" rather than
+ * to a broken upload.
+ */
+export const MAX_UPLOAD_MB = 15;
+
+/** Kept in step with ALLOWED_EXTENSIONS in app/routers/invoices.py. */
+export const INVOICE_EXTENSIONS = [
+  ".pdf", ".jpg", ".jpeg", ".png", ".webp", ".heic",
+  ".txt", ".csv", ".xlsx", ".xlsm", ".xls",
+];
+
+/** Kept in step with ALLOWED_EXTENSIONS in app/routers/reconciliation.py. */
+export const GSTR2B_EXTENSIONS = [".json", ".csv", ".txt"];
+
+/** GST itself started on 1 July 2017; an invoice cannot predate it. */
+const GST_EPOCH = "2017-07-01";
+
+// Max lengths from InvoiceUpdate in app/schemas/invoice.py.
+const MAX_INVOICE_NUMBER = 64;
+const MAX_COUNTERPARTY_NAME = 255;
+const MAX_HSN = 8;
+
+function extensionOf(name) {
+  const dot = String(name ?? "").lastIndexOf(".");
+  return dot === -1 ? "" : String(name).slice(dot).toLowerCase();
+}
+
+/** Human list: ".pdf, .jpg and .png" rather than a bare array. */
+function readableList(items) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+/**
+ * Why a file cannot be uploaded, or "" when it can.
+ *
+ * Returns a sentence rather than a code: every caller renders it directly, and
+ * an error the user cannot act on is not worth showing. "That file is 41.2 MB"
+ * tells them to re-export; "INVALID_SIZE" does not.
+ */
+export function fileError(file, { extensions, maxMb = MAX_UPLOAD_MB } = {}) {
+  if (!file) return "No file selected.";
+
+  const allowed = extensions ?? INVOICE_EXTENSIONS;
+  const ext = extensionOf(file.name);
+  if (!allowed.includes(ext)) {
+    // The extension is named explicitly because the common case is a file the
+    // user believes is fine — a .doc invoice, a .zip of scans.
+    const got = ext || "no extension";
+    return `${file.name} is ${got}, which cannot be read. Use ${readableList(allowed)}.`;
+  }
+
+  // Zero bytes reaches the parser as an empty document and comes back as "no
+  // fields found", which reads like the extraction failed rather than like the
+  // file is empty. Usually a half-finished download or a sync placeholder.
+  if (file.size === 0) {
+    return `${file.name} is empty (0 bytes). It may still be downloading.`;
+  }
+
+  const maxBytes = maxMb * 1024 * 1024;
+  if (file.size > maxBytes) {
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    return `${file.name} is ${mb} MB, over the ${maxMb} MB limit. Re-export it at a lower resolution or split it.`;
+  }
+
+  return "";
+}
+
+/** Partition a FileList into the ones worth sending and one error per reject. */
+export function partitionFiles(files, options) {
+  const accepted = [];
+  const rejected = [];
+  for (const file of Array.from(files ?? [])) {
+    const error = fileError(file, options);
+    if (error) rejected.push({ file, error });
+    else accepted.push(file);
+  }
+  return { accepted, rejected };
+}
+
+/**
+ * Why a GSTIN is malformed, or "" when it is plausibly well-formed.
+ *
+ * Shape only — no checksum. The check digit is base-36 weighted mod-36
+ * arithmetic, and a second implementation of it in another language is a
+ * standing invitation for the two to disagree; the one that matters is the one
+ * the server enforces. So this catches the errors that need no arithmetic
+ * (wrong length, a letter where a digit belongs, an unassigned state code) and
+ * lets the server return the definitive answer for anything shaped right.
+ *
+ * `` is returned for an empty string: emptiness is the caller's business, and
+ * on the invoice form clearing the field is a legitimate edit.
+ */
+export function gstinShapeError(value) {
+  const cleaned = normalizeGstin(value);
+  if (!cleaned) return "";
+
+  if (cleaned.length !== 15) {
+    return `A GSTIN is 15 characters; this one is ${cleaned.length}.`;
+  }
+  // 2 digits state, 5 letters + 4 digits + 1 letter PAN, 1 alphanumeric entity
+  // code, "Z", 1 alphanumeric check digit.
+  if (!/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]Z[0-9A-Z]$/.test(cleaned)) {
+    return "That does not look like a GSTIN. The format is 27AAPFU0939F1ZV.";
+  }
+  // 00 is not a state and is the usual result of a leading digit being eaten.
+  if (cleaned.slice(0, 2) === "00") {
+    return "00 is not a state code.";
+  }
+  return "";
+}
+
+/** Strip the spaces and hyphens people paste in, and upper-case. */
+export function normalizeGstin(value) {
+  return String(value ?? "").replace(/[\s-]/g, "").toUpperCase();
+}
+
+/**
+ * Why an amount is unacceptable, or "".
+ *
+ * Mirrors `Decimal | None = Field(ge=0)`: blank is allowed (it clears the
+ * field), negative is not. The paise check is ours — the column is
+ * Numeric(14, 2), so a third decimal is silently rounded on the way in, and a
+ * total the user did not type is worse than a rejected edit.
+ */
+export function amountError(value, label = "Amount") {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return "";
+
+  if (!/^-?\d*\.?\d*$/.test(raw) || raw === "." || raw === "-") {
+    return `${label} must be a number.`;
+  }
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return `${label} must be a number.`;
+  if (num < 0) return `${label} cannot be negative.`;
+
+  const decimals = raw.split(".")[1];
+  if (decimals && decimals.length > 2) {
+    return `${label} cannot be finer than paise (two decimal places).`;
+  }
+  // Numeric(14, 2) — twelve digits before the point. A number this large is a
+  // mistyped amount, not a real invoice.
+  if (num >= 1e12) return `${label} is too large.`;
+  return "";
+}
+
+/**
+ * Why an invoice date is unacceptable, or "".
+ *
+ * Future dates are refused rather than warned about: an invoice dated next
+ * month lands in a period that cannot be filed yet, and the reconciliation
+ * then reports it as missing from the 2B every month until someone notices.
+ */
+export function invoiceDateError(value, { today = new Date() } = {}) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return "";
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return "Use the date picker, or type YYYY-MM-DD.";
+
+  // Compared as strings against ISO dates. Parsing to Date would drag the
+  // browser's timezone in, which near midnight can shift the day and refuse a
+  // date typed today as being in the future.
+  const [y, m, d] = raw.split("-").map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    return "That date does not exist.";
+  }
+
+  const todayIso = new Date(
+    Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
+  )
+    .toISOString()
+    .slice(0, 10);
+
+  if (raw > todayIso) return "An invoice cannot be dated in the future.";
+  if (raw < GST_EPOCH) return "GST started on 1 July 2017; that date is before it.";
+  return "";
+}
+
+/** Why an HSN/SAC code is unacceptable, or "". */
+export function hsnError(value) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return "";
+  if (!/^\d+$/.test(raw)) return "HSN/SAC codes are digits only.";
+  // 4, 6 and 8 are the real lengths; 2 is allowed as a chapter heading, which
+  // the portal accepts on small-turnover returns.
+  if (raw.length > MAX_HSN) return `HSN/SAC codes are at most ${MAX_HSN} digits.`;
+  if (raw.length < 2) return "An HSN/SAC code is at least 2 digits.";
+  return "";
+}
+
+function lengthError(value, max, label) {
+  const raw = String(value ?? "");
+  if (raw.length > max) return `${label} is limited to ${max} characters.`;
+  return "";
+}
+
+/**
+ * Validate the whole invoice edit form.
+ *
+ * Returns `{ errors, warnings }`. Errors are keyed by field and block the save.
+ * Warnings are cross-field observations that do *not* block it — the server
+ * would accept the values, and there are real invoices that trip every one of
+ * these heuristics. Refusing to save because a total looks off would leave the
+ * user with no way to record what the paper actually says.
+ */
+export function invoiceDraftErrors(draft, options = {}) {
+  const errors = {};
+  const set = (field, message) => {
+    if (message && !errors[field]) errors[field] = message;
+  };
+
+  set("counterparty_gstin", gstinShapeError(draft.counterparty_gstin));
+  set(
+    "counterparty_name",
+    lengthError(draft.counterparty_name, MAX_COUNTERPARTY_NAME, "Counterparty name"),
+  );
+  set("invoice_number", lengthError(draft.invoice_number, MAX_INVOICE_NUMBER, "Invoice number"));
+  set("invoice_date", invoiceDateError(draft.invoice_date, options));
+  set("hsn_code", hsnError(draft.hsn_code));
+
+  for (const [field, label] of [
+    ["taxable_value", "Taxable value"],
+    ["cgst", "CGST"],
+    ["sgst", "SGST"],
+    ["igst", "IGST"],
+    ["cess", "Cess"],
+    ["total_value", "Total value"],
+  ]) {
+    set(field, amountError(draft[field], label));
+  }
+
+  return { errors, warnings: invoiceDraftWarnings(draft, errors) };
+}
+
+/**
+ * Cross-field observations that are suspicious but legal.
+ *
+ * Skipped for any field that already has a hard error, so a half-typed amount
+ * does not also produce "the total does not add up".
+ */
+function invoiceDraftWarnings(draft, errors) {
+  const warnings = [];
+  const num = (field) => {
+    if (errors[field]) return null;
+    const raw = String(draft[field] ?? "").trim();
+    if (raw === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  };
+
+  const taxable = num("taxable_value");
+  const cgst = num("cgst");
+  const sgst = num("sgst");
+  const igst = num("igst");
+  const cess = num("cess");
+  const total = num("total_value");
+
+  // IGST is interstate, CGST+SGST is intrastate. One supply is one or the
+  // other, so both being non-zero usually means a misread column — but a
+  // credit note adjusting a supply booked the other way can look like this.
+  if (igst && (cgst || sgst)) {
+    warnings.push(
+      "This has both IGST and CGST/SGST. A supply is either interstate or intrastate, not both.",
+    );
+  }
+
+  // The two halves of an intrastate supply are equal by construction.
+  if (cgst != null && sgst != null && cgst !== sgst) {
+    warnings.push("CGST and SGST are normally equal. Check both were read correctly.");
+  }
+
+  // Rounding on the invoice is real and legal, so this needs a tolerance
+  // rather than an equality. A rupee covers the usual line-level rounding.
+  //
+  // Skipped outright when any contributing field is in error. Treating an
+  // unparseable CGST as zero would compute a total that disagrees with the
+  // one on screen and report *that* as the problem, on top of the real
+  // message — pointing the user at the wrong field.
+  const contributors = ["taxable_value", "cgst", "sgst", "igst", "cess", "total_value"];
+  const anyContributorInvalid = contributors.some((field) => errors[field]);
+
+  if (taxable != null && total != null && !anyContributorInvalid) {
+    const computed = taxable + (cgst ?? 0) + (sgst ?? 0) + (igst ?? 0) + (cess ?? 0);
+    if (Math.abs(computed - total) > 1) {
+      warnings.push(
+        `Taxable plus tax comes to ₹${computed.toFixed(2)}, but the total says ₹${total.toFixed(2)}.`,
+      );
+    }
+  }
+
+  return warnings;
+}
+
+/**
+ * Why a registration form cannot be submitted, or "" — keyed by field.
+ *
+ * The password rule matches the server's minimum. Email is left to the input's
+ * own `type="email"`, which is what the browser and the server both key on.
+ */
+export function registrationErrors(form) {
+  const errors = {};
+  const gstin = gstinShapeError(form.gstin);
+  if (!normalizeGstin(form.gstin)) errors.gstin = "A GSTIN is required to register.";
+  else if (gstin) errors.gstin = gstin;
+
+  if (!String(form.legal_name ?? "").trim()) {
+    errors.legal_name = "Legal name is required — it is what appears on your returns.";
+  }
+  if (String(form.password ?? "").length < 8) {
+    errors.password = "Use at least 8 characters.";
+  }
+  return errors;
+}

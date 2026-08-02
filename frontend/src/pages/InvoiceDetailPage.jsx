@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SkeletonPanel } from "../components/Skeleton";
 import { api } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
+import { invoiceDraftErrors } from "../lib/validate";
 
 const EDITABLE = [
   { field: "counterparty_gstin", label: "Counterparty GSTIN" },
@@ -27,6 +29,12 @@ export default function InvoiceDetailPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  // Which fields have been left, so a half-typed GSTIN is not marked wrong on
+  // the third keystroke. A submit attempt marks everything touched.
+  const [touched, setTouched] = useState({});
+
+  const { errors, warnings } = invoiceDraftErrors(draft);
+  const hasErrors = Object.keys(errors).length > 0;
 
   const load = useCallback(async () => {
     setError("");
@@ -47,6 +55,15 @@ export default function InvoiceDetailPage() {
 
   async function handleSave(event) {
     event.preventDefault();
+    // Everything becomes touched on submit, so a field the user never entered
+    // still shows why the save did not go through.
+    setTouched(Object.fromEntries(EDITABLE.map(({ field }) => [field, true])));
+    if (hasErrors) {
+      setNotice("");
+      setError("Fix the highlighted fields before saving.");
+      return;
+    }
+
     setBusy(true);
     setError("");
     setNotice("");
@@ -99,7 +116,7 @@ export default function InvoiceDetailPage() {
     return (
       <div className="page">
         <ErrorBanner message={error} />
-        {!error && <p className="muted">Loading invoice…</p>}
+        {!error && <SkeletonPanel lines={6} label="Loading invoice" />}
       </div>
     );
   }
@@ -153,19 +170,56 @@ export default function InvoiceDetailPage() {
           . Correct anything wrong — your edit is what gets filed.
         </p>
 
-        <form onSubmit={handleSave} className="edit-grid">
-          {EDITABLE.map(({ field, label, type }) => (
-            <label key={field}>
-              <span>{label}</span>
-              <input
-                type={type ?? "text"}
-                step={type === "number" ? "0.01" : undefined}
-                value={draft[field] ?? ""}
-                onChange={(e) => setDraft((prev) => ({ ...prev, [field]: e.target.value }))}
-              />
-            </label>
-          ))}
+        {warnings.length > 0 && (
+          <div className="banner banner-warn" role="status">
+            <p className="small">
+              These look wrong, but they will save — check them against the paper first.
+            </p>
+            <ul>
+              {warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <form onSubmit={handleSave} className="edit-grid" noValidate>
+          {EDITABLE.map(({ field, label, type }) => {
+            // Shown only once the field has been left or a save attempted:
+            // marking a GSTIN invalid while it is still being typed is noise.
+            const message = touched[field] ? errors[field] : "";
+            // The error sits outside the <label>, and the label is tied to the
+            // input by htmlFor rather than by wrapping it. Nesting the message
+            // inside the label would fold it into the input's accessible name
+            // — the field would announce as "CGST CGST cannot be negative",
+            // and then the same text again from aria-describedby.
+            return (
+              <div key={field} className={message ? "field is-invalid" : "field"}>
+                <label htmlFor={field}>{label}</label>
+                <input
+                  id={field}
+                  type={type ?? "text"}
+                  step={type === "number" ? "0.01" : undefined}
+                  value={draft[field] ?? ""}
+                  aria-invalid={message ? true : undefined}
+                  // Points at the message so a screen reader reads the reason
+                  // with the field rather than leaving it as unattached text.
+                  aria-describedby={message ? `${field}-error` : undefined}
+                  onBlur={() => setTouched((prev) => ({ ...prev, [field]: true }))}
+                  onChange={(e) => setDraft((prev) => ({ ...prev, [field]: e.target.value }))}
+                />
+                {message && (
+                  <span className="field-error" id={`${field}-error`} role="alert">
+                    {message}
+                  </span>
+                )}
+              </div>
+            );
+          })}
           <div className="edit-actions">
+            {/* Not disabled on invalid input. A disabled button gives no
+                reason it is disabled; letting the submit through is what
+                surfaces the per-field messages and the banner. */}
             <button type="submit" className="btn btn-primary" disabled={busy}>
               {busy ? "Saving…" : "Save corrections"}
             </button>

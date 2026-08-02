@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +31,13 @@ function invoiceResponse(overrides = {}) {
 
 function file(name = "invoice.txt") {
   return new File(["invoice text"], name, { type: "text/plain" });
+}
+
+/** A File reporting a size without allocating the bytes for it. */
+function sizedFile(name, bytes) {
+  const made = file(name);
+  Object.defineProperty(made, "size", { value: bytes });
+  return made;
 }
 
 function renderPage() {
@@ -132,6 +139,87 @@ describe("UploadPage", () => {
     // Sequential rather than concurrent: a burst hits the free tier's rate
     // limit and every invoice after the first falls back to heuristics.
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(3));
+  });
+
+  it("refuses an oversized file without asking the server", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.upload(screen.getByLabelText("Choose files"), sizedFile("scan.txt", 41 * 1024 * 1024));
+
+    // The point of the client-side check: a 41 MB scan should be refused
+    // before it is read off disk and pushed over a phone connection.
+    expect(await screen.findByText(/over the 15 MB limit/)).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses a file type the parser cannot read", async () => {
+    const { container } = renderPage();
+
+    // Dropped rather than picked. The `accept` attribute already filters the
+    // file dialog, so a .zip cannot arrive that way — but drag-and-drop
+    // ignores `accept` entirely, which is exactly why the JS check is not
+    // redundant with the attribute.
+    fireEvent.drop(container.querySelector(".dropzone"), {
+      dataTransfer: { files: [new File(["PK"], "scans.zip", { type: "application/zip" })] },
+    });
+
+    expect(await screen.findByText(/which cannot be read/)).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a dropped file the parser can read", async () => {
+    const { container } = renderPage();
+    global.fetch.mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+
+    fireEvent.drop(container.querySelector(".dropzone"), {
+      dataTransfer: { files: [file("dropped.txt")] },
+    });
+
+    expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+  });
+
+  it("refuses an empty file and suggests why it is empty", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.upload(screen.getByLabelText("Choose files"), sizedFile("invoice.txt", 0));
+
+    // Zero bytes otherwise reaches the parser and comes back as "no fields
+    // found", which reads like the extraction failed rather than the file.
+    expect(await screen.findByText(/still be downloading/)).toBeInTheDocument();
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("uploads the good files in a batch and reports the rejected one", async () => {
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValue(jsonResponse(invoiceResponse()));
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [
+      file("good.txt"),
+      sizedFile("huge.txt", 41 * 1024 * 1024),
+      file("also-good.txt"),
+    ]);
+
+    // Dropping the bad file silently is how a 40-file batch quietly becomes 38.
+    expect(await screen.findByText(/over the 15 MB limit/)).toBeInTheDocument();
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+  });
+
+  it("names the file it is working on during a batch", async () => {
+    const user = userEvent.setup();
+    let release;
+    global.fetch.mockReturnValueOnce(new Promise((resolve) => {
+      release = () => resolve(jsonResponse(invoiceResponse()));
+    }));
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [file("first.txt"), file("second.txt")]);
+
+    // On a long batch the file taking the time is what the user wants to know.
+    expect(await screen.findByText(/Extracting 1 of 2 — first.txt/)).toBeInTheDocument();
+    release();
   });
 
   it("surfaces the plan limit as the server stated it", async () => {

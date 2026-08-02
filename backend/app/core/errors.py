@@ -226,6 +226,18 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=error_body(500, _opaque_message(), code="internal_error"),
+            # Set here rather than left to CorrelationIdMiddleware. A handler
+            # for a *specific* exception type is installed in Starlette's inner
+            # ExceptionMiddleware, so its response travels back out through the
+            # user middleware and picks the header up on the way. This one is
+            # the bare ``Exception`` handler, which lives in the outermost
+            # ServerErrorMiddleware — nothing runs after it. Without this the
+            # one response whose body says "quote this reference" is the only
+            # response that does not carry the reference as a header.
+            headers={
+                "X-Request-ID": get_correlation_id() or "-",
+                "X-Correlation-ID": get_correlation_id() or "-",
+            },
         )
 
 

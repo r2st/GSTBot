@@ -1,0 +1,149 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# A second push to the same branch makes the first run's answer irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (lint + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # Postgres is not needed by the test suite — that runs on in-memory SQLite
+    # and owns its own configuration. It is here for the migration step below,
+    # which is the only thing in CI that touches the database this app actually
+    # deploys against.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: gstbot
+          POSTGRES_PASSWORD: gstbot
+          POSTGRES_DB: gstbot_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gstbot -d gstbot_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint
+        run: ruff check app tests
+
+      # Deliberately no `ruff format --check`. The source is hand-formatted to
+      # keep comment blocks and long call signatures readable, and ruff's
+      # formatter disagrees with roughly every file. Lint enforces correctness;
+      # layout is left alone.
+
+      - name: Test
+        # No env here on purpose: tests/conftest.py sets its own, pointing at
+        # in-memory SQLite and an unreachable Redis so the degraded paths are
+        # what run. It uses os.environ.setdefault, so anything exported here
+        # would silently win and change what is under test.
+        run: pytest -q
+
+      - name: Migrations apply to a real Postgres
+        # `pytest` builds the schema with create_all, which would not notice a
+        # migration that has drifted from the models. This does.
+        env:
+          DATABASE_URL: postgresql+psycopg://gstbot:gstbot@localhost:5432/gstbot_test
+          JWT_SECRET: ci-only-secret-not-used-anywhere-else
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+
+  frontend:
+    name: Frontend (test + build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+
+  docker:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Only worth the minutes once the code itself is known good.
+    needs: [backend, frontend]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: false
+          load: true
+          tags: gstbot-api:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./frontend
+          push: false
+          load: true
+          tags: gstbot-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Compose file is valid
+        run: docker compose config --quiet
