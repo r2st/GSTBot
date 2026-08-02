@@ -49,6 +49,7 @@ EXPECTED_PATHS = frozenset(
         "/api/v1/reconciliation/run",
         "/api/v1/itc",
         "/api/v1/filing/validate",
+        "/api/v1/filing/{return_type}/filed",
         "/api/v1/suppliers",
     }
 )

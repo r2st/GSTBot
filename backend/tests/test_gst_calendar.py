@@ -7,7 +7,7 @@ with the bug.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -50,6 +50,50 @@ class TestTheDecemberRollover:
         # "2026-9" would compare wrong against every other period string in
         # the product, all of which are zero-padded.
         assert gst_calendar.next_period("2026-08") == "2026-09"
+
+
+class TestTodayIsAnIndianDate:
+    def test_ist_is_five_and_a_half_hours_ahead_of_utc(self):
+        assert gst_calendar.IST.utcoffset(None) == timedelta(hours=5, minutes=30)
+
+    def test_today_is_read_in_india_rather_than_in_utc(self):
+        # Between 18:30 and 24:00 UTC these two differ, and it is the Indian
+        # one that decides whether a return is late. A server on UTC would
+        # otherwise call a return on time for five and a half hours after the
+        # penalty started running.
+        assert gst_calendar.today_ist() == gst_calendar.ist_date(
+            datetime.now(UTC)
+        )
+
+
+class TestWhichPeriodsHaveEnded:
+    def test_the_month_in_progress_is_excluded(self):
+        # A return covers a whole month and the portal does not open it until
+        # the month is over, so asking for one is asking about sales that have
+        # not happened yet.
+        assert "2026-06" not in gst_calendar.completed_periods(date(2026, 6, 15), 6)
+
+    def test_they_come_back_newest_first(self):
+        assert gst_calendar.completed_periods(date(2026, 6, 15), 3) == [
+            "2026-05",
+            "2026-04",
+            "2026-03",
+        ]
+
+    def test_the_walk_backwards_crosses_a_year_boundary(self):
+        assert gst_calendar.completed_periods(date(2026, 2, 1), 3) == [
+            "2026-01",
+            "2025-12",
+            "2025-11",
+        ]
+
+    def test_the_first_of_the_month_still_excludes_that_month(self):
+        # The boundary: on 1 June nothing about June has happened, but May has
+        # just become filable.
+        assert gst_calendar.completed_periods(date(2026, 6, 1), 1) == ["2026-05"]
+
+    def test_previous_period_rolls_the_year_at_january(self):
+        assert gst_calendar.previous_period("2026-01") == "2025-12"
 
 
 class TestDispatchingOnReturnType:

@@ -10,10 +10,18 @@ from app.core.database import get_db
 from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
+from app.models.gstr_return import GSTRReturn
 from app.models.invoice import InvoiceType
-from app.schemas.filing import FilingPreviewOut, ValidationReportOut
+from app.schemas.filing import (
+    FiledReturnOut,
+    FilingPreviewOut,
+    FilingStatusItemOut,
+    FilingStatusOut,
+    RecordFilingIn,
+    ValidationReportOut,
+)
 from app.services import filing as filing_service
-from app.services import invoice_service
+from app.services import gst_calendar, invoice_service
 
 router = APIRouter(prefix="/filing", tags=["filing"])
 
@@ -21,6 +29,17 @@ _read_limit = RateLimit("filing_read", "120/minute")
 # An export builds the whole return and serialises it. Heavier than a preview,
 # and a download is something a person triggers rather than a screen.
 _export_limit = RateLimit("filing_export", "30/minute")
+# Recording a filing rebuilds the return to store alongside it, and it is an
+# action a person takes a handful of times a month.
+_record_limit = RateLimit("filing_record", "20/minute")
+
+# How many completed periods the status endpoint reports on. Six months covers
+# the reconciliation history the dashboard already shows, and is well past the
+# point where an unfiled return is news rather than a reminder.
+STATUS_PERIODS = 6
+
+# The returns a business files, addressable in a path.
+_FILABLE = {rt.value: rt for rt in gst_calendar.DUE_DAY}
 
 # Which direction of invoice each return is built from.
 _DIRECTION = {
@@ -121,6 +140,138 @@ def preview_gstr3b(
         document=filing_service.build_gstr3b(db, business, resolved),
         validation=ValidationReportOut.model_validate(
             filing_service.validate_period(db, business, resolved).as_dict()
+        ),
+    )
+
+
+def _standing_out(standing: filing_service.ReturnStanding) -> FilingStatusItemOut:
+    return FilingStatusItemOut(
+        period=standing.period,
+        return_type=standing.return_type.value,
+        due_date=standing.due_date,
+        filed=standing.filed,
+        filed_on=standing.filed_on,
+        arn=standing.arn,
+        filed_late=standing.filed_late,
+        days_until_due=standing.days_until_due,
+    )
+
+
+@router.get(
+    "/status",
+    response_model=FilingStatusOut,
+    summary="Which returns are filed, which are due, and which are late",
+    description=(
+        "The last six completed periods, each with its GSTR-1 and GSTR-3B. The "
+        "current month is not listed: a return covers a whole month and the "
+        "portal does not open it until that month is over.\n\n"
+        "`days_until_due` goes negative once the date has passed, and "
+        "`filed_late` stays true for a return that was filed after its due date "
+        "— the clock stops at filing, so a return filed a week late does not go "
+        "on getting later.\n\n"
+        "Dates are Indian. A deadline falls at the end of the day in India, not "
+        "wherever the server happens to run."
+    ),
+    dependencies=[Depends(_read_limit)],
+)
+def filing_status(
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_current_business),
+) -> FilingStatusOut:
+    """Which returns are filed, which are due, and which are late."""
+    today = gst_calendar.today_ist()
+    periods = gst_calendar.completed_periods(today, STATUS_PERIODS)
+    lines = filing_service.standings(db, business.id, periods=periods, as_of=today)
+    return FilingStatusOut(
+        as_of=today,
+        # Newest period first: the one a business is about to file is the one
+        # they came to look at.
+        items=[_standing_out(line) for line in reversed(lines)],
+    )
+
+
+@router.post(
+    "/{return_type}/filed",
+    response_model=FiledReturnOut,
+    status_code=status.HTTP_201_CREATED,
+    summary="Record that a return was filed on the portal",
+    description=(
+        "`return_type` is `gstr1` or `gstr3b`. This product prepares and exports "
+        "a return; the portal is where it is submitted, and nothing here can "
+        "observe that — so the business says so, and until they do the return "
+        "looks exactly like one that was never filed.\n\n"
+        "That is not only bookkeeping: the deadline alerting reads this, so a "
+        "filing nobody records is a business that keeps being told it is late.\n\n"
+        "Idempotent per period and return type. Recording the same period again "
+        "corrects the ARN or the date rather than filing twice, so this is how a "
+        "reference that was not to hand at the time gets added later.\n\n"
+        "The ARN is optional for that reason. It is the proof the filing "
+        "happened, but refusing the record without it would leave the alert "
+        "firing for a return that is genuinely filed."
+    ),
+    responses={
+        404: {"description": "Unknown return type."},
+        422: {"description": "The filing could not have happened as described."},
+    },
+    dependencies=[Depends(_record_limit)],
+)
+def record_filed(
+    return_type: str,
+    payload: RecordFilingIn,
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_current_business),
+) -> FiledReturnOut:
+    """Record that a return was filed on the portal.
+
+    Idempotent per period and return type: recording the same period again
+    corrects the reference rather than filing a second time.
+    """
+    kind = _FILABLE.get(return_type.lower())
+    if kind is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown return type '{return_type}'. Expected one of: "
+            + ", ".join(sorted(_FILABLE)),
+        )
+
+    try:
+        record = filing_service.record_filing(
+            db,
+            business,
+            payload.period,
+            kind,
+            arn=payload.arn,
+            filed_on=payload.filed_on,
+        )
+    except filing_service.FilingNotRecordable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)
+        ) from exc
+
+    return _filed_out(record)
+
+
+def _filed_out(record: GSTRReturn) -> FiledReturnOut:
+    due = record.due_date
+    filed_at = record.filed_at
+    return FiledReturnOut(
+        id=record.id,
+        period=record.period,
+        return_type=record.return_type.value,
+        status=record.status.value,
+        arn=record.arn,
+        filed_at=filed_at,
+        due_date=due,
+        invoice_count=record.invoice_count,
+        total_taxable_value=record.total_taxable_value,
+        total_cgst=record.total_cgst,
+        total_sgst=record.total_sgst,
+        total_igst=record.total_igst,
+        total_cess=record.total_cess,
+        filed_late=(
+            gst_calendar.ist_date(filed_at) > gst_calendar.ist_date(due)
+            if filed_at and due
+            else False
         ),
     )
 

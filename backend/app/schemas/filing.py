@@ -1,7 +1,10 @@
 """Request/response models for pre-filing validation and portal exports."""
 from __future__ import annotations
 
-from pydantic import BaseModel
+from datetime import date, datetime
+from decimal import Decimal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ValidationIssueOut(BaseModel):
@@ -38,3 +41,66 @@ class FilingPreviewOut(BaseModel):
     return_type: str
     document: dict
     validation: ValidationReportOut
+
+
+class RecordFilingIn(BaseModel):
+    """What the business tells us after they have filed on the portal."""
+
+    period: str = Field(pattern=r"^\d{4}-\d{2}$", description="The period filed, `YYYY-MM`.")
+    # Optional because the acknowledgement is not always to hand at the moment
+    # someone marks a return done, and refusing the record would leave the
+    # deadline alert firing for a return that is genuinely filed. It can be
+    # supplied later by recording the same period again.
+    arn: str | None = Field(
+        default=None,
+        max_length=40,
+        description="The portal's Acknowledgement Reference Number, if it is to hand.",
+    )
+    filed_on: date | None = Field(
+        default=None, description="Defaults to today in India, where the deadline falls."
+    )
+
+
+class FiledReturnOut(BaseModel):
+    """A return this tenant has recorded as filed."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    period: str
+    return_type: str
+    status: str
+    arn: str | None = None
+    filed_at: datetime | None = None
+    due_date: datetime | None = None
+    invoice_count: int
+    total_taxable_value: Decimal
+    total_cgst: Decimal
+    total_sgst: Decimal
+    total_igst: Decimal
+    total_cess: Decimal
+    # True when the recorded filing date is after the statutory due date. The
+    # figure a business wants here is not "when did I file" but "was I late",
+    # and computing that on the client means shipping the due-date rule twice.
+    filed_late: bool = False
+
+
+class FilingStatusItemOut(BaseModel):
+    """One period and one return type: due when, filed or not."""
+
+    period: str
+    return_type: str
+    due_date: date
+    filed: bool
+    filed_on: date | None = None
+    arn: str | None = None
+    filed_late: bool = False
+    # Negative once the due date has passed.
+    days_until_due: int
+
+
+class FilingStatusOut(BaseModel):
+    """Recent periods and where each return stands."""
+
+    as_of: date
+    items: list[FilingStatusItemOut]

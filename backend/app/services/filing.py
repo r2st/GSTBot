@@ -25,8 +25,9 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime, time
 from decimal import ROUND_HALF_UP, Decimal
 from enum import Enum
 
@@ -34,7 +35,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.business import Business
+from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
+from app.services import gst_calendar, invoice_service
 from app.services import gstin as gstin_service
 from app.services import itc as itc_service
 
@@ -329,6 +332,230 @@ def validate_period(
             validate_invoice(invoice, business_state=business.state_code, period=period)
         )
     return report
+
+
+# ---------------------------------------------------------------------------
+# Recording that a return was filed
+# ---------------------------------------------------------------------------
+
+# The portal issues a 15-character ARN, but this is not pinned to 15. The two
+# ways to be wrong here are not symmetric: too loose stores a typo, while too
+# strict locks a business out of recording a filing that genuinely happened —
+# and the deadline alert for that period then never clears, so the product
+# nags them about a return they have already filed. The check is therefore
+# only tight enough to reject something that is plainly not an ARN.
+ARN_PATTERN = re.compile(r"^[0-9A-Z]{10,32}$")
+
+
+class FilingNotRecordable(ValueError):
+    """The filing being recorded could not have happened as described."""
+
+
+def normalise_arn(arn: str | None) -> str | None:
+    """Upper-case and strip an ARN, or raise if it is not one.
+
+    The portal prints it with spaces in some acknowledgements, so whitespace is
+    removed rather than rejected.
+    """
+    if arn is None:
+        return None
+    cleaned = "".join(arn.split()).upper()
+    if not cleaned:
+        return None
+    if not ARN_PATTERN.match(cleaned):
+        raise FilingNotRecordable(
+            f"'{arn}' is not an ARN. The portal's acknowledgement shows a 15-character "
+            "reference made up of letters and digits."
+        )
+    return cleaned
+
+
+def record_filing(
+    db: Session,
+    business: Business,
+    period: str,
+    return_type: ReturnType,
+    *,
+    arn: str | None = None,
+    filed_on: date | None = None,
+) -> GSTRReturn:
+    """Record that *return_type* for *period* was filed on the portal.
+
+    This product prepares and exports a return; the portal is where it is
+    actually submitted. Nothing here can observe that submission, so the
+    business tells us — and until they do, the return is indistinguishable from
+    one that was never filed. That matters beyond bookkeeping: the deadline
+    alerting reads exactly this, so a filing that is never recorded is a
+    business that keeps being told it is late.
+
+    Idempotent per period and return type. Re-recording corrects the ARN or the
+    date rather than filing a second time, which matches the partial unique
+    index on the table — and matches what the caller means, since there is only
+    ever one live GSTR-1 for a period.
+
+    ``data`` is the return as *this application builds it now*. Immediately
+    after an export — which is the flow this exists for — that is exactly what
+    went to the portal. Recorded months later, against books that have since
+    been corrected, it is not, and it is stored as the best available record
+    rather than as proof of what was submitted. The ARN is the proof.
+    """
+    if return_type not in gst_calendar.DUE_DAY:
+        raise FilingNotRecordable(
+            f"{return_type.value} is not a return a business files. Only "
+            + " and ".join(sorted(rt.value for rt in gst_calendar.DUE_DAY))
+            + " can be recorded as filed."
+        )
+
+    today = gst_calendar.today_ist()
+    filed_on = filed_on or today
+    if filed_on > today:
+        raise FilingNotRecordable(
+            f"A filing date of {filed_on.isoformat()} is in the future."
+        )
+
+    # A period cannot be filed before it has finished — there is nothing to
+    # summarise yet, and the portal does not open the return until the month is
+    # over. A date inside the period is a mistyped year far more often than it
+    # is anything else.
+    opens_year, opens_month = gst_calendar.next_period(period).split("-")
+    opens_on = date(int(opens_year), int(opens_month), 1)
+    if filed_on < opens_on:
+        raise FilingNotRecordable(
+            f"{period} could not have been filed on {filed_on.isoformat()}: the period "
+            f"had not ended. The return opens on {opens_on.isoformat()}."
+        )
+
+    existing = db.scalar(
+        select(GSTRReturn).where(
+            GSTRReturn.business_id == business.id,
+            GSTRReturn.period == period,
+            GSTRReturn.return_type == return_type,
+            GSTRReturn.deleted_at.is_(None),
+        )
+    )
+    record = existing or GSTRReturn(
+        business_id=business.id, period=period, return_type=return_type
+    )
+
+    record.status = ReturnStatus.FILED
+    record.arn = normalise_arn(arn)
+    record.filed_at = datetime.combine(filed_on, time(), tzinfo=gst_calendar.IST)
+    record.due_date = datetime.combine(
+        gst_calendar.due_date(period, return_type), time(), tzinfo=gst_calendar.IST
+    )
+    record.data = (
+        build_gstr1(db, business, period)
+        if return_type is ReturnType.GSTR1
+        else build_gstr3b(db, business, period)
+    )
+
+    # Both returns summarise outward supplies, so both take their totals from
+    # sales. The purchase side reaches GSTR-3B as input credit, which is a
+    # different figure and is inside ``data``.
+    totals = invoice_service.tax_summary(db, business.id, period)["sales"]
+    record.invoice_count = int(totals["count"])
+    record.total_taxable_value = _q(Decimal(totals["taxable_value"]))
+    record.total_cgst = _q(Decimal(totals["cgst"]))
+    record.total_sgst = _q(Decimal(totals["sgst"]))
+    record.total_igst = _q(Decimal(totals["igst"]))
+    record.total_cess = _q(Decimal(totals["cess"]))
+
+    if existing is None:
+        db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+def filed_returns(
+    db: Session, business_id: int, periods: list[str] | None = None
+) -> dict[tuple[str, ReturnType], GSTRReturn]:
+    """Filed returns for this tenant, keyed by period and type.
+
+    A mapping rather than a list because both callers — the alerting and the
+    status endpoint — are asking "has *this* been filed", and a keyed lookup is
+    what stops that becoming a query per period.
+    """
+    conditions = [
+        GSTRReturn.business_id == business_id,
+        GSTRReturn.deleted_at.is_(None),
+        GSTRReturn.status == ReturnStatus.FILED,
+    ]
+    if periods is not None:
+        if not periods:
+            return {}
+        conditions.append(GSTRReturn.period.in_(periods))
+
+    return {
+        (row.period, row.return_type): row
+        for row in db.scalars(select(GSTRReturn).where(*conditions)).all()
+    }
+
+
+@dataclass(frozen=True)
+class ReturnStanding:
+    """Where one return, for one period, stands as of one date.
+
+    Shared by the status endpoint and the deadline alerting so that both answer
+    "is this late" the same way. They disagreed once in an earlier design, and
+    an alert that contradicts the screen it links to is worse than no alert.
+    """
+
+    period: str
+    return_type: ReturnType
+    due_date: date
+    as_of: date
+    filed_on: date | None = None
+    arn: str | None = None
+
+    @property
+    def filed(self) -> bool:
+        return self.filed_on is not None
+
+    @property
+    def filed_late(self) -> bool:
+        return self.filed_on is not None and self.filed_on > self.due_date
+
+    @property
+    def days_until_due(self) -> int:
+        """Negative once the due date has passed."""
+        return (self.due_date - self.as_of).days
+
+    @property
+    def overdue(self) -> bool:
+        """Unfiled and past the due date. Filing late stops the clock."""
+        return not self.filed and self.days_until_due < 0
+
+
+def standings(
+    db: Session, business_id: int, *, periods: list[str], as_of: date
+) -> list[ReturnStanding]:
+    """Every filable return over *periods*, oldest period first.
+
+    One query for the lot: the caller is asking about a handful of periods
+    across two return types, and a lookup per cell is six round trips to answer
+    a question the dashboard asks on every load.
+    """
+    filed = filed_returns(db, business_id, periods)
+    lines: list[ReturnStanding] = []
+    for period in sorted(periods):
+        for return_type in gst_calendar.DUE_DAY:
+            record = filed.get((period, return_type))
+            lines.append(
+                ReturnStanding(
+                    period=period,
+                    return_type=return_type,
+                    due_date=gst_calendar.due_date(period, return_type),
+                    as_of=as_of,
+                    filed_on=(
+                        gst_calendar.ist_date(record.filed_at)
+                        if record and record.filed_at
+                        else None
+                    ),
+                    arn=record.arn if record else None,
+                )
+            )
+    return lines
 
 
 def _invoices(

@@ -18,9 +18,19 @@ than inventing a day.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from app.models.gstr_return import ReturnType
+
+# Every date in this module is an Indian one. A due date falls at the end of
+# the 20th *in India*, so a server running on UTC is already a day behind by
+# 18:30 local — which would have the alerting call a return on time for another
+# five and a half hours after the penalty started running.
+#
+# A fixed offset rather than ``ZoneInfo("Asia/Kolkata")``: India has not
+# observed daylight saving since 1945 and IST has been UTC+05:30 throughout, so
+# there is no rule to look up, and this needs no tzdata on the host.
+IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
 # GSTR-1 — outward supplies — is due on the 11th of the month after the period.
 GSTR1_DUE_DAY = 11
@@ -31,10 +41,59 @@ GSTR1_DUE_DAY = 11
 GSTR3B_DUE_DAY = 20
 
 
+def today_ist() -> date:
+    """The current date in India — the only date a GST deadline is measured in."""
+    return datetime.now(IST).date()
+
+
+def ist_date(moment: datetime) -> date:
+    """The Indian calendar date a stored instant falls on.
+
+    Reading ``.date()`` off a timestamp straight out of the database is wrong
+    on the backend that ships and right on the one the suite runs, which is the
+    worst combination available. Midnight IST is 18:30 *the previous day* in
+    UTC, so a filing recorded on the 15th comes back from Postgres — which
+    stores ``timestamptz`` normalised to UTC — as the 14th, and every recorded
+    filing is reported a day early. SQLite has no zone at all: SQLAlchemy
+    formats the wall clock and drops the offset, so the same call returns the
+    15th and the test suite sees nothing wrong.
+
+    A naive value is therefore read as the IST wall time it was written as, and
+    an aware one is converted.
+    """
+    return moment.date() if moment.tzinfo is None else moment.astimezone(IST).date()
+
+
+def period_of(moment: date) -> str:
+    """The ``YYYY-MM`` period *moment* falls in."""
+    return f"{moment.year:04d}-{moment.month:02d}"
+
+
 def next_period(period: str) -> str:
     """The ``YYYY-MM`` period after *period*."""
     year, month = (int(part) for part in period.split("-"))
     return f"{year + 1:04d}-01" if month == 12 else f"{year:04d}-{month + 1:02d}"
+
+
+def previous_period(period: str) -> str:
+    """The ``YYYY-MM`` period before *period*."""
+    year, month = (int(part) for part in period.split("-"))
+    return f"{year - 1:04d}-12" if month == 1 else f"{year:04d}-{month - 1:02d}"
+
+
+def completed_periods(today: date, count: int) -> list[str]:
+    """The *count* periods that have ended as of *today*, newest first.
+
+    The month *today* falls in is excluded: a return covers a whole month, and
+    the portal does not open it until that month is over. Including it would
+    have the product asking for a GSTR-1 covering sales that have not happened.
+    """
+    period = period_of(today)
+    periods: list[str] = []
+    for _ in range(count):
+        period = previous_period(period)
+        periods.append(period)
+    return periods
 
 
 def _due_on(period: str, day: int) -> date:
