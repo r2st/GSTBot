@@ -68,7 +68,7 @@ def _resolve_period(period: str | None) -> str:
     dependencies=[Depends(_read_limit)],
 )
 def validate(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     invoice_type: InvoiceType = Query(default=InvoiceType.SALES),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
@@ -98,7 +98,7 @@ def validate(
     dependencies=[Depends(_read_limit)],
 )
 def preview_gstr1(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> FilingPreviewOut:
@@ -128,7 +128,7 @@ def preview_gstr1(
     dependencies=[Depends(_read_limit)],
 )
 def preview_gstr3b(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> FilingPreviewOut:
@@ -308,7 +308,7 @@ def _filed_out(record: GSTRReturn) -> FiledReturnOut:
 def export(
     return_type: str,
     extension: str,
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> Response:

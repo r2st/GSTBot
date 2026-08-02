@@ -18,9 +18,28 @@ than inventing a day.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timedelta, timezone
 
 from app.models.gstr_return import ReturnType
+
+# The only shape a filing period may take: ``YYYY-MM`` with a month that exists.
+#
+# ``\d{4}-\d{2}`` is the obvious pattern and it is not a period validator — it
+# admits ``2026-00`` and ``2026-13``, and every route that took one handed it
+# straight to arithmetic that assumes a real month. ``next_period("2026-13")``
+# is ``2026-14``, which ``date()`` refuses, so a due date computed from it was
+# a 500 rather than the 422 a malformed query string has earned. The ones that
+# did not raise were worse: ``2026-13`` built a GSTR-1 stamped ``fp=132026``
+# and ``2026-00`` quietly aliased onto January, both of them documents about a
+# month that does not exist.
+#
+# Anchored, so it validates the same whether a caller matches or searches with
+# it. Exported as the single definition every route, schema and importer spells
+# the period with.
+PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+_PERIOD_RE = re.compile(PERIOD_PATTERN)
 
 # Every date in this module is an Indian one. A due date falls at the end of
 # the 20th *in India*, so a server running on UTC is already a day behind by
@@ -62,6 +81,11 @@ def ist_date(moment: datetime) -> date:
     an aware one is converted.
     """
     return moment.date() if moment.tzinfo is None else moment.astimezone(IST).date()
+
+
+def is_period(value: object) -> bool:
+    """Whether *value* is a ``YYYY-MM`` period naming a month that exists."""
+    return isinstance(value, str) and _PERIOD_RE.match(value) is not None
 
 
 def period_of(moment: date) -> str:

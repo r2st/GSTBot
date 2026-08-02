@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from app.services import gst_calendar
 from app.services import gstin as gstin_service
 from app.services.invoice_parser import to_date, to_decimal
 
@@ -139,7 +140,11 @@ def period_from_portal(value: object) -> str | None:
     real download go down the same path.
     """
     text = str(value or "").strip()
-    if re.fullmatch(r"\d{4}-\d{2}", text):
+    # Month checked, not just the shape: this is the one path by which a period
+    # enters the database without passing a route's validation, and a hand-
+    # edited statement claiming ``2026-13`` would be stored and then reconciled
+    # against arithmetic that assumes the month exists.
+    if gst_calendar.is_period(text):
         return text
     if re.fullmatch(r"\d{6}", text):
         month, year = text[:2], text[2:]

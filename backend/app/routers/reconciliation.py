@@ -3,7 +3,17 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+    status,
+)
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -22,7 +32,7 @@ from app.schemas.reconciliation import (
     ReconciliationListOut,
     ReconciliationRunOut,
 )
-from app.services import gstr2b, reconciliation
+from app.services import gst_calendar, gstr2b, reconciliation
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +249,7 @@ def run(
     dependencies=[Depends(_read_limit)],
 )
 def list_runs(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -275,7 +285,7 @@ def list_runs(
     dependencies=[Depends(_read_limit)],
 )
 def latest_run(
-    period: str = Query(..., pattern=r"^\d{4}-\d{2}$"),
+    period: str = Query(..., pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> ReconciliationDetailOut:
@@ -342,7 +352,7 @@ def get_run(
     dependencies=[Depends(_read_limit)],
 )
 def get_imported_2b(
-    period: str,
+    period: str = Path(pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> GSTR2BImportOut:

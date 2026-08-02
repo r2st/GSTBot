@@ -21,7 +21,7 @@ from app.schemas.invoice import (
     InvoiceUpdate,
     InvoiceUploadResponse,
 )
-from app.services import invoice_service
+from app.services import gst_calendar, invoice_service
 
 logger = logging.getLogger(__name__)
 
@@ -209,7 +209,7 @@ def list_invoices(
     ),
     period: str | None = Query(
         default=None,
-        pattern=r"^\d{4}-\d{2}$",
+        pattern=gst_calendar.PERIOD_PATTERN,
         description="Filing period as `YYYY-MM`, derived from the invoice date.",
         examples=["2026-04"],
     ),

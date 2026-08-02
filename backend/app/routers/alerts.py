@@ -31,6 +31,7 @@ from app.models.alert import (
 )
 from app.models.business import Business
 from app.schemas.alert import AlertListOut, AlertOut, AlertScope
+from app.services import gst_calendar
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
@@ -108,7 +109,7 @@ def list_alerts(
     ),
     period: str | None = Query(
         default=None,
-        pattern=r"^\d{4}-\d{2}$",
+        pattern=gst_calendar.PERIOD_PATTERN,
         description="Filing period as `YYYY-MM`, for alerts that are about one.",
         examples=["2026-04"],
     ),

@@ -119,3 +119,54 @@ class TestDispatchingOnReturnType:
         # the model and not here, the deadline alerts silently stop covering
         # it — so the omission is asserted rather than discovered.
         assert set(gst_calendar.DUE_DAY) == {ReturnType.GSTR1, ReturnType.GSTR3B}
+
+
+class TestWhatCountsAsAPeriod:
+    """``\\d{4}-\\d{2}`` is not a period validator, and every route used it.
+
+    It admits ``2026-00`` and ``2026-13``, and both reached arithmetic that
+    assumes the month exists. ``next_period("2026-13")`` is ``2026-14``, which
+    ``date()`` refuses — so a due date computed from a query string was a 500
+    rather than the 422 a malformed one has earned. The values that did not
+    raise were the worse half: ``2026-13`` built a GSTR-1 stamped ``fp=132026``
+    and ``2026-00`` aliased quietly onto January, each of them a return
+    document about a month that does not exist.
+    """
+
+    @pytest.mark.parametrize("period", ["2026-01", "2026-09", "2026-10", "2026-12"])
+    def test_a_real_month_is_a_period(self, period):
+        assert gst_calendar.is_period(period)
+
+    @pytest.mark.parametrize("period", ["2026-00", "2026-13", "2026-99", "2026-1"])
+    def test_a_month_outside_1_to_12_is_not(self, period):
+        assert not gst_calendar.is_period(period)
+
+    @pytest.mark.parametrize(
+        "value", ["", "2026", "202604", "04-2026", "2026-04-01", "abcd-ef", None, 202604]
+    )
+    def test_anything_that_is_not_yyyy_mm_is_not(self, value):
+        assert not gst_calendar.is_period(value)
+
+    def test_the_pattern_is_anchored_at_both_ends(self):
+        # Pydantic matches rather than fullmatches, so an unanchored pattern
+        # would accept "2026-04junk" — and a trailing-garbage period reaches
+        # the database as a string nothing else in the product will match.
+        assert not gst_calendar.is_period("x2026-04")
+        assert not gst_calendar.is_period("2026-04x")
+
+    @pytest.mark.parametrize("period", ["2026-00", "2026-13", "2026-99"])
+    def test_the_months_the_old_pattern_let_through_break_the_arithmetic(
+        self, period
+    ):
+        # Why this is validated at the edge rather than defended against
+        # everywhere downstream: the arithmetic cannot give a sensible answer,
+        # so the only place to say no is before it is reached.
+        assert not gst_calendar.is_period(period)
+        month = int(period.split("-")[1])
+        if month in (13, 99):
+            with pytest.raises(ValueError, match="month must be in 1..12"):
+                gst_calendar.gstr3b_due_date(period)
+        else:
+            # 2026-00 does not raise, which is worse: it silently answers as
+            # though the caller had asked about a month before January.
+            assert gst_calendar.gstr3b_due_date(period) == date(2026, 1, 20)

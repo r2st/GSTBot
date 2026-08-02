@@ -6,6 +6,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.services import gst_calendar
+
 
 class ValidationIssueOut(BaseModel):
     """One problem found on one invoice."""
@@ -46,7 +48,9 @@ class FilingPreviewOut(BaseModel):
 class RecordFilingIn(BaseModel):
     """What the business tells us after they have filed on the portal."""
 
-    period: str = Field(pattern=r"^\d{4}-\d{2}$", description="The period filed, `YYYY-MM`.")
+    period: str = Field(
+        pattern=gst_calendar.PERIOD_PATTERN, description="The period filed, `YYYY-MM`."
+    )
     # Optional because the acknowledgement is not always to hand at the moment
     # someone marks a return done, and refusing the record would leave the
     # deadline alert firing for a return that is genuinely filed. It can be

@@ -22,7 +22,7 @@ from app.schemas.dashboard import (
     PlanUsage,
     TaxBucket,
 )
-from app.services import invoice_service
+from app.services import gst_calendar, invoice_service
 from app.services.gst_calendar import gstr3b_due_date
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -90,7 +90,7 @@ def _net_liability(sales: TaxBucket, purchase: TaxBucket) -> NetLiability:
     dependencies=[Depends(_dashboard_limit)],
 )
 def get_dashboard(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> DashboardOut:

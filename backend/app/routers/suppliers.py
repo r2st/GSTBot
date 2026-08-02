@@ -18,7 +18,7 @@ from app.schemas.supplier import (
     SupplierOut,
     SupplierScoreOut,
 )
-from app.services import supplier_score
+from app.services import gst_calendar, supplier_score
 
 router = APIRouter(prefix="/suppliers", tags=["suppliers"])
 
@@ -124,7 +124,7 @@ def _owned_supplier(db: Session, business: Business, supplier_id: int) -> Suppli
     dependencies=[Depends(_rescore_limit)],
 )
 def rescore(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> RescoreOut:
@@ -157,7 +157,7 @@ def rescore(
 )
 def get_supplier(
     supplier_id: int,
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> SupplierDetailOut:

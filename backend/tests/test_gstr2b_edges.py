@@ -103,6 +103,17 @@ class TestPeriodFormats:
         """
         assert period_from_portal(raw) is None
 
+    @pytest.mark.parametrize("raw", ["2026-13", "2026-00", "2026-99"])
+    def test_the_passthrough_branch_checks_the_month_too(self, raw):
+        """The six-digit readings both range-checked the month; this one did not.
+
+        It matched on shape alone, so a hand-edited statement naming
+        ``2026-13`` was accepted verbatim — and this is the one path by which
+        a period reaches the database without passing a route's validation.
+        Stored, it becomes a filing period no return can ever be filed for.
+        """
+        assert period_from_portal(raw) is None
+
 
 # --------------------------------------------------------------------------
 # JSON that is shaped wrong

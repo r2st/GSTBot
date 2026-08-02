@@ -32,6 +32,7 @@ from starlette.status import HTTP_204_NO_CONTENT, HTTP_304_NOT_MODIFIED
 
 from app.core.rate_limit import RateLimit
 from app.main import app
+from app.services import gst_calendar
 from tests.conftest import SUPPLIER_GSTIN_SAME_STATE, TEST_EMAIL, TEST_PASSWORD
 
 # Statuses RFC 9110 forbids a body on. FastAPI asserts on these at import.
@@ -276,3 +277,99 @@ class TestEndpointSignatures:
         schema = app.openapi()
         assert schema["openapi"].startswith("3.")
         assert schema["paths"]
+
+
+class TestEveryPeriodParameterNamesARealMonth:
+    """A filing period is ``YYYY-MM``, and the month has to exist.
+
+    Every route here once validated one with ``\\d{4}-\\d{2}``, which is a
+    shape check and not a period check: it accepts ``2026-00`` and ``2026-13``.
+    Those reach arithmetic that assumes a real month — ``next_period("2026-13")``
+    is ``2026-14``, which ``date()`` refuses — so the dashboard answered a
+    malformed query string with a 500, and the filing previews answered with a
+    200 carrying a GSTR-1 stamped ``fp=132026``.
+
+    Swept rather than spot-checked because the failure mode is a new route
+    spelling the pattern out by hand again, which no individual route's tests
+    would notice.
+    """
+
+    @staticmethod
+    def _period_schemas(route) -> list[dict]:
+        """Every ``period`` parameter's schema on *route*, query or path."""
+        dependant = route.dependant
+        found = []
+        for param in (*dependant.query_params, *dependant.path_params):
+            if param.name != "period":
+                continue
+            schema = param.field_info
+            found.append(schema)
+        return found
+
+    def test_at_least_one_route_takes_a_period(self):
+        # Guards the sweep itself: a collector that finds nothing passes every
+        # assertion below without checking anything.
+        total = sum(
+            len(self._period_schemas(route))
+            for route in _collect_api_routes(app)
+            if hasattr(route, "dependant")
+        )
+        assert total >= 10, f"only found {total} period parameters — sweep is broken"
+
+    def test_every_period_parameter_carries_the_canonical_pattern(self):
+        offenders = []
+        for route in _collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for field_info in self._period_schemas(route):
+                patterns = [
+                    getattr(meta, "pattern", None)
+                    for meta in getattr(field_info, "metadata", []) or []
+                ]
+                if gst_calendar.PERIOD_PATTERN not in patterns:
+                    offenders.append((route.path, patterns))
+        assert not offenders, (
+            "these period parameters do not use gst_calendar.PERIOD_PATTERN: "
+            f"{offenders}"
+        )
+
+    @pytest.mark.parametrize("period", ["2026-00", "2026-13", "2026-99"])
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/api/v1/dashboard",
+            "/api/v1/invoices",
+            "/api/v1/itc",
+            "/api/v1/alerts",
+            "/api/v1/reconciliation",
+            "/api/v1/reconciliation/latest",
+            "/api/v1/reconciliation/gstr2b/2026-13",
+            "/api/v1/filing/validate",
+            "/api/v1/filing/gstr1",
+            "/api/v1/filing/gstr3b",
+        ],
+    )
+    def test_an_impossible_month_is_refused_not_answered(
+        self, auth_client, url, period
+    ):
+        response = auth_client.get(url, params={"period": period})
+        assert response.status_code == 422, (
+            f"{url} answered {response.status_code} for period={period}"
+        )
+
+    @pytest.mark.parametrize("period", ["2026-00", "2026-13"])
+    def test_a_reconciliation_cannot_be_run_for_a_month_that_does_not_exist(
+        self, auth_client, period
+    ):
+        assert (
+            auth_client.post(
+                "/api/v1/reconciliation/run", json={"period": period}
+            ).status_code
+            == 422
+        )
+
+    def test_a_real_month_is_still_accepted(self, auth_client):
+        # The guard against over-correcting into refusing everything.
+        assert auth_client.get(
+            "/api/v1/dashboard", params={"period": "2026-04"}
+        ).status_code == 200

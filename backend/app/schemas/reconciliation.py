@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.gstr_return import ReturnStatus, ReturnType
 from app.models.reconciliation_run import ReconciliationStatus
+from app.services import gst_calendar
 
 
 class GSTR2BImportOut(BaseModel):
@@ -72,7 +73,7 @@ class ReconciliationListOut(BaseModel):
 class ReconcileRequest(BaseModel):
     """Ask for a period to be reconciled."""
 
-    period: str = Field(pattern=r"^\d{4}-\d{2}$")
+    period: str = Field(pattern=gst_calendar.PERIOD_PATTERN)
     # Rupee gap treated as agreement. Exposed because a business reconciling
     # high-value inter-state invoices may reasonably accept a wider band than
     # the default, and because a CA checking a specific dispute wants to set it

@@ -12,7 +12,7 @@ from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
 from app.schemas.itc import ITCSummaryOut, Rule37Out, SetOffOut, SetOffRequest
-from app.services import invoice_service
+from app.services import gst_calendar, invoice_service
 from app.services import itc as itc_service
 
 router = APIRouter(prefix="/itc", tags=["itc"])
@@ -42,7 +42,7 @@ _setoff_limit = RateLimit("itc_setoff", "240/minute")
     dependencies=[Depends(_read_limit)],
 )
 def get_itc_summary(
-    period: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}$"),
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     exempt_turnover: Decimal | None = Query(default=None, ge=0),
     total_turnover: Decimal | None = Query(default=None, ge=0),
     as_of: date | None = Query(
