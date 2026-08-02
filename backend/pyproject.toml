@@ -17,8 +17,30 @@ include = ["app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# No --cov here. Coverage slows the suite by roughly a third, and the number
+# is only interesting in CI and when someone asks for it; `pytest --cov=app`
+# picks up the settings below on demand.
 addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+# A gate rather than a target. It is set just under where the suite actually
+# sits so that deleting tests, or adding a module with none, fails CI — not so
+# that anyone writes a test purely to move it.
+fail_under = 95
+show_missing = true
+skip_covered = true
+exclude_also = [
+    # Guards for code paths that only exist under a type checker.
+    "if TYPE_CHECKING:",
+    # Re-raise helpers and abstract stubs have no behaviour to assert on.
+    "raise NotImplementedError",
+    "@(abc\\.)?abstractmethod",
+]
 
 [tool.ruff]
 line-length = 100
