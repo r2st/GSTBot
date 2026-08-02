@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { MemoryRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import ErrorBoundary from "./ErrorBoundary";
+import ErrorBoundary, { SectionBoundary } from "./ErrorBoundary";
 
 /** Throws on render when `explode` is true. */
 function Bomb({ explode, message = "Cannot read properties of null" }) {
@@ -151,5 +151,125 @@ describe("ErrorBoundary", () => {
       </MemoryRouter>,
     );
     expect(screen.getByRole("button", { name: "Reload the app" })).toBeInTheDocument();
+  });
+});
+
+describe("SectionBoundary", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A page with a widget that throws, and content either side of it. */
+  function Page({ explode }) {
+    return (
+      <MemoryRouter>
+        <p>Net liability ₹41,200</p>
+        <SectionBoundary name="The net liability trend">
+          <Bomb explode={explode} message="Cannot read properties of null" />
+        </SectionBoundary>
+        <p>Plan usage</p>
+      </MemoryRouter>
+    );
+  }
+
+  it("renders its children when nothing throws", () => {
+    render(<Page explode={false} />);
+    expect(screen.getByText("Everything is fine")).toBeInTheDocument();
+  });
+
+  it("costs the page only the section that failed", () => {
+    render(<Page explode />);
+
+    // The whole reason this is not the page boundary. A null in one of six
+    // period summaries used to take the stat cards and the tax table with it —
+    // everything the user actually came for.
+    expect(screen.getByText("Net liability ₹41,200")).toBeInTheDocument();
+    expect(screen.getByText("Plan usage")).toBeInTheDocument();
+  });
+
+  it("names what is missing", () => {
+    render(<Page explode />);
+    // "Something went wrong" floating between two panels does not tell the user
+    // what they are no longer looking at.
+    expect(
+      screen.getByText("The net liability trend could not be displayed"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not interrupt with an alert", () => {
+    render(<Page explode />);
+
+    // A chart that failed to draw, while the numbers it summarises are still on
+    // screen, is not worth cutting across whatever a screen reader is saying.
+    // The page-level boundary is the loud one.
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByRole("status")).toBeInTheDocument();
+  });
+
+  it("still shows the underlying message", () => {
+    render(<Page explode />);
+    expect(screen.getByText(/Cannot read properties of null/)).toBeInTheDocument();
+  });
+
+  it("still logs", () => {
+    render(<Page explode />);
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("retries just the section", async () => {
+    const user = userEvent.setup();
+
+    function Flaky() {
+      const [explode, setExplode] = useState(true);
+      return (
+        <MemoryRouter>
+          <button type="button" onClick={() => setExplode(false)}>
+            Fix it
+          </button>
+          <SectionBoundary name="The net liability trend">
+            <Bomb explode={explode} />
+          </SectionBoundary>
+        </MemoryRouter>
+      );
+    }
+
+    render(<Flaky />);
+    expect(screen.getByText("The net liability trend could not be displayed")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Fix it" }));
+    await user.click(screen.getByRole("button", { name: "Retry this section" }));
+
+    expect(screen.getByText("Everything is fine")).toBeInTheDocument();
+  });
+
+  it("clears itself on navigation like the page boundary does", async () => {
+    const user = userEvent.setup();
+
+    function Nav() {
+      const navigate = useNavigate();
+      return (
+        <button type="button" onClick={() => navigate("/safe")}>
+          Go elsewhere
+        </button>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={["/broken"]}>
+        <Nav />
+        <SectionBoundary name="The chart">
+          <Routes>
+            <Route path="/broken" element={<Bomb explode />} />
+            <Route path="/safe" element={<p>A different screen</p>} />
+          </Routes>
+        </SectionBoundary>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("The chart could not be displayed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Go elsewhere" }));
+    expect(screen.getByText("A different screen")).toBeInTheDocument();
   });
 });

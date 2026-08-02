@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
+import TableScroll from "../components/TableScroll";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { currentPeriod, periodLabel, rupees } from "../lib/format";
 
@@ -63,6 +65,7 @@ function IssueRow({ issue }) {
 }
 
 export default function FilingPage() {
+  usePageTitle("Filing");
   const [period, setPeriod] = useState(currentPeriod());
   const [returnType, setReturnType] = useState("gstr1");
   const [preview, setPreview] = useState(null);
@@ -264,7 +267,7 @@ export default function FilingPage() {
                 portal needs.
               </p>
             ) : (
-              <div className="table-scroll">
+              <TableScroll label="Validation issues">
                 <table className="table">
                   <thead>
                     <tr>
@@ -283,7 +286,7 @@ export default function FilingPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             )}
           </section>
         </>

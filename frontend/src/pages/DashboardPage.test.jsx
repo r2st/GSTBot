@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -304,6 +304,126 @@ describe("DashboardPage", () => {
 
       release();
       vi.useRealTimers();
+    });
+  });
+  describe("the plan usage meter", () => {
+    it("reports usage as a progress bar rather than a bare width", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+
+      const bar = await screen.findByRole("progressbar", {
+        name: "Invoices used this month",
+      });
+      expect(bar).toHaveAttribute("aria-valuetext", "3 of 50");
+    });
+
+    it("shows nothing to fill on an unlimited plan", async () => {
+      mockDashboard(
+        dashboard({
+          plan_usage: {
+            plan: "pro",
+            invoices_this_month: 812,
+            monthly_limit: null,
+            remaining: null,
+          },
+        }),
+      );
+      renderPage();
+
+      await screen.findByText(/812/);
+      // No ceiling means no proportion to report; a bar stuck at zero or full
+      // would both be lies.
+      expect(screen.queryByRole("progressbar")).toBeNull();
+    });
+
+    it("marks an account that is over its limit", async () => {
+      // The plan check runs at upload time, so an account moved to a smaller
+      // plan is over the limit before it uploads anything.
+      mockDashboard(
+        dashboard({
+          plan_usage: {
+            plan: "free",
+            invoices_this_month: 64,
+            monthly_limit: 50,
+            remaining: 0,
+          },
+        }),
+      );
+      const { container } = renderPage();
+
+      const bar = await screen.findByRole("progressbar");
+      expect(bar).toHaveAttribute("aria-valuetext", "64 of 50");
+      expect(container.querySelector(".meter-fill")).toHaveClass("is-over");
+    });
+  });
+
+  describe("the trend chart", () => {
+    const PERIODS = [
+      { period: "2026-03", net_liability: { total: "9000.00" } },
+      { period: "2026-04", net_liability: { total: "12500.00" } },
+    ];
+
+    it("carries the same numbers in a table for anyone who cannot see the bars", async () => {
+      mockDashboard(dashboard({ recent_periods: PERIODS }));
+      renderPage();
+
+      // Six divs with a height percentage are not a chart to a screen reader,
+      // and there is no ARIA that makes them one. A table of the same figures
+      // is the honest equivalent — and is what someone would want anyway.
+      const table = await screen.findByRole("table", { name: "Net liability by period" });
+      expect(table).toBeInTheDocument();
+      expect(within(table).getByRole("row", { name: /March 2026.*₹9,000.00/ })).toBeInTheDocument();
+      expect(within(table).getByRole("row", { name: /April 2026.*₹12,500.00/ })).toBeInTheDocument();
+    });
+
+    it("hides the decorative bars from assistive tech", async () => {
+      mockDashboard(dashboard({ recent_periods: PERIODS }));
+      const { container } = renderPage();
+
+      await screen.findByRole("table", { name: "Net liability by period" });
+      expect(container.querySelector(".chart-bars")).toHaveAttribute("aria-hidden", "true");
+    });
+
+    it("does not cost the rest of the dashboard when a period is malformed", async () => {
+      // `net_liability` null is the shape that used to blank the page: the
+      // chart reads `.total` off every entry, and one null threw during render
+      // — taking the stat cards and the tax table with it.
+      vi.spyOn(console, "error").mockImplementation(() => {});
+      mockDashboard(
+        dashboard({
+          recent_periods: [{ period: "2026-03", net_liability: null }],
+        }),
+      );
+      renderPage();
+
+      expect(
+        await screen.findByText("The net liability trend could not be displayed"),
+      ).toBeInTheDocument();
+      // Everything the user actually came for is still on screen.
+      expect(screen.getByText(/Umang Traders/)).toBeInTheDocument();
+      expect(screen.getByRole("row", { name: /IGST/ })).toBeInTheDocument();
+      expect(screen.getByRole("progressbar")).toBeInTheDocument();
+    });
+  });
+
+  describe("accessibility furniture", () => {
+    it("names the screen in the document title", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+      await screen.findByText(/Umang Traders/);
+      expect(document.title).toBe("Dashboard · GSTBot");
+    });
+
+    it("makes the tax table reachable when it has to scroll", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+
+      // Seven columns overflow the panel on a phone. Without a tab stop the
+      // scrolled-out columns cannot be reached from a keyboard at all.
+      const region = await screen.findByRole("region", {
+        name: "Tax breakdown for April 2026",
+      });
+      expect(region).toHaveAttribute("tabindex", "0");
     });
   });
 });

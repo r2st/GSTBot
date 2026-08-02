@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
+import TableScroll from "../components/TableScroll";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { dateLabel, periodLabel } from "../lib/format";
 
@@ -75,7 +77,7 @@ function SupplierDetail({ supplier, onClose }) {
       </div>
 
       <h3>How the score is made up</h3>
-      <div className="table-scroll">
+      <TableScroll label="How the score is made up">
         <table className="table">
           <thead>
             <tr>
@@ -98,7 +100,7 @@ function SupplierDetail({ supplier, onClose }) {
             ))}
           </tbody>
         </table>
-      </div>
+      </TableScroll>
 
       <h3>Exposure right now</h3>
       <div className="kv">
@@ -119,7 +121,7 @@ function SupplierDetail({ supplier, onClose }) {
       {detail.observations.length > 0 && (
         <>
           <h3>Filing history</h3>
-          <div className="table-scroll">
+          <TableScroll label="Filing history">
             <table className="table">
               <thead>
                 <tr>
@@ -149,7 +151,7 @@ function SupplierDetail({ supplier, onClose }) {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         </>
       )}
     </section>
@@ -157,6 +159,7 @@ function SupplierDetail({ supplier, onClose }) {
 }
 
 export default function SuppliersPage() {
+  usePageTitle("Suppliers");
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [risk, setRisk] = useState("");
@@ -279,7 +282,7 @@ export default function SuppliersPage() {
             once a period has been reconciled.
           </p>
         ) : (
-          <div className="table-scroll">
+          <TableScroll label="Suppliers">
             <table className="table">
               <thead>
                 <tr>
@@ -327,7 +330,7 @@ export default function SuppliersPage() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </TableScroll>
         )}
       </section>
     </div>

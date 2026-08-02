@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import { SectionBoundary } from "../components/ErrorBoundary";
+import Meter from "../components/Meter";
 import { SkeletonPanel, SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
+import TableScroll from "../components/TableScroll";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import {
   currentPeriod,
@@ -55,7 +59,13 @@ function TrendChart({ periods }) {
   return (
     <div className="chart">
       <h2>Net liability trend</h2>
-      <div className="chart-bars">
+
+      {/* Hidden from assistive tech rather than labelled. A bar chart has no
+          honest ARIA equivalent — role="img" with a summary throws away the
+          per-period figures, and there is no markup that makes six divs read as
+          a series. The table below carries the same numbers instead, which is
+          also what someone would want if they asked for them. */}
+      <div className="chart-bars" aria-hidden="true">
         {periods.map((entry, index) => {
           const value = values[index];
           return (
@@ -71,11 +81,30 @@ function TrendChart({ periods }) {
           );
         })}
       </div>
+
+      <table className="visually-hidden">
+        <caption>Net liability by period</caption>
+        <thead>
+          <tr>
+            <th scope="col">Period</th>
+            <th scope="col">Net liability</th>
+          </tr>
+        </thead>
+        <tbody>
+          {periods.map((entry, index) => (
+            <tr key={entry.period}>
+              <th scope="row">{periodLabel(entry.period)}</th>
+              <td>{rupees(values[index])}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }
 
 export default function DashboardPage() {
+  usePageTitle("Dashboard");
   const [period, setPeriod] = useState(currentPeriod());
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -199,7 +228,7 @@ export default function DashboardPage() {
 
             <div className="panel">
               <h2>Tax breakdown — {periodLabel(data.period)}</h2>
-              <div className="table-scroll">
+              <TableScroll label={`Tax breakdown for ${periodLabel(data.period)}`}>
                 <table className="table">
                 <thead>
                   <tr>
@@ -220,7 +249,7 @@ export default function DashboardPage() {
                   ))}
                 </tbody>
                 </table>
-              </div>
+              </TableScroll>
               <p className="muted small">
                 Credit is tracked per head: IGST credit can offset CGST and SGST, but CGST
                 credit can never discharge an SGST liability.
@@ -238,21 +267,24 @@ export default function DashboardPage() {
                 : " (unlimited)"}
             </p>
             {data.plan_usage.monthly_limit > 0 && (
-              <div className="meter">
-                <div
-                  className="meter-fill"
-                  style={{
-                    width: `${Math.min(
-                      100,
-                      (data.plan_usage.invoices_this_month / data.plan_usage.monthly_limit) * 100,
-                    )}%`,
-                  }}
-                />
-              </div>
+              <Meter
+                value={data.plan_usage.invoices_this_month}
+                max={data.plan_usage.monthly_limit}
+                label="Invoices used this month"
+              />
             )}
           </section>
 
-          {data.recent_periods?.length > 0 && <TrendChart periods={data.recent_periods} />}
+          {/* Boundaried on its own. The chart is the one thing on this page
+              that reaches three levels into the response — `net_liability.total`
+              across six period summaries — so it is the most likely to throw on
+              a shape the API did not promise, and the least worth losing the
+              rest of the dashboard over. */}
+          {data.recent_periods?.length > 0 && (
+            <SectionBoundary name="The net liability trend">
+              <TrendChart periods={data.recent_periods} />
+            </SectionBoundary>
+          )}
         </>
       )}
     </div>

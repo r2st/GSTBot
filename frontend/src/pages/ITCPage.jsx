@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
+import TableScroll from "../components/TableScroll";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
 
@@ -23,10 +25,16 @@ const HEADS = [
   { key: "cess", label: "Cess" },
 ];
 
-/** A four-head breakdown with a total, used for credit, tax and reversals. */
-function HeadsTable({ caption, rows }) {
+/**
+ * A four-head breakdown with a total, used for credit, tax and reversals.
+ *
+ * `caption` heads the first column; `label` names the scroll region, which
+ * wants to say which of the two breakdowns on this page it is rather than
+ * repeating a column header.
+ */
+function HeadsTable({ caption, label, rows }) {
   return (
-    <div className="table-scroll">
+    <TableScroll label={label}>
       <table className="table">
         <thead>
           <tr>
@@ -60,11 +68,12 @@ function HeadsTable({ caption, rows }) {
           ))}
         </tbody>
       </table>
-    </div>
+    </TableScroll>
   );
 }
 
 export default function ITCPage() {
+  usePageTitle("ITC");
   const [period, setPeriod] = useState(currentPeriod());
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
@@ -157,6 +166,7 @@ export default function ITCPage() {
             <h2>Position by tax head</h2>
             <HeadsTable
               caption="Head"
+              label="Position by tax head"
               rows={[
                 {
                   label: "Credit available",
@@ -223,7 +233,7 @@ export default function ITCPage() {
             {rule37.overdue.length === 0 && rule37.approaching.length === 0 ? (
               <p className="muted">Nothing outstanding past the deadline or approaching it.</p>
             ) : (
-              <div className="table-scroll">
+              <TableScroll label="Rule 37 reversals">
                 <table className="table">
                   <thead>
                     <tr>
@@ -267,7 +277,7 @@ export default function ITCPage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             )}
           </section>
 
@@ -293,6 +303,7 @@ export default function ITCPage() {
             </div>
             <HeadsTable
               caption="Reversal"
+              label="Proportionate reversals under rules 42 and 43"
               rows={[
                 {
                   label: "Rule 42 — inputs and services",

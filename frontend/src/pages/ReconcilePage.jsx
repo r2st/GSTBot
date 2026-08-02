@@ -3,6 +3,8 @@ import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonText } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
+import TableScroll from "../components/TableScroll";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
 import { GSTR2B_EXTENSIONS, fileError } from "../lib/validate";
@@ -100,6 +102,7 @@ function FindingRow({ finding }) {
 }
 
 export default function ReconcilePage() {
+  usePageTitle("Reconcile");
   const [period, setPeriod] = useState(currentPeriod());
   const [imported, setImported] = useState(null);
   const [run, setRun] = useState(null);
@@ -324,7 +327,7 @@ export default function ReconcilePage() {
             {visible.length === 0 ? (
               <p className="muted">Nothing in this category.</p>
             ) : (
-              <div className="table-scroll">
+              <TableScroll label="Reconciliation findings">
                 <table className="table">
                   <thead>
                     <tr>
@@ -346,7 +349,7 @@ export default function ReconcilePage() {
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </TableScroll>
             )}
           </section>
         </>

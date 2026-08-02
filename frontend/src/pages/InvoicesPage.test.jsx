@@ -271,4 +271,106 @@ describe("InvoicesPage", () => {
 
     expect(container.querySelector(".table-scroll table")).toBeInTheDocument();
   });
+  describe("accessibility furniture", () => {
+    it("names the screen in the document title", async () => {
+      mockApi();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+      expect(document.title).toBe("Invoices · GSTBot");
+    });
+
+    it("makes the scroll container a named, focusable region", async () => {
+      mockApi();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      // Seven columns overflow on a phone. `overflow-x: auto` alone leaves the
+      // hidden columns unreachable from a keyboard — there is nothing focusable
+      // inside the overflow for Tab to land on.
+      const region = screen.getByRole("region", { name: "Invoices" });
+      expect(region).toHaveAttribute("tabindex", "0");
+      expect(within(region).getByRole("table")).toBeInTheDocument();
+    });
+
+    it("announces the range after paging", async () => {
+      // Next replaces the rows in place. Without a live region the only
+      // feedback from the press is that focus stayed on the button.
+      mockApi({ items: [invoice()], total: 60 });
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      expect(screen.getByRole("status")).toHaveTextContent("1–25 of 60");
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("26–50 of 60"));
+    });
+  });
+
+  describe("refetching over rows that are already on screen", () => {
+    it("dims the table instead of replacing it with placeholders", async () => {
+      mockApi();
+      const { container } = renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      let release;
+      global.fetch = vi.fn(
+        () =>
+          new Promise((resolve) => {
+            release = () =>
+              resolve({
+                ok: true,
+                status: 200,
+                statusText: "OK",
+                text: async () =>
+                  JSON.stringify({ items: [], total: 0, limit: PAGE_SIZE, offset: 0 }),
+              });
+          }),
+      );
+      await userEvent.selectOptions(screen.getByLabelText("Status"), "failed");
+
+      await waitFor(() =>
+        expect(container.querySelector(".page")).toHaveAttribute("aria-busy", "true"),
+      );
+      // Swapping the rows for skeletons on every filter change reads as "your
+      // invoices are gone"; the previous answer stays up, dimmed.
+      expect(screen.getByText("INV-2026-0042")).toBeInTheDocument();
+      expect(container.querySelector(".results")).toHaveClass("is-refreshing");
+
+      release();
+    });
+
+    it("is not busy once the rows have landed", async () => {
+      mockApi();
+      const { container } = renderPage();
+      await screen.findByText("INV-2026-0042");
+      expect(container.querySelector(".page")).toHaveAttribute("aria-busy", "false");
+      expect(container.querySelector(".results")).not.toHaveClass("is-refreshing");
+    });
+
+    it("leaves the filters usable while the rows are being refetched", async () => {
+      // `.is-refreshing` carries `pointer-events: none`. Dimming the whole page
+      // would take the search box down with the rows — and the search box is
+      // what triggered the refetch, mid-word.
+      mockApi();
+      const { container } = renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      global.fetch = vi.fn(() => new Promise(() => {}));
+      await userEvent.selectOptions(screen.getByLabelText("Status"), "failed");
+
+      await waitFor(() =>
+        expect(container.querySelector(".results")).toHaveClass("is-refreshing"),
+      );
+      expect(container.querySelector(".filters")).not.toHaveClass("is-refreshing");
+      expect(container.querySelector(".filters").closest(".is-refreshing")).toBeNull();
+    });
+
+    it("still shows placeholders on the very first load", async () => {
+      // Nothing to dim yet — a blank page with no explanation is the thing the
+      // skeleton exists to prevent.
+      mockApi();
+      const { container } = renderPage();
+      expect(container.querySelector(".skeleton-table")).toBeInTheDocument();
+      await screen.findByText("INV-2026-0042");
+    });
+  });
 });

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { useAuth } from "../hooks/useAuth";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { gstinShapeError, normalizeGstin, registrationErrors } from "../lib/validate";
 
@@ -15,6 +16,7 @@ const EMPTY = {
 };
 
 export default function LoginPage() {
+  usePageTitle("Sign in");
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState("");

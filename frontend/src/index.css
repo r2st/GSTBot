@@ -575,6 +575,12 @@ button.chip.is-active {
   height: 100%;
   background: var(--brand);
 }
+/* Usage can exceed the plan: the limit is checked at upload time, so an account
+   moved to a smaller plan is over it before it uploads anything. The bar pins
+   at full, and the colour is what says which side of the line it is on. */
+.meter-fill.is-over {
+  background: var(--bad);
+}
 
 /* ---- Filters / pager ---- */
 .filters {
@@ -797,8 +803,47 @@ button.chip.is-active {
   padding: 0.5rem 0.65rem;
   border-radius: var(--radius);
 }
+/* The widget-scale fallback stands in for one panel on a working page, so it
+   is sized like the thing it replaced rather than like a page-wide failure. */
+.error-fallback-section {
+  padding: 0.9rem 1.15rem;
+}
+.section-fallback-head {
+  margin: 0 0 0.4rem;
+  font-weight: 600;
+}
 
-/* ---- Keyboard affordances ---- */
+/* ---- Keyboard affordances ----
+
+   Inputs got an explicit focus outline above; everything else was left on the
+   browser default, which is not a consistent thing to rely on. On the green
+   primary button Chrome draws a dark ring that all but vanishes into the fill,
+   and the nav links in the mobile drawer get one so tight to the text it reads
+   as an underline.
+
+   :focus-visible rather than :focus, so clicking a button with a mouse does not
+   leave a ring sitting behind the pointer — the heuristic keeps it for keyboard
+   users, which is who it is for. */
+.btn:focus-visible,
+.nav-link:focus-visible,
+.auth-tab:focus-visible,
+.banner-close:focus-visible,
+button.chip:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+/* Brand green on brand green is not a focus ring. */
+.btn-primary:focus-visible {
+  outline-color: var(--ink);
+}
+/* Inset, because an outset ring on a scroll container is clipped by the panel
+   edge on exactly the narrow screens where the container is focusable at all. */
+.table-scroll:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
+}
+
 .skip-link {
   position: absolute;
   left: -9999px;
@@ -967,8 +1012,12 @@ button.chip.is-active {
     height: 130px;
     gap: 0.35rem;
   }
+  /* Was display:none, with the figure left in the bar's title attribute. A
+     title needs a hover, and a phone has no hover — that hid the numbers from
+     exactly the users who could not read them off the axis either. Six bars
+     still fit them at this size. */
   .chart-value {
-    display: none; /* Reappears in the bar's title attribute on tap. */
+    font-size: 0.62rem;
   }
   .auth-card {
     padding: 1.25rem;

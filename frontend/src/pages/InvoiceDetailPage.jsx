@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonPanel } from "../components/Skeleton";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 import { invoiceDraftErrors } from "../lib/validate";
@@ -35,6 +36,12 @@ export default function InvoiceDetailPage() {
 
   const { errors, warnings } = invoiceDraftErrors(draft);
   const hasErrors = Object.keys(errors).length > 0;
+
+  // Named by invoice number once it arrives, so browser history and the tab
+  // strip distinguish the four invoices someone has open while reconciling.
+  // Until then the title is just "Invoice" rather than a number the user has
+  // never seen — the row id in the URL is not one they would recognise.
+  usePageTitle(invoice?.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice");
 
   const load = useCallback(async () => {
     setError("");

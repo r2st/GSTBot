@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
+import TableScroll from "../components/TableScroll";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 
 const PAGE_SIZE = 25;
 
 export default function InvoicesPage() {
+  usePageTitle("Invoices");
   const [filters, setFilters] = useState({ invoice_type: "", status: "", search: "" });
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
@@ -38,8 +41,18 @@ export default function InvoicesPage() {
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
 
+  // A filter change refetches over a table that is already populated. Dimming
+  // it says the rows on screen are the previous answer; swapping them for
+  // placeholders on every keystroke in the search box would not.
+  //
+  // Scoped to the results rather than the page, unlike the dashboard, because
+  // `.is-refreshing` carries `pointer-events: none` and the control driving
+  // most of these refetches is a search box the user is still typing into.
+  // Dimming the filters along with the rows would make the page fight back.
+  const refreshing = loading && Boolean(data);
+
   return (
-    <div className="page">
+    <div className="page" aria-busy={refreshing}>
       <div className="page-head">
         <h1>Invoices</h1>
         <Link to="/upload" className="btn btn-primary">
@@ -84,7 +97,7 @@ export default function InvoicesPage() {
       </div>
 
       {loading && !data ? (
-        <SkeletonTable rows={8} columns={5} label="Loading invoices" />
+        <SkeletonTable rows={8} columns={7} label="Loading invoices" />
       ) : items.length === 0 ? (
         <div className="empty">
           <p>No invoices yet.</p>
@@ -93,8 +106,8 @@ export default function InvoicesPage() {
           </Link>
         </div>
       ) : (
-        <>
-          <div className="table-scroll">
+        <div className={refreshing ? "results is-refreshing" : "results"}>
+          <TableScroll label="Invoices">
             <table className="table table-invoices">
             <thead>
               <tr>
@@ -140,7 +153,7 @@ export default function InvoicesPage() {
               })}
             </tbody>
             </table>
-          </div>
+          </TableScroll>
 
           <div className="pager">
             <button
@@ -151,7 +164,9 @@ export default function InvoicesPage() {
             >
               Previous
             </button>
-            <span className="muted">
+            {/* Paging replaces the table in place, so without this the only
+                feedback from pressing Next is that focus stayed on a button. */}
+            <span className="muted" role="status">
               {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
             </span>
             <button
@@ -163,7 +178,7 @@ export default function InvoicesPage() {
               Next
             </button>
           </div>
-        </>
+        </div>
       )}
     </div>
   );

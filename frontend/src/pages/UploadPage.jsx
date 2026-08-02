@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { Spinner } from "../components/Skeleton";
+import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { dateLabel, rupees } from "../lib/format";
 import { INVOICE_EXTENSIONS, MAX_UPLOAD_MB, partitionFiles } from "../lib/validate";
@@ -46,6 +47,7 @@ function ResultRow({ result }) {
 }
 
 export default function UploadPage() {
+  usePageTitle("Upload");
   const [invoiceType, setInvoiceType] = useState("purchase");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
