@@ -51,10 +51,17 @@ class RecordFilingIn(BaseModel):
     # someone marks a return done, and refusing the record would leave the
     # deadline alert firing for a return that is genuinely filed. It can be
     # supplied later by recording the same period again.
+    #
+    # Omitting it on that second call leaves any stored reference alone, rather
+    # than clearing it — otherwise correcting the date would silently discard
+    # the proof of filing.
     arn: str | None = Field(
         default=None,
         max_length=40,
-        description="The portal's Acknowledgement Reference Number, if it is to hand.",
+        description=(
+            "The portal's Acknowledgement Reference Number, if it is to hand. "
+            "Omitting it never clears a reference already recorded."
+        ),
     )
     filed_on: date | None = Field(
         default=None, description="Defaults to today in India, where the deadline falls."

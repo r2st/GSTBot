@@ -207,7 +207,9 @@ def filing_status(
         "reference that was not to hand at the time gets added later.\n\n"
         "The ARN is optional for that reason. It is the proof the filing "
         "happened, but refusing the record without it would leave the alert "
-        "firing for a return that is genuinely filed."
+        "firing for a return that is genuinely filed. Leaving it out of a "
+        "later call does not clear a reference already recorded — only "
+        "supplying a different one replaces it."
     ),
     responses={
         404: {"description": "Unknown return type."},

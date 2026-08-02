@@ -391,7 +391,8 @@ def record_filing(
     Idempotent per period and return type. Re-recording corrects the ARN or the
     date rather than filing a second time, which matches the partial unique
     index on the table — and matches what the caller means, since there is only
-    ever one live GSTR-1 for a period.
+    ever one live GSTR-1 for a period. An omitted ARN is "not to hand" and
+    leaves a stored one intact; only a supplied one replaces it.
 
     ``data`` is the return as *this application builds it now*. Immediately
     after an export — which is the flow this exists for — that is exactly what
@@ -425,6 +426,10 @@ def record_filing(
             f"had not ended. The return opens on {opens_on.isoformat()}."
         )
 
+    # Before anything is mutated: a rejected ARN should leave the record it was
+    # offered against exactly as it was, not half-updated in the session.
+    supplied_arn = normalise_arn(arn)
+
     existing = db.scalar(
         select(GSTRReturn).where(
             GSTRReturn.business_id == business.id,
@@ -438,7 +443,14 @@ def record_filing(
     )
 
     record.status = ReturnStatus.FILED
-    record.arn = normalise_arn(arn)
+    # Omitting the ARN means "not to hand", not "erase the one I gave you". The
+    # asymmetry is the whole point of this endpoint being idempotent: recording
+    # again is how a date gets corrected, and clearing the acknowledgement as a
+    # side effect of that would drop the only proof the filing happened — which
+    # nothing here can re-derive, because it was issued by the portal. A wrong
+    # ARN is still corrected by supplying the right one.
+    if supplied_arn is not None:
+        record.arn = supplied_arn
     record.filed_at = datetime.combine(filed_on, time(), tzinfo=gst_calendar.IST)
     record.due_date = datetime.combine(
         gst_calendar.due_date(period, return_type), time(), tzinfo=gst_calendar.IST

@@ -182,6 +182,39 @@ class TestRecordingIsIdempotent:
         assert second.json()["arn"] == "AA270426123456Z"
         assert second.json()["id"] == first.json()["id"]
 
+    def test_correcting_the_date_does_not_erase_the_arn(
+        self, auth_client, business, frozen_today
+    ):
+        # The reason this endpoint is idempotent is so a mistake can be fixed by
+        # recording again. Fixing the date must not cost the acknowledgement:
+        # the portal issued it, nothing here can derive it a second time, and
+        # it is the only evidence the filing actually happened.
+        record(auth_client, arn="AA270426123456Z", filed_on="2026-05-18")
+
+        corrected = record(auth_client, filed_on="2026-05-19")
+        assert corrected.json()["arn"] == "AA270426123456Z"
+        assert corrected.json()["filed_at"].startswith("2026-05-19")
+
+    def test_a_wrong_arn_is_corrected_by_supplying_the_right_one(
+        self, auth_client, business, frozen_today
+    ):
+        record(auth_client, arn="AA270426000000Z")
+        assert record(auth_client, arn="AA270426123456Z").json()["arn"] == "AA270426123456Z"
+
+    def test_a_rejected_arn_leaves_the_stored_one_alone(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        # The refusal happens before the record is touched, so a typo on the
+        # second attempt costs nothing that was already recorded.
+        record(auth_client, arn="AA270426123456Z", filed_on="2026-05-18")
+
+        assert record(auth_client, arn="not-an-arn").status_code == 422
+
+        db_session.expire_all()
+        stored = db_session.query(GSTRReturn).filter_by(period=PERIOD).one()
+        assert stored.arn == "AA270426123456Z"
+        assert gst_calendar.ist_date(stored.filed_at) == date(2026, 5, 18)
+
     def test_the_two_returns_for_one_period_are_separate_records(
         self, auth_client, db_session, business, frozen_today
     ):
