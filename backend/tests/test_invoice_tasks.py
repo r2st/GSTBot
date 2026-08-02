@@ -1,0 +1,299 @@
+"""The worker-side half of an invoice upload.
+
+An upload is answered 201 before anything is extracted, so this task is where
+the actual work happens and it runs with nobody waiting on it. That changes
+what correctness means: there is no caller to return an error to, so the only
+outcomes that matter are "the row ends up in a state the user can act on" and
+"the worker's database connection is released".
+
+The task body is called directly rather than through a broker. What is under
+test is this function's own decisions — the missing-row guard, the retry
+boundary, the session lifecycle — and a live Redis would test Celery's
+transport instead.
+"""
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from app.models.invoice import Invoice, InvoiceSource, InvoiceStatus, InvoiceType
+from app.services import invoice_service
+from app.tasks import invoice_tasks
+from app.tasks.invoice_tasks import parse_invoice_task
+
+
+class _Retry(Exception):
+    """Stands in for celery.exceptions.Retry, which is what .retry() raises."""
+
+
+@pytest.fixture()
+def task(monkeypatch):
+    """Record ``self.retry()`` on the real registered task.
+
+    The task is invoked as ``parse_invoice_task(invoice_id)``: Celery binds
+    ``self`` itself, so there is no fake to hand in. Patching retry on the
+    registered object is what makes the retry decision observable without a
+    broker, and it keeps the code under test the object the worker runs.
+    """
+    retries: list[BaseException | None] = []
+
+    def fake_retry(exc=None, **kwargs):
+        retries.append(exc)
+        return _Retry(str(exc))
+
+    monkeypatch.setattr(parse_invoice_task, "retry", fake_retry)
+    return SimpleNamespace(retries=retries)
+
+
+@pytest.fixture()
+def sessions(monkeypatch, db_session):
+    """Hand the task the test's session and record open/close.
+
+    The task builds its own session because it runs outside a request. Here it
+    must get the one the test can assert against, and closing it for real
+    would detach every object the test still holds — so close is counted, not
+    performed. That count is the point: a leaked connection in a long-lived
+    worker never comes back.
+    """
+    record = {"opened": 0, "closed": 0}
+
+    class _Handle:
+        def __getattr__(self, name):
+            return getattr(db_session, name)
+
+        def close(self):
+            record["closed"] += 1
+
+    def factory():
+        record["opened"] += 1
+        return _Handle()
+
+    monkeypatch.setattr(invoice_tasks, "SessionLocal", factory)
+    return record
+
+
+def _store_invoice(db_session, business, **overrides) -> Invoice:
+    fields = {
+        "business_id": business.id,
+        "invoice_type": InvoiceType.PURCHASE,
+        "source": InvoiceSource.UPLOAD,
+        "status": InvoiceStatus.UPLOADED,
+        "source_filename": "bill.txt",
+        "storage_path": "/tmp/does-not-matter.txt",
+        "content_type": "text/plain",
+    }
+    fields.update(overrides)
+    invoice = Invoice(**fields)
+    db_session.add(invoice)
+    db_session.commit()
+    db_session.refresh(invoice)
+    return invoice
+
+
+class TestTheHappyPath:
+    def test_the_invoice_is_processed_and_reported(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business)
+
+        def fake_process(db, row):
+            row.status = InvoiceStatus.PARSED
+            row.parsed_with = "heuristic"
+            row.extraction_confidence = 0.72
+            return row
+
+        monkeypatch.setattr(invoice_service, "process_invoice", fake_process)
+
+        result = parse_invoice_task(invoice.id)
+
+        assert result == {
+            "invoice_id": invoice.id,
+            "status": "parsed",
+            "parsed_with": "heuristic",
+            "confidence": 0.72,
+        }
+        assert task.retries == []
+
+    def test_the_row_the_service_was_given_is_the_stored_one(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business, source_filename="april.pdf")
+        seen: dict = {}
+
+        def fake_process(db, row):
+            seen["filename"] = row.source_filename
+            row.status = InvoiceStatus.PARSED
+            return row
+
+        monkeypatch.setattr(invoice_service, "process_invoice", fake_process)
+        parse_invoice_task(invoice.id)
+        assert seen["filename"] == "april.pdf"
+
+    def test_a_failed_extraction_is_reported_not_retried(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        # process_invoice records its own failures on the row. Retrying that
+        # would only repeat a permanent failure three times and delay the row
+        # reaching the user's review queue.
+        invoice = _store_invoice(db_session, business)
+
+        def fake_process(db, row):
+            row.status = InvoiceStatus.FAILED
+            return row
+
+        monkeypatch.setattr(invoice_service, "process_invoice", fake_process)
+
+        result = parse_invoice_task(invoice.id)
+        assert result["status"] == "failed"
+        assert task.retries == [], "a recorded failure must not be retried"
+
+
+class TestTheMissingRowGuard:
+    def test_an_unknown_id_is_reported_as_missing(self, task, sessions):
+        assert parse_invoice_task(99_999) == {
+            "invoice_id": 99_999,
+            "status": "missing",
+        }
+
+    def test_an_unknown_id_is_not_retried(self, task, sessions):
+        # The row will never appear; three retries would just be noise.
+        parse_invoice_task(99_999)
+        assert task.retries == []
+
+    def test_a_soft_deleted_invoice_is_treated_as_missing(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        # The user deleted it between the upload and the worker picking it up.
+        # Parsing it would resurrect it into their review queue.
+        invoice = _store_invoice(db_session, business)
+        invoice.soft_delete()
+        db_session.commit()
+
+        called = {"n": 0}
+
+        def fake_process(db, row):
+            called["n"] += 1
+            return row
+
+        monkeypatch.setattr(invoice_service, "process_invoice", fake_process)
+
+        assert parse_invoice_task(invoice.id)["status"] == "missing"
+        assert called["n"] == 0, "a deleted invoice was parsed anyway"
+
+    def test_the_absence_is_logged_for_the_operator(self, task, sessions, caplog):
+        with caplog.at_level("WARNING"):
+            parse_invoice_task(99_999)
+        assert "nothing to parse" in caplog.text
+
+
+class TestTheRetryBoundary:
+    def test_an_unexpected_error_is_retried(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        # This is what the retry is for: the layer below process_invoice — a
+        # database that was unreachable when the task started.
+        invoice = _store_invoice(db_session, business)
+        boom = OSError("could not connect to the database")
+
+        def fake_process(db, row):
+            raise boom
+
+        monkeypatch.setattr(invoice_service, "process_invoice", fake_process)
+
+        with pytest.raises(_Retry):
+            parse_invoice_task(invoice.id)
+        assert task.retries == [boom]
+
+    def test_the_original_exception_is_handed_to_the_retry(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        # Celery uses this to decide whether the failure is retryable and to
+        # record the traceback on the final attempt.
+        invoice = _store_invoice(db_session, business)
+        boom = ValueError("something specific")
+        monkeypatch.setattr(
+            invoice_service, "process_invoice", lambda db, row: (_ for _ in ()).throw(boom)
+        )
+
+        with pytest.raises(_Retry):
+            parse_invoice_task(invoice.id)
+        assert task.retries[0] is boom
+
+    def test_the_failure_is_logged_with_a_traceback(
+        self, monkeypatch, task, sessions, db_session, business, caplog
+    ):
+        invoice = _store_invoice(db_session, business)
+        monkeypatch.setattr(
+            invoice_service,
+            "process_invoice",
+            lambda db, row: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        with caplog.at_level("ERROR"), pytest.raises(_Retry):
+            parse_invoice_task(invoice.id)
+        assert "parse_invoice_task failed" in caplog.text
+        assert "RuntimeError" in caplog.text
+
+
+class TestTheSessionLifecycle:
+    """A worker is long-lived; a connection leaked here never comes back."""
+
+    def test_the_session_is_closed_on_success(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business)
+        monkeypatch.setattr(
+            invoice_service, "process_invoice", lambda db, row: row
+        )
+        parse_invoice_task(invoice.id)
+        assert sessions == {"opened": 1, "closed": 1}
+
+    def test_the_session_is_closed_when_the_row_is_missing(self, task, sessions):
+        parse_invoice_task(99_999)
+        assert sessions == {"opened": 1, "closed": 1}
+
+    def test_the_session_is_closed_when_the_task_retries(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        # The path most likely to leak: the exception leaves through a raise,
+        # so only the finally block can close the session.
+        invoice = _store_invoice(db_session, business)
+        monkeypatch.setattr(
+            invoice_service,
+            "process_invoice",
+            lambda db, row: (_ for _ in ()).throw(OSError("gone")),
+        )
+        with pytest.raises(_Retry):
+            parse_invoice_task(invoice.id)
+        assert sessions == {"opened": 1, "closed": 1}
+
+    def test_each_run_opens_exactly_one_session(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business)
+        monkeypatch.setattr(invoice_service, "process_invoice", lambda db, row: row)
+        parse_invoice_task(invoice.id)
+        parse_invoice_task(invoice.id)
+        parse_invoice_task(99_999)
+        assert sessions == {"opened": 3, "closed": 3}
+
+
+class TestTheTaskRegistration:
+    def test_it_is_registered_under_the_name_the_router_enqueues(self):
+        # invoices.py sends "invoices.parse" by name; a rename here would
+        # silently strand every upload in the queue.
+        assert "invoices.parse" in invoice_tasks.celery_app.tasks
+
+    def test_it_is_bound_so_self_carries_the_retry(self):
+        # bind=True is what makes self.retry() available inside the task.
+        # Celery signals it by binding `run` to the task instance, which is
+        # why run's signature no longer shows a `self` parameter.
+        registered = invoice_tasks.celery_app.tasks["invoices.parse"]
+        assert registered.run.__self__ is registered
+
+    def test_the_retry_budget_is_finite(self):
+        # An unbounded retry on a permanently broken row is an infinite loop
+        # in the worker.
+        registered = invoice_tasks.celery_app.tasks["invoices.parse"]
+        assert registered.max_retries == 3
+        assert registered.default_retry_delay == 60
