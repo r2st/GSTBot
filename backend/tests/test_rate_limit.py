@@ -260,3 +260,161 @@ class TestMemoryFallback:
         for i in range(_MAX_MEMORY_KEYS + 2000):
             windows.hit(f"key-{i}")
         assert len(windows._counts) <= _MAX_MEMORY_KEYS + 1
+
+
+class TestRedisBackedCounters:
+    """The path that actually runs in production.
+
+    Everything above this runs on the in-process fallback, because the suite
+    points REDIS_URL at a closed port. That fallback is per-process: two API
+    instances behind a load balancer would each allow the full budget, which
+    is the whole reason the Redis path exists. It needs its own cover.
+    """
+
+    class FakeRedis:
+        """Enough of redis-py for the limiter: a pipeline that counts."""
+
+        def __init__(self, *, fail: bool = False) -> None:
+            self.counts: dict[str, int] = {}
+            self.expiries: dict[str, int] = {}
+            self.deleted: list[str] = []
+            self.fail = fail
+
+        def pipeline(self):
+            if self.fail:
+                raise ConnectionError("Connection refused")
+            return self._Pipeline(self)
+
+        class _Pipeline:
+            def __init__(self, store) -> None:
+                self.store = store
+                self.queued: list[tuple[str, str, int]] = []
+
+            def incr(self, key, amount=1):
+                self.queued.append(("incr", key, amount))
+
+            def expire(self, key, seconds):
+                self.queued.append(("expire", key, seconds))
+
+            def execute(self):
+                results = []
+                for op, key, value in self.queued:
+                    if op == "incr":
+                        self.store.counts[key] = self.store.counts.get(key, 0) + value
+                        results.append(self.store.counts[key])
+                    else:
+                        self.store.expiries[key] = value
+                        results.append(True)
+                return results
+
+        def scan_iter(self, match, count=None):
+            prefix = match.rstrip("*")
+            return [k for k in list(self.counts) if k.startswith(prefix)]
+
+        def delete(self, *keys):
+            self.deleted.extend(keys)
+            for key in keys:
+                self.counts.pop(key, None)
+
+    @pytest.fixture()
+    def fake_redis(self, monkeypatch):
+        from app.core import rate_limit, redis_client
+
+        rate_limit.reset()
+        store = self.FakeRedis()
+        monkeypatch.setattr(redis_client, "get_redis", lambda: store)
+        yield store
+        monkeypatch.undo()
+        rate_limit.reset()
+
+    def test_the_counting_happens_in_redis(self, fake_redis):
+        from app.core import rate_limit
+
+        for _ in range(3):
+            rate_limit._hit("uploads:user:1", Rate(10, 60))
+
+        (bucket,) = fake_redis.counts
+        assert bucket.startswith("ratelimit:uploads:user:1:")
+        assert fake_redis.counts[bucket] == 3
+
+    def test_the_budget_is_shared_rather_than_per_process(self, fake_redis):
+        """Two instances, one counter — otherwise a 30/minute limit is really
+        30 per pod and the number in the docs is fiction."""
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        decisions = [rate_limit._hit("shared:key", rate) for _ in range(5)]
+
+        assert [d.allowed for d in decisions] == [True, True, True, False, False]
+        assert decisions[-1].remaining == 0
+
+    def test_the_bucket_is_given_an_expiry(self, fake_redis):
+        """Without a TTL every window ever opened stays in Redis for good."""
+        from app.core import rate_limit
+
+        rate_limit._hit("uploads:user:1", Rate(10, 60))
+
+        (bucket,) = fake_redis.expiries
+        # One second past the window, so a bucket cannot expire while the
+        # window it belongs to is still open.
+        assert fake_redis.expiries[bucket] == 61
+
+    def test_each_window_gets_its_own_bucket(self, fake_redis, monkeypatch):
+        from app.core import rate_limit
+
+        monkeypatch.setattr(rate_limit.time, "time", lambda: 1_000_000.0)
+        rate_limit._hit("uploads:user:1", Rate(10, 60))
+        monkeypatch.setattr(rate_limit.time, "time", lambda: 1_000_060.0)
+        rate_limit._hit("uploads:user:1", Rate(10, 60))
+
+        assert len(fake_redis.counts) == 2
+        assert set(fake_redis.counts.values()) == {1}
+
+    def test_a_redis_that_fails_mid_flight_degrades_instead_of_502ing(
+        self, monkeypatch, caplog
+    ):
+        """Redis going down must cost the limit's accuracy, not the request.
+
+        Failing closed here would mean a Redis outage takes the whole API with
+        it, which is a worse outcome than briefly counting per-process.
+        """
+        import logging
+
+        from app.core import rate_limit, redis_client
+
+        rate_limit.reset()
+        monkeypatch.setattr(redis_client, "get_redis", lambda: self.FakeRedis(fail=True))
+
+        with caplog.at_level(logging.WARNING):
+            decision = rate_limit._hit("uploads:user:1", Rate(2, 60))
+
+        assert decision.allowed
+        assert "degraded" in caplog.text.lower()
+        # And it kept counting, in memory, rather than silently allowing all.
+        assert not [rate_limit._hit("uploads:user:1", Rate(2, 60)) for _ in range(3)][-1].allowed
+        rate_limit.reset()
+
+    def test_reset_clears_the_redis_keys_too(self, fake_redis):
+        """Otherwise one test's counters leak into the next one's budget."""
+        from app.core import rate_limit
+
+        rate_limit._hit("uploads:user:1", Rate(10, 60))
+        assert fake_redis.counts
+
+        rate_limit.reset()
+
+        assert fake_redis.deleted
+        assert not fake_redis.counts
+
+    def test_reset_survives_a_redis_that_is_down(self, monkeypatch):
+        """It is called from fixtures; raising here would fail unrelated tests
+        for a reason that has nothing to do with them."""
+        from app.core import rate_limit, redis_client
+
+        class Broken:
+            def scan_iter(self, *_args, **_kwargs):
+                raise ConnectionError("Connection refused")
+
+        monkeypatch.setattr(redis_client, "get_redis", lambda: Broken())
+
+        rate_limit.reset()  # Must not raise.
