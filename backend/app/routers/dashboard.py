@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
-from app.models.alert import Alert, AlertStatus
+from app.models.alert import OPEN_STATUSES, Alert
 from app.models.business import Business
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.reconciliation_run import ReconciliationRun
@@ -173,12 +173,17 @@ def get_dashboard(
             )
         )
 
+    # Outstanding, not unread. This counted PENDING and SENT alone, which made
+    # reading an alert take it off the badge while the return it is about was
+    # still unfiled — and hid a delivery that failed entirely. OPEN_STATUSES is
+    # what the sweep and /alerts both mean by open, and the badge has to be the
+    # same number as the list it links to.
     open_alerts = int(
         db.scalar(
             select(func.count(Alert.id)).where(
                 Alert.business_id == business.id,
                 Alert.deleted_at.is_(None),
-                Alert.status.in_((AlertStatus.PENDING, AlertStatus.SENT)),
+                Alert.status.in_(OPEN_STATUSES),
             )
         )
         or 0

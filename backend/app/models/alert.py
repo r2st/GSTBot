@@ -42,6 +42,20 @@ class AlertStatus(str, Enum):
     RESOLVED = "resolved"
 
 
+# The statuses that mean the alert is still outstanding: everything except the
+# two that close it. FAILED is one of them — a delivery that failed leaves the
+# deadline every bit as unmet, so the alert is live and it is the sending that
+# is broken.
+#
+# Kept here rather than in whichever module needed it first, because the sweep,
+# the listing and the dashboard's badge all have to agree on it. They disagreed
+# once: the badge counted PENDING and SENT alone, so reading an alert made the
+# count go down while the return stayed unfiled.
+OPEN_STATUSES = frozenset(
+    {AlertStatus.PENDING, AlertStatus.SENT, AlertStatus.READ, AlertStatus.FAILED}
+)
+
+
 class Alert(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
     """One thing the business should know about, and whether we told them.
 

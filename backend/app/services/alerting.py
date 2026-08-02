@@ -49,7 +49,13 @@ from datetime import date
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.alert import Alert, AlertSeverity, AlertStatus, AlertType
+from app.models.alert import (
+    OPEN_STATUSES,
+    Alert,
+    AlertSeverity,
+    AlertStatus,
+    AlertType,
+)
 from app.models.business import Business
 from app.models.gstr_return import ReturnType
 from app.services import filing as filing_service
@@ -76,15 +82,6 @@ URGENT_DAYS = 3
 # What a business calls each return. The enum values are storage.
 RETURN_LABEL = {ReturnType.GSTR1: "GSTR-1", ReturnType.GSTR3B: "GSTR-3B"}
 
-# Statuses that mean the alert is still outstanding. FAILED belongs here: a
-# delivery that failed leaves the deadline every bit as unmet, so the alert is
-# live and it is the sending that is broken.
-LIVE_STATUSES = (
-    AlertStatus.PENDING,
-    AlertStatus.SENT,
-    AlertStatus.READ,
-    AlertStatus.FAILED,
-)
 
 
 @dataclass(frozen=True)
@@ -255,7 +252,7 @@ def sweep_business(
             # Filing is the only thing that closes this on its own. Recorded
             # late still closes it: the alert asks for a filing, not a punctual
             # one, and leaving it open would be nagging about something done.
-            if alert is not None and alert.status in LIVE_STATUSES:
+            if alert is not None and alert.status in OPEN_STATUSES:
                 alert.status = AlertStatus.RESOLVED
                 resolved += 1
             continue
@@ -288,7 +285,7 @@ def sweep_business(
         undone = alert.status is AlertStatus.RESOLVED
         escalated = alert.severity is not severity
 
-        if alert.status in LIVE_STATUSES or undone or escalated:
+        if alert.status in OPEN_STATUSES or undone or escalated:
             # "due in 3 days" is wrong tomorrow, so the wording is rewritten
             # rather than left as whatever the day it was raised said.
             alert.title = title
@@ -296,7 +293,7 @@ def sweep_business(
             alert.severity = severity
             alert.due_date = standing.due_date
 
-        if undone or (escalated and alert.status not in LIVE_STATUSES):
+        if undone or (escalated and alert.status not in OPEN_STATUSES):
             alert.status = AlertStatus.PENDING
             reopened += 1
         elif escalated and alert.status is AlertStatus.READ:

@@ -24,6 +24,7 @@ from app.core.middleware import (
 from app.core.redis_client import close as redis_close
 from app.core.redis_client import ping as redis_ping
 from app.routers import (
+    alerts,
     auth,
     dashboard,
     filing,
@@ -148,6 +149,15 @@ TAGS_METADATA = [
         "description": (
             "Counterparties and their compliance scores, built from this tenant's "
             "own matched invoices rather than from a shared reputation."
+        ),
+    },
+    {
+        "name": "alerts",
+        "description": (
+            "What the business still has to act on, and the two things it can do "
+            "about one: mark it seen, or dismiss it. Nothing here is delivered "
+            "anywhere yet — an alert lives in the product, so `channel` and "
+            "`sent_at` are null on every row."
         ),
     },
 ]
@@ -307,6 +317,7 @@ def create_app() -> FastAPI:
     application.include_router(itc.router, prefix=prefix)
     application.include_router(filing.router, prefix=prefix)
     application.include_router(suppliers.router, prefix=prefix)
+    application.include_router(alerts.router, prefix=prefix)
 
     @application.get("/", include_in_schema=False)
     def root() -> dict[str, str | None]:
