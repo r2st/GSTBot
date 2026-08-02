@@ -96,6 +96,12 @@ class InvoiceUpdate(BaseModel):
 
     Every field is optional and unset fields are left alone: a user fixing a
     misread GSTIN must not blank the amounts by omission.
+
+    Omitted and ``null`` are different things here. Omitting a field leaves it
+    alone; sending ``null`` clears it, which is how a misread GSTIN or date is
+    taken back off an invoice. The money and the two credit flags have no
+    cleared state — an invoice always carries a figure for every head, zero
+    included — so a ``null`` there is refused rather than written.
     """
 
     counterparty_gstin: str | None = None
@@ -123,3 +129,31 @@ class InvoiceUpdate(BaseModel):
             return gstin_service.parse(v).gstin
         except gstin_service.InvalidGSTIN as exc:
             raise ValueError(str(exc)) from exc
+
+    @field_validator(
+        "taxable_value",
+        "cgst",
+        "sgst",
+        "igst",
+        "cess",
+        "total_value",
+        "itc_eligible",
+        "reverse_charge",
+    )
+    @classmethod
+    def _not_cleared(cls, v, info):
+        """Refuse an explicit ``null`` on a field the invoice must always have.
+
+        These columns are NOT NULL. Written through, a ``null`` reached the
+        database and came back as an integrity error the API reported as 409
+        "that record conflicts with one that already exists" — which is a
+        statement about duplicates, and sends a reviewer looking for an invoice
+        that does not exist. A form that clears a tax box is the ordinary way
+        to arrive here, so it has to say what is actually wrong.
+        """
+        if v is None:
+            raise ValueError(
+                f"{info.field_name} cannot be cleared. Omit it to leave it "
+                "unchanged, or send 0 (or false) to zero it."
+            )
+        return v

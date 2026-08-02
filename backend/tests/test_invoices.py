@@ -4,6 +4,8 @@ from __future__ import annotations
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
+import pytest
+
 from app.models.business import BusinessPlan
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.supplier import Supplier
@@ -361,6 +363,57 @@ def test_patch_rejects_an_invalid_gstin(auth_client, sample_invoice_text):
         f"/api/v1/invoices/{invoice_id}", json={"counterparty_gstin": "27AAPFU0939F1ZW"}
     )
     assert response.status_code == 422
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["taxable_value", "cgst", "sgst", "igst", "cess", "total_value",
+     "itc_eligible", "reverse_charge"],
+)
+def test_patch_refuses_to_clear_a_field_the_invoice_must_have(
+    auth_client, sample_invoice_text, field
+):
+    """Clearing a tax box is a validation error, not a duplicate.
+
+    These columns are NOT NULL. The null went through to the database and came
+    back as an integrity error, which the API reports as 409 "that record
+    conflicts with one that already exists" — a reviewer is then hunting for a
+    duplicate invoice that was never there. It also leaves the request's
+    session needing a rollback.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    response = auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={field: None})
+
+    assert response.status_code == 422, response.text
+    assert field in response.text
+    # And the invoice is untouched, not half-written.
+    after = auth_client.get(f"/api/v1/invoices/{invoice_id}").json()
+    assert Decimal(after["igst"]) == Decimal("81000.00")
+
+
+def test_patch_still_zeroes_a_head_that_is_sent_as_zero(auth_client, sample_invoice_text):
+    """Refusing null must not refuse the correction it stands in for."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"igst": "0.00", "cgst": "40500.00", "sgst": "40500.00"},
+    ).json()
+
+    assert Decimal(body["igst"]) == Decimal("0.00")
+    assert Decimal(body["cgst"]) == Decimal("40500.00")
+
+
+def test_patch_still_clears_a_field_that_can_be_empty(auth_client, sample_invoice_text):
+    """A misread GSTIN is taken off the invoice by sending null."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"counterparty_gstin": None}
+    ).json()
+
+    assert body["counterparty_gstin"] is None
 
 
 def test_a_correction_links_a_supplier(auth_client, db_session):
