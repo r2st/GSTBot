@@ -26,7 +26,7 @@ hold 18% of ₹1,234.56.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy import func, select
@@ -34,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.reconciliation_run import ReconciliationRun
+from app.services import gst_calendar
 
 ZERO = Decimal("0.00")
 
@@ -300,8 +301,16 @@ def rule_37(invoices: list[Invoice], *, as_of: date | None = None) -> Rule37Resu
     An invoice with no date is skipped rather than assumed overdue. The clock
     runs from the invoice date, and a missing date means the extraction failed,
     not that 180 days have passed.
+
+    The 180 days are counted in Indian calendar days, because that is the
+    calendar the invoice date is written in and the one the Act is enforced in.
+    Reading the day off a UTC clock is a day short for the five and a half
+    hours after midnight IST, and the invoice that crosses day 180 in that
+    window is reported as still inside it — which understates the reversal in
+    GSTR-3B, and an understated reversal is over-claimed credit with interest
+    on it.
     """
-    today = as_of or datetime.now(UTC).date()
+    today = as_of or gst_calendar.today_ist()
     result = Rule37Result()
 
     for invoice in invoices:

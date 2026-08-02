@@ -1,14 +1,14 @@
 """The set-off waterfall, the reversal rules, and the ITC endpoints."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
+from app.services import gst_calendar, reconciliation
 from app.services import itc as itc_service
-from app.services import reconciliation
 from app.services.gstr2b import GSTR2BRecord
 from tests.conftest import SUPPLIER_GSTIN_OTHER_STATE, SUPPLIER_GSTIN_SAME_STATE
 
@@ -217,6 +217,35 @@ def test_rule_37_skips_an_invoice_with_no_date():
 
     assert result.overdue == []
     assert result.approaching == []
+
+
+def test_rule_37_counts_the_180_days_in_the_indian_calendar(monkeypatch):
+    """The default "today" is the Indian date, not the UTC one.
+
+    The invoice date is an Indian calendar date and the Act is enforced in that
+    calendar. For the five and a half hours after midnight IST the UTC clock
+    still reads yesterday, so an invoice that has just crossed day 180 would be
+    reported as inside the window — and the reversal that GSTR-3B carries would
+    be understated by the tax on it, which is credit over-claimed with interest
+    running on it.
+    """
+    # 00:30 IST on 2 July 2026, which is still 1 July in UTC.
+    just_after_midnight_ist = datetime(2026, 7, 2, 0, 30, tzinfo=gst_calendar.IST)
+    monkeypatch.setattr(
+        itc_service.gst_calendar,
+        "today_ist",
+        lambda: gst_calendar.ist_date(just_after_midnight_ist),
+    )
+
+    # Day 181 in India; day 180 if the clock is read in UTC.
+    invoice = purchase(invoice_date=date(2026, 1, 2))
+    result = itc_service.rule_37([invoice])
+
+    assert [item.invoice_id for item in result.overdue] == [1]
+    assert result.overdue[0].days_outstanding == 181
+    assert result.reversal.igst == Decimal("18000.00")
+    # The UTC reading of the same instant is the day the reversal is missed on.
+    assert just_after_midnight_ist.astimezone(UTC).date() == date(2026, 7, 1)
 
 
 def test_rule_37_reports_the_most_overdue_first():
