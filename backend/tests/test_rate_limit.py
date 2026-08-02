@@ -12,6 +12,35 @@ import pytest
 from app.core.ratespec import Rate, parse_rate
 
 
+@pytest.fixture
+def pinned_window(monkeypatch):
+    """Stop the clock just after a window opens, and hand back a way to move it.
+
+    The windows are fixed and aligned to the wall clock, so a burst that takes
+    real seconds can straddle a boundary and have its budget refilled halfway
+    through — the assertion then fails for the calendar rather than for the
+    limiter. That went from theoretical to routine once a login against an
+    unknown address started paying a full bcrypt round, which is deliberate and
+    makes a twenty-five request burst take about five seconds.
+
+    Returns ``advance(seconds)`` so a test can also step *over* a boundary on
+    purpose, which is the only way to assert a rollover without sleeping for a
+    minute.
+    """
+    from app.core import rate_limit
+
+    # An exact multiple of 86400, and so of every window the parser can
+    # produce, which means every rate starts a fresh window at this instant
+    # rather than landing partway through one.
+    now = [1_799_971_200.0]
+    monkeypatch.setattr(rate_limit, "_clock", lambda: now[0])
+
+    def advance(seconds: float) -> None:
+        now[0] += seconds
+
+    return advance
+
+
 class TestParseRate:
     @pytest.mark.parametrize(
         "spec,limit,window",
@@ -179,26 +208,31 @@ class TestEnforcement:
                 data={"username": "nobody@example.com", "password": "wrong-password"},
             ).status_code != 429
 
-    def test_repeated_logins_are_eventually_refused(self, client, rate_limited):
-        # 20/minute, keyed by address for an anonymous caller.
+    def test_repeated_logins_are_eventually_refused(self, client, rate_limited, pinned_window):
+        # 20/minute, keyed by address for an anonymous caller. A different
+        # account every time, so this trips the *address* budget rather than
+        # the per-account one — which is the limit under test here.
         statuses = [
             client.post(
                 "/api/v1/auth/login",
-                data={"username": "nobody@example.com", "password": "wrong-password"},
+                data={"username": f"nobody{i}@example.com", "password": "wrong-password"},
             ).status_code
-            for _ in range(25)
+            for i in range(25)
         ]
-        assert 429 in statuses
+        # Exact, now that the window cannot roll underneath it: the twenty-first
+        # is the first refusal, not merely "a 429 happened somewhere".
+        assert statuses == [401] * 20 + [429] * 5
 
-    def test_a_429_tells_the_caller_when_to_come_back(self, client, rate_limited):
+    def test_a_429_tells_the_caller_when_to_come_back(self, client, rate_limited, pinned_window):
         response = None
-        for _ in range(25):
+        for i in range(25):
             response = client.post(
                 "/api/v1/auth/login",
-                data={"username": "nobody@example.com", "password": "wrong-password"},
+                data={"username": f"nobody{i}@example.com", "password": "wrong-password"},
             )
             if response.status_code == 429:
                 break
+        assert response is not None
         assert response.status_code == 429
         assert int(response.headers["Retry-After"]) > 0
         assert response.headers["X-RateLimit-Remaining"] == "0"
@@ -220,6 +254,101 @@ class TestEnforcement:
         assert client.get("/api/v1/meta/gstin/27AAPFU0939F1ZV").status_code == 200
 
 
+class TestWindowsRollOver:
+    """What happens at a boundary — the half of a fixed window nothing asserted.
+
+    Every enforcement test above establishes that a budget runs out. None of
+    them establish that it ever comes back, because doing so meant sleeping for
+    a minute. A limiter that refuses correctly and never forgives is a far
+    worse bug than one that is slightly too generous, and until the clock
+    became injectable there was no test that could tell the two apart.
+    """
+
+    def test_a_spent_budget_is_restored_when_the_window_rolls(self, pinned_window):
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        rate_limit.reset()
+        for _ in range(3):
+            rate_limit.charge("rollover:key", rate)
+        assert not rate_limit.peek("rollover:key", rate).allowed
+
+        pinned_window(60)
+
+        assert rate_limit.peek("rollover:key", rate).allowed
+        assert rate_limit.peek("rollover:key", rate).remaining == 3
+        rate_limit.reset()
+
+    def test_the_budget_holds_right_up_to_the_boundary(self, pinned_window):
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        rate_limit.reset()
+        for _ in range(3):
+            rate_limit.charge("rollover:key", rate)
+
+        # One second short of the roll, the refusal must still stand — an
+        # off-by-one in the flooring would hand the budget back a window early.
+        pinned_window(59)
+        assert not rate_limit.peek("rollover:key", rate).allowed
+
+        pinned_window(1)
+        assert rate_limit.peek("rollover:key", rate).allowed
+        rate_limit.reset()
+
+    def test_retry_after_counts_down_towards_the_roll(self, pinned_window):
+        """The number the caller is told to sleep for has to shrink as the
+        window drains, and must never be zero — a client told to retry in zero
+        seconds retries immediately and is refused again."""
+        from app.core import rate_limit
+
+        rate = Rate(1, 60)
+        rate_limit.reset()
+
+        assert rate_limit.charge("countdown:key", rate).retry_after == 60
+        pinned_window(30)
+        assert rate_limit.peek("countdown:key", rate).retry_after == 30
+        pinned_window(29.5)
+        assert rate_limit.peek("countdown:key", rate).retry_after == 1
+        rate_limit.reset()
+
+    def test_an_expired_window_is_not_reused_by_a_later_one(self, pinned_window):
+        """Windows are keyed by their start, so a count from an old one must
+        not be visible to the new one even though the rate key is identical."""
+        from app.core import rate_limit
+
+        rate = Rate(2, 60)
+        rate_limit.reset()
+        rate_limit.charge("rollover:key", rate)
+        rate_limit.charge("rollover:key", rate)
+
+        pinned_window(120)  # Two windows on, not one.
+
+        assert rate_limit.charge("rollover:key", rate).remaining == 1
+        rate_limit.reset()
+
+    def test_a_login_budget_comes_back_after_its_minute(
+        self, client, rate_limited, pinned_window
+    ):
+        """The same property end to end: a caller locked out of login is not
+        locked out forever."""
+        statuses = [
+            client.post(
+                "/api/v1/auth/login",
+                data={"username": f"nobody{i}@example.com", "password": "wrong-password"},
+            ).status_code
+            for i in range(22)
+        ]
+        assert statuses[-1] == 429
+
+        pinned_window(60)
+
+        assert client.post(
+            "/api/v1/auth/login",
+            data={"username": "nobody-fresh@example.com", "password": "wrong-password"},
+        ).status_code == 401
+
+
 class TestMemoryFallback:
     """With Redis down the limiter degrades rather than failing the request."""
 
@@ -234,7 +363,7 @@ class TestMemoryFallback:
 
         rate_limit.reset()
         rate = Rate(3, 60)
-        decisions = [rate_limit._hit("test:key", rate) for _ in range(5)]
+        decisions = [rate_limit.charge("test:key", rate) for _ in range(5)]
         assert [d.allowed for d in decisions] == [True, True, True, False, False]
         assert decisions[0].remaining == 2
         assert decisions[-1].remaining == 0
@@ -246,9 +375,9 @@ class TestMemoryFallback:
 
         rate_limit.reset()
         rate = Rate(1, 60)
-        assert rate_limit._hit("a", rate).allowed
-        assert rate_limit._hit("b", rate).allowed
-        assert not rate_limit._hit("a", rate).allowed
+        assert rate_limit.charge("a", rate).allowed
+        assert rate_limit.charge("b", rate).allowed
+        assert not rate_limit.charge("a", rate).allowed
         rate_limit.reset()
 
     def test_the_key_map_is_bounded(self):
@@ -260,6 +389,114 @@ class TestMemoryFallback:
         for i in range(_MAX_MEMORY_KEYS + 2000):
             windows.hit(f"key-{i}")
         assert len(windows._counts) <= _MAX_MEMORY_KEYS + 1
+
+
+class TestFailureCounterVerbs:
+    """``peek`` and ``forget``, the two verbs a failure budget needs.
+
+    A request counter only ever charges. A failure budget has to answer "may
+    another attempt be made" *without* spending one — otherwise asking the
+    question is itself an attempt — and has to be droppable, because the caller
+    who proves their identity must get their budget back. Login is the caller;
+    these are the primitives underneath it.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _clean(self):
+        from app.core import rate_limit
+
+        rate_limit.reset()
+        yield
+        rate_limit.reset()
+
+    def test_peek_reports_the_count_without_spending_one(self):
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        rate_limit.charge("failures:acct", rate)
+
+        first = rate_limit.peek("failures:acct", rate)
+        second = rate_limit.peek("failures:acct", rate)
+
+        # Two reads, still one charge — a peek that incremented would mean a
+        # budget of N allowed only N/2 real attempts.
+        assert first.remaining == second.remaining == 2
+        assert rate_limit.charge("failures:acct", rate).remaining == 1
+
+    def test_peek_on_an_untouched_key_reports_the_whole_budget(self):
+        from app.core import rate_limit
+
+        decision = rate_limit.peek("failures:never-seen", Rate(5, 60))
+        assert decision.allowed
+        assert decision.remaining == 5
+        assert decision.limit == 5
+
+    def test_peek_closes_one_attempt_before_charge_does(self):
+        """The two answer different questions and must not be interchanged.
+
+        ``charge`` says "was the attempt I just counted within budget", so on a
+        budget of 2 it stays true for the second. ``peek`` says "is there room
+        for one more", so after two charges it is false — which is what a
+        pre-flight check needs. Swapping them would let one extra guess
+        through on every window.
+        """
+        from app.core import rate_limit
+
+        rate = Rate(2, 60)
+        assert rate_limit.peek("failures:acct", rate).allowed
+
+        assert rate_limit.charge("failures:acct", rate).allowed
+        assert rate_limit.peek("failures:acct", rate).allowed
+
+        assert rate_limit.charge("failures:acct", rate).allowed
+        assert not rate_limit.peek("failures:acct", rate).allowed
+
+    def test_forget_drops_the_count(self):
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        for _ in range(3):
+            rate_limit.charge("failures:acct", rate)
+        assert not rate_limit.peek("failures:acct", rate).allowed
+
+        rate_limit.forget("failures:acct", rate)
+
+        assert rate_limit.peek("failures:acct", rate).allowed
+        assert rate_limit.peek("failures:acct", rate).remaining == 3
+
+    def test_forget_leaves_other_keys_alone(self):
+        from app.core import rate_limit
+
+        rate = Rate(2, 60)
+        rate_limit.charge("failures:mine", rate)
+        rate_limit.charge("failures:theirs", rate)
+
+        rate_limit.forget("failures:mine", rate)
+
+        assert rate_limit.peek("failures:mine", rate).remaining == 2
+        assert rate_limit.peek("failures:theirs", rate).remaining == 1
+
+    def test_forget_on_a_key_that_was_never_charged_is_not_an_error(self):
+        from app.core import rate_limit
+
+        rate_limit.forget("failures:never-seen", Rate(2, 60))
+
+    def test_peek_and_forget_address_the_window_that_is_open_now(self, monkeypatch):
+        """A budget is per window, so a forget must not reach back into an old
+        one — and a peek must not read one that has already rolled over."""
+        from app.core import rate_limit
+
+        rate = Rate(2, 60)
+        # ``_clock``, not ``rate_limit.time.time``: the latter is the stdlib
+        # module itself, so patching it stops the clock for httpx, logging and
+        # everything else running inside the test as well.
+        monkeypatch.setattr(rate_limit, "_clock", lambda: 1_000_000.0)
+        rate_limit.charge("failures:acct", rate)
+        rate_limit.charge("failures:acct", rate)
+        assert not rate_limit.peek("failures:acct", rate).allowed
+
+        monkeypatch.setattr(rate_limit, "_clock", lambda: 1_000_060.0)
+        assert rate_limit.peek("failures:acct", rate).remaining == 2
 
 
 class TestRedisBackedCounters:
@@ -307,11 +544,21 @@ class TestRedisBackedCounters:
                         results.append(True)
                 return results
 
+        def get(self, key):
+            if self.fail:
+                raise ConnectionError("Connection refused")
+            value = self.counts.get(key)
+            # redis-py hands back bytes, not an int; a peek that forgets to
+            # coerce would work here and fail against a real server.
+            return None if value is None else str(value).encode()
+
         def scan_iter(self, match, count=None):
             prefix = match.rstrip("*")
             return [k for k in list(self.counts) if k.startswith(prefix)]
 
         def delete(self, *keys):
+            if self.fail:
+                raise ConnectionError("Connection refused")
             self.deleted.extend(keys)
             for key in keys:
                 self.counts.pop(key, None)
@@ -331,7 +578,7 @@ class TestRedisBackedCounters:
         from app.core import rate_limit
 
         for _ in range(3):
-            rate_limit._hit("uploads:user:1", Rate(10, 60))
+            rate_limit.charge("uploads:user:1", Rate(10, 60))
 
         (bucket,) = fake_redis.counts
         assert bucket.startswith("ratelimit:uploads:user:1:")
@@ -343,7 +590,7 @@ class TestRedisBackedCounters:
         from app.core import rate_limit
 
         rate = Rate(3, 60)
-        decisions = [rate_limit._hit("shared:key", rate) for _ in range(5)]
+        decisions = [rate_limit.charge("shared:key", rate) for _ in range(5)]
 
         assert [d.allowed for d in decisions] == [True, True, True, False, False]
         assert decisions[-1].remaining == 0
@@ -352,7 +599,7 @@ class TestRedisBackedCounters:
         """Without a TTL every window ever opened stays in Redis for good."""
         from app.core import rate_limit
 
-        rate_limit._hit("uploads:user:1", Rate(10, 60))
+        rate_limit.charge("uploads:user:1", Rate(10, 60))
 
         (bucket,) = fake_redis.expiries
         # One second past the window, so a bucket cannot expire while the
@@ -362,10 +609,10 @@ class TestRedisBackedCounters:
     def test_each_window_gets_its_own_bucket(self, fake_redis, monkeypatch):
         from app.core import rate_limit
 
-        monkeypatch.setattr(rate_limit.time, "time", lambda: 1_000_000.0)
-        rate_limit._hit("uploads:user:1", Rate(10, 60))
-        monkeypatch.setattr(rate_limit.time, "time", lambda: 1_000_060.0)
-        rate_limit._hit("uploads:user:1", Rate(10, 60))
+        monkeypatch.setattr(rate_limit, "_clock", lambda: 1_000_000.0)
+        rate_limit.charge("uploads:user:1", Rate(10, 60))
+        monkeypatch.setattr(rate_limit, "_clock", lambda: 1_000_060.0)
+        rate_limit.charge("uploads:user:1", Rate(10, 60))
 
         assert len(fake_redis.counts) == 2
         assert set(fake_redis.counts.values()) == {1}
@@ -386,12 +633,12 @@ class TestRedisBackedCounters:
         monkeypatch.setattr(redis_client, "get_redis", lambda: self.FakeRedis(fail=True))
 
         with caplog.at_level(logging.WARNING):
-            decision = rate_limit._hit("uploads:user:1", Rate(2, 60))
+            decision = rate_limit.charge("uploads:user:1", Rate(2, 60))
 
         assert decision.allowed
         assert "degraded" in caplog.text.lower()
         # And it kept counting, in memory, rather than silently allowing all.
-        assert not [rate_limit._hit("uploads:user:1", Rate(2, 60)) for _ in range(3)][-1].allowed
+        assert not [rate_limit.charge("uploads:user:1", Rate(2, 60)) for _ in range(3)][-1].allowed
         rate_limit.reset()
 
     def test_a_failure_takes_redis_out_of_the_path_for_the_next_request(
@@ -414,7 +661,7 @@ class TestRedisBackedCounters:
         # hands it out without a probe, so this failure is only visible here.
         monkeypatch.setattr(redis_client, "_client", self.FakeRedis(fail=True))
 
-        rate_limit._hit("uploads:user:1", Rate(2, 60))
+        rate_limit.charge("uploads:user:1", Rate(2, 60))
 
         assert redis_client.get_redis() is None, "the dead client is still cached"
         assert redis_client._down_until > 0, "the breaker was never tripped"
@@ -427,13 +674,106 @@ class TestRedisBackedCounters:
         """Otherwise one test's counters leak into the next one's budget."""
         from app.core import rate_limit
 
-        rate_limit._hit("uploads:user:1", Rate(10, 60))
+        rate_limit.charge("uploads:user:1", Rate(10, 60))
         assert fake_redis.counts
 
         rate_limit.reset()
 
         assert fake_redis.deleted
         assert not fake_redis.counts
+
+    def test_peek_reads_the_shared_counter_rather_than_a_local_one(self, fake_redis):
+        """The whole point of the Redis path: a failure budget spent against
+        one API process has to be visible to the next request, which will land
+        on a different one."""
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        rate_limit.charge("failures:acct", rate)
+        rate_limit.charge("failures:acct", rate)
+
+        assert rate_limit.peek("failures:acct", rate).remaining == 1
+        # Read, not written: the count in Redis is still 2.
+        (bucket,) = fake_redis.counts
+        assert fake_redis.counts[bucket] == 2
+
+    def test_forget_deletes_the_shared_bucket(self, fake_redis):
+        from app.core import rate_limit
+
+        rate = Rate(3, 60)
+        rate_limit.charge("failures:acct", rate)
+        (bucket,) = fake_redis.counts
+
+        rate_limit.forget("failures:acct", rate)
+
+        assert bucket in fake_redis.deleted
+        assert not fake_redis.counts
+        assert rate_limit.peek("failures:acct", rate).remaining == 3
+
+    def test_a_peek_against_a_dead_redis_falls_back_instead_of_failing_the_login(
+        self, monkeypatch
+    ):
+        """This runs in front of every sign-in. Raising here would mean a Redis
+        outage locks every user out of the product, which is a far worse
+        failure than counting per-process for the cooldown."""
+        from app.core import rate_limit, redis_client
+
+        rate_limit.reset()
+        redis_client.reset()
+        monkeypatch.setattr(redis_client, "_client", self.FakeRedis(fail=True))
+
+        decision = rate_limit.peek("failures:acct", Rate(2, 60))
+
+        assert decision.allowed
+        assert decision.remaining == 2
+        # And it told the breaker, so the next sign-in does not pay the same
+        # socket timeout over again.
+        assert redis_client.get_redis() is None
+        assert redis_client._down_until > 0
+
+        monkeypatch.undo()
+        redis_client.reset()
+        rate_limit.reset()
+
+    def test_a_forget_against_a_dead_redis_does_not_fail_the_login_it_follows(
+        self, monkeypatch
+    ):
+        """``forget`` runs *after* the password has been accepted. Letting it
+        raise would turn a correct password into a 500."""
+        from app.core import rate_limit, redis_client
+
+        rate_limit.reset()
+        redis_client.reset()
+        monkeypatch.setattr(redis_client, "_client", self.FakeRedis(fail=True))
+
+        rate_limit.forget("failures:acct", Rate(2, 60))  # Must not raise.
+
+        assert redis_client._down_until > 0
+
+        monkeypatch.undo()
+        redis_client.reset()
+        rate_limit.reset()
+
+    def test_forget_clears_the_in_process_count_as_well_as_the_shared_one(
+        self, fake_redis, monkeypatch
+    ):
+        """The two stores drift when Redis flaps: attempts counted in memory
+        during an outage are still there when Redis returns. A forget that only
+        reached Redis would leave a user locked out by a count nothing can
+        clear until the window rolls."""
+        from app.core import rate_limit, redis_client
+
+        rate = Rate(2, 60)
+        # Charged while Redis was unreachable, so it landed in memory.
+        monkeypatch.setattr(redis_client, "get_redis", lambda: None)
+        rate_limit.charge("failures:acct", rate)
+        rate_limit.charge("failures:acct", rate)
+
+        monkeypatch.setattr(redis_client, "get_redis", lambda: fake_redis)
+        rate_limit.forget("failures:acct", rate)
+
+        monkeypatch.setattr(redis_client, "get_redis", lambda: None)
+        assert rate_limit.peek("failures:acct", rate).remaining == 2
 
     def test_reset_survives_a_redis_that_is_down(self, monkeypatch):
         """It is called from fixtures; raising here would fail unrelated tests

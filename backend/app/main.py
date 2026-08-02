@@ -77,6 +77,12 @@ Responses carry `X-RateLimit-Limit` and `X-RateLimit-Remaining`. A 429 carries
 to the client address for anonymous callers — so an office behind one NAT does
 not share a single budget.
 
+`POST /auth/login` carries a second budget on top, keyed by the account being
+attempted rather than by the caller, so that failed sign-ins against one
+account are capped no matter how many addresses they arrive from. It counts
+only failures and is handed straight back on a correct password, so a client
+that signs in successfully never meets it.
+
 ### Money
 
 Every monetary value is a decimal *string*, not a float — `"1234.56"`. GST is

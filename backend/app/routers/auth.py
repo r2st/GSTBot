@@ -5,9 +5,18 @@ The rate limits here are the strictest in the product and are keyed by
 comes from someone who has no identity yet: credential stuffing against login,
 bulk sign-ups against register. Everywhere else, limiting by IP would punish an
 office behind one NAT; here it is the only key that means anything.
+
+Login carries a second limit on top, keyed by the account being attempted.
+An address limit alone is only as strong as the number of addresses the
+attacker has, and a stuffing run's whole shape is one guess per host across
+thousands of hosts — twenty a minute each, against one account, is a password
+every three seconds from a limiter that never sees the same key twice. The
+per-account counter is the one that costs the attacker something, because the
+target is the thing they cannot spread the load across.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -15,9 +24,18 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_business, get_current_user
-from app.core.rate_limit import RateLimit, client_ip
+from app.core.rate_limit import (
+    RateLimit,
+    apply_headers,
+    charge,
+    client_ip,
+    forget,
+    peek,
+)
+from app.core.ratespec import Rate, parse_rate
 from app.core.security import create_access_token, hash_password, verify_password
 from app.models.business import Business, BusinessPlan
 from app.models.user import User, UserRole
@@ -42,6 +60,33 @@ _register_limit = RateLimit("register", "10/hour", by="ip")
 # password needs, and far less than a stuffing run wants.
 _login_limit = RateLimit("login", "20/minute", by="ip")
 _me_limit = RateLimit("me", "120/minute")
+
+# The per-account failure budget, spent by wrong passwords and refunded the
+# moment a right one arrives. Ten in a quarter of an hour: a person who has
+# forgotten which of their passwords it is runs out of guesses long before
+# this, and an attacker who has spread themselves over a thousand hosts still
+# only gets forty guesses an hour at any one account.
+_LOGIN_ACCOUNT_LIMIT = "login_account"
+_LOGIN_ACCOUNT_SPEC = "10/15m"
+
+
+def _account_rate() -> Rate:
+    # Read per call rather than memoised, so RATE_LIMIT_OVERRIDES and a test's
+    # monkeypatch both take effect without a restart.
+    return parse_rate(settings.rate_limits.get(_LOGIN_ACCOUNT_LIMIT, _LOGIN_ACCOUNT_SPEC))
+
+
+def _account_key(username: str) -> str:
+    """The counter key for the account *username* names.
+
+    Folded the same way the lookup folds it, so varying the case cannot mint a
+    fresh budget. Hashed rather than stored plain because these keys outlive
+    the request in Redis, and Redis is not where this product's email addresses
+    should be legible — the same reason the failed-login log line carries the
+    address of the caller and not the account they guessed at.
+    """
+    digest = hashlib.sha256(username.strip().lower().encode("utf-8")).hexdigest()
+    return f"{_LOGIN_ACCOUNT_LIMIT}:{digest[:32]}"
 
 
 @router.post(
@@ -147,7 +192,12 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> Registe
             )
         },
         403: {"description": "The account exists but has been deactivated."},
-        429: {"description": "Too many attempts from this address."},
+        429: {
+            "description": (
+                "Too many attempts from this address, or too many failed "
+                "attempts against this account from anywhere."
+            )
+        },
     },
     dependencies=[Depends(_login_limit)],
 )
@@ -156,6 +206,38 @@ def login(
     form: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ) -> Token:
+    # ``None`` switches the per-account counter off wholesale, which is how
+    # RATE_LIMIT_ENABLED=false stays a single decision rather than three.
+    account_rate = _account_rate() if settings.rate_limit_enabled else None
+    account_key = _account_key(form.username)
+
+    # Checked before the password is, so a spent budget costs the attacker a
+    # rejection rather than a bcrypt round — which is the point: the work this
+    # endpoint does per attempt is what a stuffing run is buying.
+    if account_rate is not None:
+        budget = peek(account_key, account_rate)
+        if not budget.allowed:
+            logger.warning(
+                "Login blocked: account attempt budget exhausted",
+                extra={"client_ip": client_ip(request), "status_code": 429},
+            )
+            # Overwrites the address limiter's decision, which the dependency
+            # left here on the way in. The access-log middleware copies
+            # whatever is on the request onto the response, so without this the
+            # caller is told they have budget left by the very response
+            # refusing them for having none.
+            request.state.rate_limit = budget
+            headers = {"Retry-After": str(budget.retry_after)}
+            apply_headers(headers, budget)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Too many failed sign-in attempts. "
+                    f"Try again in {budget.retry_after}s."
+                ),
+                headers=headers,
+            )
+
     # OAuth2PasswordRequestForm calls it ``username``; we treat it as the email.
     # Registration stores the address folded to lower case, so that is the
     # indexed lookup. The second attempt covers rows written before the folding
@@ -164,7 +246,15 @@ def login(
     user = db.scalar(select(User).where(User.email == form.username.lower()))
     if user is None and form.username != form.username.lower():
         user = db.scalar(select(User).where(User.email == form.username))
-    if not user or not verify_password(form.password, user.hashed_password):
+    # ``None`` when no row matched, and ``verify_password`` hashes against a
+    # throwaway digest in that case rather than returning early. Both branches
+    # therefore cost one bcrypt round, which is what stops the response time
+    # answering the question the identical 401 body refuses to. Verified before
+    # the branch, not inside it, so no short circuit can skip that round.
+    matched = verify_password(form.password, user.hashed_password if user else None)
+    if user is None or not matched:
+        if account_rate is not None:
+            charge(account_key, account_rate)
         # Logged without the attempted email: a failed-login log is exactly
         # where a mistyped password ends up sitting next to the address that
         # typed it.
@@ -176,6 +266,14 @@ def login(
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    # Refunded on proof of identity, and before the active check: a deactivated
+    # account whose owner still types the right password is not a guess, and
+    # leaving its counter spent would let anyone lock that account's budget
+    # empty on its owner's behalf. That refund is what keeps a per-account
+    # counter from being a way to deny someone their own login.
+    if account_rate is not None:
+        forget(account_key, account_rate)
+
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
 

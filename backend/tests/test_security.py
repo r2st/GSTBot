@@ -68,6 +68,92 @@ class TestPasswordHashing:
         assert verify_password(base + "different", hash_password(base + "tail"))
 
 
+class TestVerifyingAgainstNoAccount:
+    """``verify_password(plain, None)`` — the "no such user" path.
+
+    Returning early there is the obvious implementation and it is a user
+    enumeration oracle: bcrypt costs a few hundred milliseconds, a missing row
+    costs nothing, and the difference is measurable across the internet. So the
+    absent case does the same work, and these tests are what say so — a login
+    that skips the hashing still returns the same 401 body and would pass every
+    test in ``test_auth.py`` written before this one.
+    """
+
+    def test_no_account_is_a_failed_verification(self):
+        assert not verify_password("supersecret123", None)
+
+    def test_the_absent_case_still_runs_a_full_bcrypt_comparison(self, monkeypatch):
+        """The property, asserted on the work done rather than on the clock.
+
+        A wall-clock assertion is the direct translation and is unusable in
+        CI — a loaded runner makes it either flaky or so loose it proves
+        nothing. Counting the bcrypt calls is exact, and it fails for exactly
+        the change that matters: an early return when the row is missing.
+        """
+        import app.core.security as security
+
+        calls: list[bytes] = []
+        real = security.bcrypt.checkpw
+
+        def spy(password, hashed):
+            calls.append(hashed)
+            return real(password, hashed)
+
+        monkeypatch.setattr(security.bcrypt, "checkpw", spy)
+        security._absent_account_hash()  # Pay the lazy build outside the count.
+        calls.clear()
+
+        assert not verify_password("supersecret123", None)
+        assert len(calls) == 1
+
+        present = hash_password("supersecret123")
+        calls.clear()
+        assert verify_password("supersecret123", present)
+        assert len(calls) == 1
+
+    def test_the_stand_in_hash_costs_what_a_real_one_costs(self):
+        """Equal work means the same bcrypt cost factor.
+
+        A stand-in built at a cheaper cost would still be one ``checkpw`` call
+        and would still be several times faster than a stored hash, which puts
+        the timing gap straight back.
+        """
+        import app.core.security as security
+
+        def cost(digest: str) -> str:
+            # "$2b$12$...." — scheme and rounds are the first three fields.
+            return "$".join(digest.split("$")[:3])
+
+        assert cost(security._absent_account_hash()) == cost(hash_password("anything"))
+
+    def test_the_stand_in_hash_is_reused_rather_than_rebuilt(self):
+        """Rebuilding it per call would double the cost of every failed login
+        against an unknown address — which is the request an attacker sends
+        most of, and so is the one worth not making expensive for us."""
+        import app.core.security as security
+
+        assert security._absent_account_hash() is security._absent_account_hash()
+
+    def test_nothing_verifies_against_the_stand_in_hash(self):
+        """It is a hash of a fresh random secret, so there is no password that
+        opens it — including the empty one a caller can actually send."""
+        import app.core.security as security
+
+        absent = security._absent_account_hash()
+
+        assert not verify_password("", absent)
+        assert not verify_password("supersecret123", absent)
+
+    def test_two_processes_do_not_share_a_stand_in_hash(self, monkeypatch):
+        """Built from ``secrets.token_urlsafe``, so it is not a constant baked
+        into the source that anyone reading the repository could match."""
+        import app.core.security as security
+
+        first = security._absent_account_hash()
+        monkeypatch.setattr(security, "_absent_hash", None)
+        assert security._absent_account_hash() != first
+
+
 class TestAccessTokens:
     def test_a_token_round_trips_to_its_subject(self):
         assert decode_access_token(create_access_token(42)) == "42"

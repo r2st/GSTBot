@@ -73,6 +73,14 @@ class _MemoryWindows:
             self._counts.move_to_end(bucket_key)
             return count
 
+    def peek(self, bucket_key: str) -> int:
+        with self._lock:
+            return self._counts.get(bucket_key, 0)
+
+    def forget(self, bucket_key: str) -> None:
+        with self._lock:
+            self._counts.pop(bucket_key, None)
+
     def clear(self) -> None:
         with self._lock:
             self._counts.clear()
@@ -81,11 +89,29 @@ class _MemoryWindows:
 _memory = _MemoryWindows()
 
 
-def _hit(key: str, rate: Rate) -> Decision:
-    """Count one request against *key* and decide whether it may proceed."""
-    now = time.time()
+# The clock the windows are cut against, named so a test can pin it.
+#
+# These are fixed windows aligned to the wall clock, not sliding ones, so where
+# a test sits relative to a boundary changes its result: a burst that straddles
+# one gets its budget silently refilled halfway through. That is invisible when
+# the requests are fast and becomes a real flake when they are not — a login
+# now pays a bcrypt round even for an address with no account, which is the
+# point of that path, and it makes a twenty-five request burst take seconds.
+# Pinning this is also the only way to assert what happens *at* a rollover
+# without a test that sleeps for a minute.
+_clock = time.time
+
+
+def _bucket(rate: Rate) -> tuple[int, int]:
+    """``(window_start, seconds_until_it_rolls)`` for the window now open."""
+    now = _clock()
     window_start = int(now // rate.window) * rate.window
-    reset_in = int(window_start + rate.window - now) or 1
+    return window_start, int(window_start + rate.window - now) or 1
+
+
+def charge(key: str, rate: Rate) -> Decision:
+    """Count one request against *key* and decide whether it may proceed."""
+    window_start, reset_in = _bucket(rate)
     bucket = f"ratelimit:{key}:{window_start}"
 
     count: int | None = None
@@ -119,6 +145,85 @@ def _hit(key: str, rate: Rate) -> Decision:
         remaining=remaining,
         retry_after=reset_in,
     )
+
+
+# ``charge``, ``peek`` and ``forget`` are the three verbs a *failure* counter
+# needs, as opposed to the request counter the ``RateLimit`` dependency
+# implements. A request counter charges every call and asks afterwards whether
+# that was one too many. A failure counter has to ask *before* doing the work
+# (peek), charge only the attempts that failed, and — this is the part
+# that matters — drop the count the moment the caller proves who they are
+# (forget). Without ``forget``, counting failures per account hands anyone who
+# knows an email address a way to lock its owner out by spending the budget on
+# their behalf; with it, the lockout only ever reaches a caller who cannot
+# produce the password either.
+
+
+def peek(key: str, rate: Rate) -> Decision:
+    """Read the count against *key* without charging for this call.
+
+    ``allowed`` answers "is there budget for one more", so it goes false one
+    attempt earlier than :func:`charge`'s — which answers "was the attempt just
+    counted within budget". The two conventions differ because the callers do:
+    this one is asked before the work, that one after.
+    """
+    window_start, reset_in = _bucket(rate)
+    bucket = f"ratelimit:{key}:{window_start}"
+
+    count: int | None = None
+    from app.core.redis_client import get_redis, mark_unavailable
+
+    client = get_redis()
+    if client is not None:
+        try:
+            raw = client.get(bucket)
+            count = int(raw) if raw is not None else 0
+        except Exception as exc:  # noqa: BLE001 - fall back, never fail the request
+            logger.warning("Rate limiter degraded to in-process counters: %s", exc)
+            mark_unavailable(f"{type(exc).__name__}: {exc}")
+            count = None
+
+    if count is None:
+        count = _memory.peek(bucket)
+
+    return Decision(
+        allowed=count < rate.limit,
+        limit=rate.limit,
+        remaining=max(0, rate.limit - count),
+        retry_after=reset_in,
+    )
+
+
+def forget(key: str, rate: Rate) -> None:
+    """Drop *key*'s count for the window now open.
+
+    Best effort on purpose: this is called after a caller has already been
+    authenticated, and failing to clear a counter must never turn a successful
+    login into an error. The worst case is that the count stands until the
+    window rolls over on its own.
+
+    Both stores are cleared, not whichever one is live. ``charge`` writes to
+    Redis when it can and to memory when it cannot, so a Redis that flaps
+    mid-window leaves attempts recorded in both places. Clearing only the one
+    reachable right now would leave the other holding a count that no
+    subsequent refund can reach — the user stays locked out until the window
+    rolls, by a counter their correct password was supposed to have cleared.
+    """
+    window_start, _ = _bucket(rate)
+    bucket = f"ratelimit:{key}:{window_start}"
+
+    _memory.forget(bucket)
+
+    from app.core.redis_client import get_redis, mark_unavailable
+
+    client = get_redis()
+    if client is None:
+        return
+    try:
+        client.delete(bucket)
+    except Exception as exc:  # noqa: BLE001 - best effort
+        logger.warning("Could not clear rate-limit counter %s: %s", key, exc)
+        mark_unavailable(f"{type(exc).__name__}: {exc}")
 
 
 def client_ip(request: Request) -> str:
@@ -188,7 +293,7 @@ class RateLimit:
             return
 
         who = f"ip:{client_ip(request)}" if self.by == "ip" else identity(request)
-        decision = _hit(f"{self.name}:{who}", self.rate)
+        decision = charge(f"{self.name}:{who}", self.rate)
 
         # Stashed on the request so the middleware can put the headers on the
         # response — a dependency has no response object to write to.
@@ -224,7 +329,7 @@ def check_global(request: Request) -> Decision | None:
     if not settings.rate_limit_enabled:
         return None
     rate = parse_rate(settings.rate_limits.get("global", settings.rate_limit_default))
-    return _hit(f"global:{identity(request)}", rate)
+    return charge(f"global:{identity(request)}", rate)
 
 
 def reset() -> None:
