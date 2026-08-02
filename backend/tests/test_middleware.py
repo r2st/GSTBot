@@ -260,3 +260,88 @@ class TestErrorHelpers:
 
     def test_an_http_exception_detail_survives_the_round_trip(self):
         assert error_body(404, HTTPException(404, "x").detail)["detail"] == "x"
+
+
+class TestGlobalRateLimit:
+    """The blanket ceiling, applied in middleware rather than as a dependency.
+
+    Being middleware is the point: a dependency only runs once a route has
+    matched, so it never sees the scan for /admin.php or /.env — which is
+    precisely the traffic a global limit exists to absorb.
+    """
+
+    @pytest.fixture()
+    def tight_limit(self, rate_limited, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "rate_limit_default", "3/minute")
+        return rate_limited
+
+    @staticmethod
+    def _spend_the_budget(client, times=4):
+        """Exhaust the limit and hand back the response that was refused."""
+        return [client.get("/admin.php") for _ in range(times)][-1]
+
+    def test_a_scan_for_paths_that_do_not_exist_is_still_limited(self, client, tight_limit):
+        scanned = ("admin", "wp", "shell", "x")
+        statuses = [client.get(f"/{name}.php").status_code for name in scanned]
+
+        # The first few are ordinary 404s; the limiter takes over before the
+        # scanner gets through its list.
+        assert statuses[0] == 404
+        assert statuses[-1] == 429
+
+    def test_the_429_is_the_standard_error_envelope(self, client, tight_limit):
+        response = self._spend_the_budget(client)
+
+        body = response.json()
+        assert response.status_code == 429
+        assert body["error"]["code"] == "rate_limited"
+        assert body["error"]["status"] == 429
+        assert "Try again in" in body["error"]["message"]
+
+    def test_the_429_says_when_to_come_back(self, client, tight_limit):
+        response = self._spend_the_budget(client)
+
+        assert int(response.headers["retry-after"]) >= 1
+        assert response.headers["x-ratelimit-limit"] == "3"
+        assert response.headers["x-ratelimit-remaining"] == "0"
+
+    def test_the_429_is_still_traceable(self, client, tight_limit):
+        """The body is built inside the limiter, before the correlation
+        middleware would normally attach the id — so it attaches its own."""
+        response = self._spend_the_budget(client)
+
+        assert response.headers["x-request-id"]
+        assert response.json()["correlation_id"] == response.headers["x-request-id"]
+
+    def test_a_cors_preflight_is_never_rate_limited(self, client, tight_limit):
+        """A preflight is not a request the caller chose to make. Rejecting one
+        surfaces as an opaque CORS failure in the browser rather than as the
+        429 it really is."""
+        self._spend_the_budget(client, times=6)
+
+        preflight = client.options(
+            "/api/v1/auth/login",
+            headers={
+                "Origin": "http://localhost:5173",
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert preflight.status_code != 429
+
+    def test_the_liveness_probe_is_exempt(self, client, tight_limit):
+        """An orchestrator polls this every few seconds from one address. Rate
+        limiting it would eventually kill the pod for being healthy."""
+        self._spend_the_budget(client, times=6)
+
+        assert client.get("/api/v1/health/live").status_code == 200
+
+    def test_the_limit_is_off_when_disabled(self, client, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "rate_limit_enabled", False)
+        monkeypatch.setattr(settings, "rate_limit_default", "1/minute")
+
+        assert [client.get("/admin.php").status_code for _ in range(4)] == [404] * 4
