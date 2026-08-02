@@ -187,3 +187,61 @@ jobs:
 
       - name: Compose file is valid
         run: docker compose config --quiet
+
+  deploy:
+    name: Deploy manifests (validate)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # No `needs:`. These files are checked by tools that never import the
+    # application, so there is nothing for them to wait on — and a broken
+    # Caddyfile is worth knowing about even in a run where the tests are red.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # backend/tests/test_deploy.py asserts that these files agree with each
+      # other and with the application: the port in the Caddyfile is the port
+      # in the unit, the ExecStart lines address modules that import. What it
+      # cannot do is parse them the way the server will. That is this job, and
+      # it is the half that catches a missing brace — which otherwise surfaces
+      # as `systemctl reload caddy` failing partway through a release.
+
+      - name: Caddyfile is valid
+        # The published image rather than an apt repository: `caddy validate`
+        # is the only thing wanted from it, and the tag is the version the
+        # server runs.
+        run: |
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile
+
+      - name: Caddyfile is formatted
+        # `validate` only warns about formatting, and it warns on every reload
+        # — which is how the file ends up with a warning nobody reads attached
+        # to it. Comparing against `caddy fmt` is the assertion that has teeth.
+        run: |
+          docker run --rm -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2-alpine caddy fmt /etc/caddy/Caddyfile | diff -u deploy/Caddyfile -
+
+      - name: Units are valid
+        # systemd-analyze runs the same parser the server does, which is the
+        # only way to catch a misspelled directive — systemd ignores an unknown
+        # key at runtime, so a typo in `ProtectSystem=` is a unit that reports
+        # active and is not confined.
+        #
+        # The stubs below exist because verify resolves User=, EnvironmentFile=
+        # and ExecStart= against this filesystem. None of those are what is
+        # under test here; test_deploy.py already checks the paths themselves.
+        run: |
+          sudo useradd --system --no-create-home --shell /usr/sbin/nologin gstbot
+          sudo install -d /srv/gstbot/src/backend /srv/gstbot/venv/bin /etc/gstbot
+          sudo touch /etc/gstbot/gstbot.env
+          for binary in uvicorn celery alembic; do
+            sudo install -m 0755 /dev/null "/srv/gstbot/venv/bin/$binary"
+          done
+          systemd-analyze verify deploy/systemd/gstbot.target deploy/systemd/*.service
+
+      - name: Release script is sound
+        # The suite runs `bash -n`, which only proves it parses. shellcheck is
+        # what catches the unquoted expansion and the swallowed exit status —
+        # the failures a release script has in the one situation it exists for.
+        run: shellcheck deploy/deploy.sh

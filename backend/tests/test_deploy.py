@@ -271,7 +271,24 @@ class TestTheStackStartsInOrder:
     @pytest.mark.parametrize("name", ["gstbot-api.service", "gstbot-worker.service"])
     def test_a_serving_unit_restarts_but_not_forever(self, name, units):
         assert entry(units[name], "Service", "Restart") == "always"
-        assert int(entry(units[name], "Service", "StartLimitBurst")) > 0
+        assert int(entry(units[name], "Unit", "StartLimitBurst")) > 0
+
+    @pytest.mark.parametrize("name", ["gstbot-api.service", "gstbot-worker.service"])
+    @pytest.mark.parametrize("directive", ["StartLimitIntervalSec", "StartLimitBurst"])
+    def test_the_restart_limit_is_in_the_section_systemd_reads_it_from(
+        self, name, directive, units
+    ):
+        # These moved from [Service] to [Unit] in systemd v229. Left in
+        # [Service] they are not an error — systemd logs "Unknown key name"
+        # and carries on, so the unit starts, reports active, and rate-limits
+        # restarts on the 10s default instead of the 300s written down. The
+        # earlier version of this file asserted the value and passed the whole
+        # time it was inert, which is why the section is asserted and not just
+        # the number.
+        assert entries(units[name], "Unit", directive), f"{directive} is not in [Unit]"
+        assert not entries(units[name], "Service", directive), (
+            f"{directive} in [Service] is ignored by systemd"
+        )
 
     def test_only_the_migration_unit_runs_alembic(self, units):
         # The container entrypoint refuses to migrate from the worker for the
@@ -537,7 +554,7 @@ class TestTheCaddyfile:
 
     @pytest.mark.skipif(
         subprocess.run(["which", "caddy"], capture_output=True).returncode != 0,
-        reason="caddy is not installed; CI validates the file in the docker job",
+        reason="caddy is not installed; CI validates the file in the deploy job",
     )
     def test_caddy_itself_accepts_the_file(self):
         result = subprocess.run(

@@ -10,6 +10,16 @@ After=network-online.target postgresql.service redis-server.service gstbot-migra
 Requires=gstbot-migrate.service
 PartOf=gstbot.target
 
+# [Unit], not [Service]. systemd moved these here in v229 and ignores
+# StartLimitIntervalSec= in [Service] entirely — with a log line nobody reads,
+# and with the interval silently falling back to DefaultStartLimitIntervalSec
+# (10s), which is short enough that a process crashing every 11 seconds
+# restarts forever. A process that cannot start is a configuration error;
+# retrying it indefinitely buries the first traceback under a thousand
+# identical ones.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=exec
 User=gstbot
@@ -49,10 +59,6 @@ TimeoutStopSec=120
 
 Restart=always
 RestartSec=5
-# A process that cannot start is a configuration error; retrying it forever
-# just buries the first traceback under a thousand identical ones.
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # ---- Sandboxing ----
 # See gstbot-migrate.service for why this block is identical across the three

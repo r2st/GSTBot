@@ -6,6 +6,12 @@ After=network-online.target postgresql.service redis-server.service gstbot-migra
 Requires=gstbot-migrate.service
 PartOf=gstbot.target
 
+# [Unit], not [Service] — see the comment in gstbot-api.service. systemd
+# ignores StartLimitIntervalSec= in [Service], so a worker that crashes on
+# every task would have restarted forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
 [Service]
 Type=exec
 User=gstbot
@@ -32,8 +38,6 @@ TimeoutStopSec=300
 
 Restart=always
 RestartSec=5
-StartLimitIntervalSec=300
-StartLimitBurst=5
 
 # ---- Sandboxing ----
 # See gstbot-migrate.service. The worker needs the same StateDirectory as the

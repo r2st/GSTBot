@@ -9,7 +9,9 @@
 # point — the browser never makes a cross-origin request, so CORS is not in
 # the path of anything a user does and a stolen token cannot be replayed from
 # another site by a preflight that was allowed too broadly.
-
+#
+# No blank line before the global options block below: `caddy fmt` closes it
+# up, and an unformatted file makes `caddy validate` warn on every reload.
 {
 	# Where Let's Encrypt sends expiry warnings. Change before deploying.
 	email ops@aiknol.com
