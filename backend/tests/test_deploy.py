@@ -1319,6 +1319,84 @@ class TestTheMonitor:
         assert entry(timer, "Timer", "Persistent") == "false"
 
 
+class TestTheJobThatValidatesAllOfThis:
+    """The CI job that runs the parsers this suite cannot.
+
+    Everything above compares the manifests against each other as text.
+    `systemd-analyze verify` and `caddy validate` are the only things that
+    parse them the way the server will, and they run in one job — so that
+    job quietly checking nothing is a gap this file cannot otherwise see.
+
+    That is not hypothetical. Its stub tree was written for an install root
+    of /srv/gstbot and stayed there after the units moved to /opt/GSTBot,
+    so every ExecStart= failed to resolve and the job was red for reasons
+    unrelated to any unit. The checks below are about the shape that let
+    that happen: paths and file lists in the workflow that duplicate what
+    the deploy tree already states.
+    """
+
+    @pytest.fixture(scope="class")
+    def workflow(self) -> str:
+        return (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+
+    @pytest.fixture(scope="class")
+    def verify_step(self, workflow) -> str:
+        """Just the commands of the step that runs `systemd-analyze verify`.
+
+        Scoped rather than searching the whole file, because `alembic` is a
+        word other jobs have every reason to use — and a check that cannot
+        tell those apart from a hardcoded stub list is one that passes for
+        the wrong reason. Comments are dropped for the same reason they are
+        in TestTheDeployScript: prose about a binary is not a use of it.
+        """
+        steps = workflow.split("- name: ")
+        step = next(s for s in steps if s.startswith("Units are valid"))
+        return "\n".join(
+            line for line in step.splitlines() if not line.lstrip().startswith("#")
+        )
+
+    def test_it_stages_the_release_where_the_units_expect_it(self, workflow):
+        # The units name absolute paths. If the workflow stages the tree
+        # somewhere else, ExecStart= resolves to nothing — or worse, the
+        # shipped scripts get stubbed over with empty files and verify passes
+        # while checking a release that is not the one in the repository.
+        assert f"mkdir -p {INSTALL_ROOT}" in workflow
+        assert f"cp -R . {INSTALL_ROOT}/" in workflow
+
+    def test_it_does_not_name_the_binaries_it_stubs(self, verify_step):
+        # The list is read out of ExecStart= at run time. Spelling the
+        # binaries out again here is what went stale last time, and it goes
+        # stale silently: a unit whose binary is missing from a hardcoded
+        # list is a unit that stops being verified.
+        assert "ExecStart=" in verify_step, "the stub list is no longer derived from the units"
+        for unit in SYSTEMD.glob("*.service"):
+            binary = matched(r"^ExecStart=[-@+!]*(\S+)", unit.read_text(), flags=re.M).group(1)
+            name = Path(binary).name
+            if binary.startswith(f"{INSTALL_ROOT}/deploy/"):
+                continue  # shipped scripts are staged, not stubbed
+            assert name not in verify_step, f"{name} is hardcoded in the workflow again"
+
+    def test_every_unit_that_ships_is_verified(self, workflow):
+        # A glob rather than a list, for the same reason. Adding a unit must
+        # not also require remembering this file.
+        assert "deploy/systemd/*.service" in workflow
+        assert "deploy/systemd/*.timer" in workflow
+        assert f"deploy/systemd/{TARGET.name}" in workflow
+
+    def test_every_shell_script_that_ships_is_shellchecked(self, workflow):
+        # `bash -n` above proves they parse. shellcheck is what catches the
+        # unquoted expansion — and a script added without a word here is one
+        # whose first real run is at 02:30 on the server.
+        checked = matched(r"run: shellcheck ([^\n]+)", workflow).group(1).split()
+        shipped = sorted(p.name for p in DEPLOY.iterdir() if p.suffix == ".sh")
+        assert sorted(Path(c).name for c in checked) == shipped
+
+    def test_the_edge_config_is_validated_by_the_name_it_has(self, workflow):
+        # The one that broke a release before: the job passed because it was
+        # validating a filename that no longer existed.
+        assert SITE_CONF.name in workflow
+
+
 class TestTheRunbook:
     @pytest.fixture(scope="class")
     def readme(self) -> str:

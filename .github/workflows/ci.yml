@@ -253,16 +253,38 @@ jobs:
         # key at runtime, so a typo in `ProtectSystem=` is a unit that reports
         # active and is not confined.
         #
-        # The stubs below exist because verify resolves User=, EnvironmentFile=
-        # and ExecStart= against this filesystem. None of those are what is
-        # under test here; test_deploy.py already checks the paths themselves.
+        # The staging below exists because verify resolves User=,
+        # EnvironmentFile= and ExecStart= against this filesystem. None of those
+        # are what is under test here; test_deploy.py already checks the paths
+        # themselves.
+        #
+        # The binaries are derived from the units rather than listed here. A
+        # hardcoded list is how this step came to stub /srv/gstbot/venv while
+        # the units had long since moved to /opt/GSTBot/.venv: every unit failed
+        # to resolve, and the job reported that as a red X nobody could tell
+        # apart from a real one. Reading ExecStart= means a new unit — or a
+        # moved install root — cannot quietly stop being verified.
         run: |
           sudo useradd --system --no-create-home --shell /usr/sbin/nologin gstbot
-          sudo install -d /srv/gstbot/src/backend /srv/gstbot/venv/bin /etc/gstbot
+          sudo install -d /etc/gstbot
           sudo touch /etc/gstbot/gstbot.env
-          for binary in uvicorn celery alembic; do
-            sudo install -m 0755 /dev/null "/srv/gstbot/venv/bin/$binary"
+
+          # The release, where the units say it is. This makes the shipped
+          # scripts real executables at the paths that ship, so backup.sh and
+          # monitor.sh are verified rather than stubbed over.
+          sudo mkdir -p /opt/GSTBot
+          sudo cp -R . /opt/GSTBot/
+
+          # Everything else ExecStart= names: the virtualenv that is built at
+          # release time, and node from a distribution this runner is not.
+          for unit in deploy/systemd/*.service; do
+            binary="$(sed -n 's/^ExecStart=[-@+!]*\([^ \\]*\).*/\1/p' "$unit" | head -1)"
+            [ -n "$binary" ] || { echo "no ExecStart= in $unit"; exit 1; }
+            [ -x "$binary" ] && continue
+            sudo install -d "$(dirname "$binary")"
+            sudo install -m 0755 /dev/null "$binary"
           done
+
           systemd-analyze verify deploy/systemd/gstbot.target deploy/systemd/*.service deploy/systemd/*.timer
 
       - name: Release scripts are sound
