@@ -158,6 +158,32 @@ class InvoiceUpdate(BaseModel):
             )
         return v
 
+    @field_validator("invoice_date")
+    @classmethod
+    def _a_date_an_invoice_could_carry(cls, v: date | None) -> date | None:
+        """Refuse an invoice date outside the span a GST invoice can fall in.
+
+        The filing period is derived from this field, so a slipped year does
+        not produce a wrong number on a return — it takes the invoice out of
+        every return there is. A sale corrected to 2099 left the April GSTR-1
+        empty, and the validation endpoint then reported that return
+        ``ok: true`` with ``invoice_count: 0`` and no issues at all, because
+        every check downstream is scoped to a period and the invoice was no
+        longer in one. That is under-declared output tax, arrived at silently,
+        on the screen whose whole job is to say whether a return is safe to
+        file.
+
+        Both ends are the same typo. Nothing before GST commenced can be a GST
+        invoice, and nothing dated after today has been issued yet.
+        """
+        if v is None or gst_calendar.is_filable_invoice_date(v):
+            return v
+        raise ValueError(
+            f"An invoice date of {v.isoformat()} is not one an invoice can carry. "
+            f"Expected a date between {gst_calendar.GST_COMMENCEMENT.isoformat()}, "
+            f"when GST commenced, and today."
+        )
+
     @field_validator("counterparty_gstin")
     @classmethod
     def _valid_gstin(cls, v: str | None) -> str | None:

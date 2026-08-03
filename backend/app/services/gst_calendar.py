@@ -51,6 +51,13 @@ _PERIOD_RE = re.compile(PERIOD_PATTERN)
 # there is no rule to look up, and this needs no tzdata on the host.
 IST = timezone(timedelta(hours=5, minutes=30), "IST")
 
+# The day GST commenced. Nothing before it can be a GST invoice: there was no
+# GSTIN to put on one and no return to file it in. Useful as the far end of
+# "is this a date an invoice could carry" — a misread year is otherwise
+# indistinguishable from a real one, and the period it derives is a month no
+# return will ever cover.
+GST_COMMENCEMENT = date(2017, 7, 1)
+
 # GSTR-1 — outward supplies — is due on the 11th of the month after the period.
 GSTR1_DUE_DAY = 11
 
@@ -86,6 +93,21 @@ def ist_date(moment: datetime) -> date:
 def is_period(value: object) -> bool:
     """Whether *value* is a ``YYYY-MM`` period naming a month that exists."""
     return isinstance(value, str) and _PERIOD_RE.match(value) is not None
+
+
+def is_filable_invoice_date(value: date, *, today: date | None = None) -> bool:
+    """Whether *value* is a day an invoice could be dated and still be filed.
+
+    Between the day GST commenced and today, in India. Both ends are typos
+    rather than edge cases — a slipped year on a keyboard, a misread digit out
+    of OCR — and both have the same consequence, which is why they are one
+    question: the filing period is derived from this date, so a date outside
+    the range puts the invoice in a month no return will ever cover. It leaves
+    the register, the dashboard, the reconciliation and the GSTR-1 in one step,
+    and nothing downstream is left to notice, because every one of those is
+    scoped to a period and this invoice is no longer in any of them.
+    """
+    return GST_COMMENCEMENT <= value <= (today or today_ist())
 
 
 def period_of(moment: date) -> str:

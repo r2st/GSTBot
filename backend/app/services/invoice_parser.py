@@ -24,7 +24,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from app.core.config import settings
-from app.services import document_text
+from app.services import document_text, gst_calendar
 from app.services import gstin as gstin_service
 from app.services.openrouter_client import OpenRouterError, chat_json, image_data_url, is_configured
 
@@ -524,6 +524,19 @@ def validate(parsed: ParsedInvoice) -> ParsedInvoice:
         parsed.warnings.append("No invoice number found")
     if not parsed.invoice_date:
         parsed.warnings.append("No invoice date found")
+    elif not gst_calendar.is_filable_invoice_date(parsed.invoice_date):
+        # A warning rather than a discard, per this function's rule — but it
+        # has to be *a* warning, because this field alone decides which return
+        # the invoice appears in. A year misread out of a scan puts it in a
+        # month no return covers, and it then leaves the register, the
+        # dashboard and the GSTR-1 together, with nothing downstream left to
+        # notice: every check there is scoped to a period, and the invoice is
+        # no longer in one. The lowered confidence is what routes it to the
+        # reviewer who can see the paper.
+        parsed.warnings.append(
+            f"Invoice date {parsed.invoice_date.isoformat()} is outside the span a "
+            "GST invoice can fall in; check the year"
+        )
 
     # Tolerance of ₹1: invoices round each tax line to the rupee, so a
     # correctly-extracted invoice routinely misses by a few paise.

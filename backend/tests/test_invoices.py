@@ -1009,3 +1009,86 @@ def test_period_and_date_survive_the_round_trip(auth_client, db_session, sample_
     assert invoice.invoice_date == date(2026, 4, 15)
     assert invoice.period == "2026-04"
     assert invoice.total_tax == Decimal("81000.00")
+
+
+class TestTheDateThatDecidesWhichReturnAnInvoiceIsIn:
+    """`invoice_date` is not one field among several: the filing period is
+    derived from it, so a slipped year does not put a wrong number on a return
+    — it takes the invoice out of every return there is.
+
+    And nothing downstream can notice, because every check there is scoped to
+    a period and the invoice is no longer in one. A sale corrected to 2099 left
+    April's GSTR-1 empty and its validation reporting `ok: true`,
+    `invoice_count: 0`, no issues — under-declared output tax, arrived at in
+    silence, on the screen whose job is to say whether a return is safe to file.
+    """
+
+    @pytest.fixture()
+    def sale_id(self, auth_client, sample_invoice_text) -> int:
+        return upload(auth_client, sample_invoice_text, invoice_type="sales").json()[
+            "invoice"
+        ]["id"]
+
+    def test_a_date_after_today_is_refused(self, auth_client, sale_id):
+        future = (gst_calendar.today_ist() + timedelta(days=1)).isoformat()
+        response = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": future}
+        )
+        assert response.status_code == 422, response.text
+        assert future in response.text
+
+    def test_a_slipped_century_is_refused(self, auth_client, sale_id):
+        response = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": "2099-01-15"}
+        )
+        assert response.status_code == 422, response.text
+
+    def test_a_date_before_gst_existed_is_refused(self, auth_client, sale_id):
+        """There was no GSTIN to put on an invoice and no return to file it in."""
+        response = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": "2016-04-15"}
+        )
+        assert response.status_code == 422, response.text
+        assert "2017-07-01" in response.text
+
+    def test_the_invoice_stays_in_the_return_it_was_in(self, auth_client, sale_id):
+        """The point of the refusal: the sale does not leave April."""
+        auth_client.patch(f"/api/v1/invoices/{sale_id}", json={"invoice_date": "2099-01-15"})
+
+        assert auth_client.get(f"/api/v1/invoices/{sale_id}").json()["period"] == "2026-04"
+        assert auth_client.get("/api/v1/filing/validate?period=2026-04").json()[
+            "invoice_count"
+        ] == 1
+
+    def test_the_return_still_carries_the_sale(self, auth_client, sale_id):
+        auth_client.patch(f"/api/v1/invoices/{sale_id}", json={"invoice_date": "2099-01-15"})
+
+        document = auth_client.get("/api/v1/filing/gstr1?period=2026-04").json()
+        assert "b2b" in str(document)
+
+    def test_the_day_gst_commenced_is_itself_allowed(self, auth_client, sale_id):
+        response = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": "2017-07-01"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["period"] == "2017-07"
+
+    def test_today_is_allowed(self, auth_client, sale_id):
+        today = gst_calendar.today_ist()
+        response = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": today.isoformat()}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["period"] == today.strftime("%Y-%m")
+
+    def test_an_ordinary_correction_still_goes_through(self, auth_client, sale_id):
+        body = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": "2026-03-31"}
+        ).json()
+        assert body["period"] == "2026-03"
+
+    def test_the_date_can_still_be_cleared(self, auth_client, sale_id):
+        body = auth_client.patch(
+            f"/api/v1/invoices/{sale_id}", json={"invoice_date": None}
+        ).json()
+        assert body["invoice_date"] is None

@@ -284,3 +284,45 @@ class TestWhatCountsAsAPeriod:
             # 2026-00 does not raise, which is worse: it silently answers as
             # though the caller had asked about a month before January.
             assert gst_calendar.gstr3b_due_date(period) == date(2026, 1, 20)
+
+
+class TestTheSpanAnInvoiceDateCanFallIn:
+    """Both ends are typos, and both have the same consequence.
+
+    The filing period is derived from the invoice date, so a date outside this
+    span puts the invoice in a month no return will ever cover — which is why
+    the two ends are one question rather than two checks.
+    """
+
+    def test_gst_commenced_on_the_first_of_july_2017(self):
+        assert gst_calendar.GST_COMMENCEMENT == date(2017, 7, 1)
+
+    def test_an_ordinary_date_is_inside_the_span(self):
+        assert gst_calendar.is_filable_invoice_date(
+            date(2026, 4, 15), today=date(2026, 5, 20)
+        )
+
+    def test_both_ends_are_inclusive(self):
+        assert gst_calendar.is_filable_invoice_date(
+            gst_calendar.GST_COMMENCEMENT, today=date(2026, 5, 20)
+        )
+        assert gst_calendar.is_filable_invoice_date(
+            date(2026, 5, 20), today=date(2026, 5, 20)
+        )
+
+    def test_the_day_before_gst_is_outside_it(self):
+        assert not gst_calendar.is_filable_invoice_date(
+            gst_calendar.GST_COMMENCEMENT - timedelta(days=1), today=date(2026, 5, 20)
+        )
+
+    def test_tomorrow_is_outside_it(self):
+        assert not gst_calendar.is_filable_invoice_date(
+            date(2026, 5, 21), today=date(2026, 5, 20)
+        )
+
+    def test_today_defaults_to_the_indian_date(self):
+        """Not the server's. A deadline product measures every day in IST."""
+        assert gst_calendar.is_filable_invoice_date(gst_calendar.today_ist())
+        assert not gst_calendar.is_filable_invoice_date(
+            gst_calendar.today_ist() + timedelta(days=1)
+        )

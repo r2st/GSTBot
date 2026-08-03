@@ -1,13 +1,13 @@
 """Extraction: the heuristic path, the model path, and the validation between."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 
 from app.services import filing as filing_service
-from app.services import invoice_parser
+from app.services import gst_calendar, invoice_parser
 from app.services.invoice_parser import (
     ParsedInvoice,
     parse_heuristic,
@@ -530,3 +530,64 @@ def test_extract_json_object_survives_free_tier_output(raw):
 @pytest.mark.parametrize("raw", ["", "no json here", "[1, 2, 3]", "{not valid json}"])
 def test_extract_json_object_returns_none_when_there_is_none(raw):
     assert extract_json_object(raw) is None
+
+
+class TestADateNoInvoiceCouldCarry:
+    """The one field whose typo removes the invoice instead of misstating it.
+
+    The filing period is derived from ``invoice_date``, so a year misread out
+    of a scan does not put a wrong figure on a return — it puts the invoice in
+    a month no return covers, and it leaves the register, the dashboard and the
+    GSTR-1 in one step. Nothing downstream is left to notice, because every
+    check there is scoped to a period and this invoice is no longer in one.
+
+    A warning rather than a discard, as everything in ``validate`` is: the
+    lowered confidence is what routes it to the reviewer holding the paper.
+    """
+
+    @staticmethod
+    def _dated(day: date) -> ParsedInvoice:
+        return ParsedInvoice(
+            supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            invoice_number="X-1",
+            invoice_date=day,
+        )
+
+    def test_a_slipped_century_is_flagged(self):
+        parsed = validate(self._dated(date(2099, 1, 15)))
+        assert any("outside the span" in w for w in parsed.warnings)
+        assert any("2099-01-15" in w for w in parsed.warnings)
+
+    def test_a_date_before_gst_existed_is_flagged(self):
+        parsed = validate(self._dated(date(2016, 4, 15)))
+        assert any("outside the span" in w for w in parsed.warnings)
+
+    def test_a_date_within_the_span_is_not_flagged(self):
+        parsed = validate(self._dated(date(2026, 4, 15)))
+        assert not any("outside the span" in w for w in parsed.warnings)
+
+    def test_the_day_gst_commenced_is_itself_within_the_span(self):
+        parsed = validate(self._dated(gst_calendar.GST_COMMENCEMENT))
+        assert not any("outside the span" in w for w in parsed.warnings)
+
+    def test_today_is_within_the_span(self):
+        parsed = validate(self._dated(gst_calendar.today_ist()))
+        assert not any("outside the span" in w for w in parsed.warnings)
+
+    def test_tomorrow_is_not(self):
+        parsed = validate(
+            self._dated(gst_calendar.today_ist() + timedelta(days=1))
+        )
+        assert any("outside the span" in w for w in parsed.warnings)
+
+    def test_the_flag_lowers_confidence_so_a_human_sees_it(self):
+        parsed = self._dated(date(2099, 1, 15))
+        parsed.confidence = 0.95
+        validate(parsed)
+        assert parsed.confidence < 0.95
+
+    def test_a_missing_date_still_reports_only_that(self):
+        """Absent and impossible are different problems; one message each."""
+        parsed = validate(self._dated(None))
+        assert any("No invoice date found" in w for w in parsed.warnings)
+        assert not any("outside the span" in w for w in parsed.warnings)
