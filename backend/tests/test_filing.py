@@ -799,6 +799,96 @@ class TestAClosedPeriodsReturnDoesNotMove:
 
         assert document["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
 
+    def test_the_next_month_s_return_does_not_reverse_it_again(
+        self, db_session, business, monkeypatch
+    ):
+        """Rule 37 is paid once, in the return for the month the clock expired.
+
+        Anchoring the clock to the period stopped the *same* return moving.
+        It did nothing about the reversal reappearing in every return after
+        it: the April 3B gave back ₹9,000, and so did May's, and June's, and
+        every one after that. A business filing four months handed back four
+        times what the rule asks for, and each of those returns still
+        reproduced itself exactly, which is what kept it invisible.
+        """
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            # The 181st day is 2026-04-30 — inside PERIOD and no other month.
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2027, 6, 2))
+        april = filing_service.build_gstr3b(db_session, business, PERIOD)
+        may = filing_service.build_gstr3b(db_session, business, "2026-05")
+        september = filing_service.build_gstr3b(db_session, business, "2026-09")
+
+        assert april["itc_elg"]["itc_rev"][0]["iamt"] == 9000.00
+        assert may["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
+        assert september["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
+
+    def test_a_later_month_keeps_the_credit_it_earned(
+        self, db_session, business, monkeypatch
+    ):
+        """What the repeat reversal cost: a month's credit wiped out by it."""
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-MAY",
+            invoice_date=date(2026, 5, 10),
+            period="2026-05",
+            igst=Decimal("9000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2027, 6, 2))
+        may = filing_service.build_gstr3b(db_session, business, "2026-05")
+
+        assert may["itc_elg"]["itc_avl"][0]["iamt"] == 9000.00
+        assert may["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
+        assert may["itc_elg"]["itc_net"]["iamt"] == 9000.00
+
+    def test_available_less_reversed_is_still_the_net(
+        self, db_session, business, monkeypatch
+    ):
+        """Table 4 has to add up inside one document.
+
+        4(C) is 4(A) minus 4(B). Scoping the reversal in one place and not the
+        other would leave the three lines of the block contradicting each
+        other on the page a business signs.
+        """
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-APR",
+            igst=Decimal("20000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2027, 6, 2))
+        itc = filing_service.build_gstr3b(db_session, business, PERIOD)["itc_elg"]
+
+        assert itc["itc_avl"][0]["iamt"] == 20000.00
+        assert itc["itc_rev"][0]["iamt"] == 9000.00
+        assert itc["itc_net"]["iamt"] == 11000.00
+
     def test_an_explicit_as_of_overrides_the_anchor(self, db_session, business):
         """For reconstructing what the return said on a particular day."""
         self.purchase(

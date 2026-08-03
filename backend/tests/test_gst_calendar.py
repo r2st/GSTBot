@@ -96,6 +96,41 @@ class TestWhichPeriodsHaveEnded:
         assert gst_calendar.previous_period("2026-01") == "2025-12"
 
 
+class TestTheFirstDayOfAPeriod:
+    """``period_start`` — where a period's window opens.
+
+    Needed alongside ``period_end`` to decide which month a rule fired in:
+    Rule 37's 180 days run out on one particular day, and that day's month is
+    the return the reversal belongs to.
+    """
+
+    def test_it_is_the_first_of_the_named_month(self):
+        assert gst_calendar.period_start("2026-04") == date(2026, 4, 1)
+
+    def test_january(self):
+        assert gst_calendar.period_start("2026-01") == date(2026, 1, 1)
+
+    def test_december(self):
+        assert gst_calendar.period_start("2026-12") == date(2026, 12, 1)
+
+    def test_it_is_the_day_after_the_previous_period_ends(self):
+        for period in ("2025-11", "2026-01", "2026-03", "2026-12"):
+            previous = gst_calendar.previous_period(period)
+            assert gst_calendar.period_start(period) == gst_calendar.period_end(
+                previous
+            ) + timedelta(days=1)
+
+    def test_the_two_ends_bracket_the_period_and_nothing_else(self):
+        for period in ("2026-02", "2026-04", "2028-02"):
+            start = gst_calendar.period_start(period)
+            end = gst_calendar.period_end(period)
+            assert start <= end
+            assert gst_calendar.period_of(start) == period
+            assert gst_calendar.period_of(end) == period
+            assert gst_calendar.period_of(start - timedelta(days=1)) != period
+            assert gst_calendar.period_of(end + timedelta(days=1)) != period
+
+
 class TestTheLastDayOfAPeriod:
     """``period_end`` — the day a return for that period is a statement about."""
 

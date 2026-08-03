@@ -38,6 +38,7 @@ function summary(overrides = {}) {
       total_reversal: heads(),
       capital_months: 60,
     },
+    rule_37_reversal: heads(),
     total_reversal: heads(),
     net_available: heads({ igst: "18000.00" }),
     set_off: {
@@ -231,6 +232,50 @@ describe("ITCPage", () => {
     renderPage();
 
     expect(await screen.findByText("25.00%")).toBeInTheDocument();
+  });
+
+  it("reverses this period's Rule 37 share, not the standing exposure", async () => {
+    // An invoice that lapsed in an earlier month is still listed as overdue —
+    // the credit is still gone — but this period's return does not give it
+    // back a second time. Showing the running total in the reversal column
+    // left it not adding up to the total on the row beneath it.
+    mockApi(
+      summary({
+        rule_37: {
+          overdue: [
+            {
+              invoice_id: 11,
+              invoice_number: "OLD-1",
+              supplier_gstin: "29AAGCB7383J1Z4",
+              supplier_name: "Northwind Supplies",
+              invoice_date: "2025-06-01",
+              days_outstanding: 333,
+              days_remaining: -153,
+              tax: heads({ igst: "18000.00" }),
+              overdue: true,
+            },
+          ],
+          approaching: [],
+          reversal: heads({ igst: "18000.00" }),
+          approaching_amount: heads(),
+          days: 180,
+          warning_days: 30,
+        },
+        rule_37_reversal: heads(),
+        total_reversal: heads(),
+      }),
+    );
+    renderPage();
+
+    // The section heading carries the same words, so scope to the table cell.
+    const cell = (await screen.findAllByText(/Rule 37 — unpaid suppliers/)).find(
+      (element) => element.tagName === "TD",
+    );
+    const row = cell.closest("tr");
+    expect(within(row).queryByText("₹18,000.00")).not.toBeInTheDocument();
+    // The overdue invoice is still listed: the credit is gone, it was just
+    // given back in an earlier month's return.
+    expect(screen.getByRole("link", { name: "OLD-1" })).toBeInTheDocument();
   });
 
   it("surfaces an API failure", async () => {

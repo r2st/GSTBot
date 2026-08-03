@@ -122,6 +122,17 @@ def months_before(period: str, count: int) -> str:
     return f"{index // 12:04d}-{index % 12 + 1:02d}"
 
 
+def period_start(period: str) -> date:
+    """The first day of *period* — the day its return starts being about.
+
+    :func:`period_end`'s counterpart, and needed for the same reason: a rule
+    that fires on a particular day belongs to the return for the month that day
+    fell in, and deciding which month that was takes both ends of it.
+    """
+    year, month = (int(part) for part in period.split("-"))
+    return date(year, month, 1)
+
+
 def period_end(period: str) -> date:
     """The last day of *period* — the day its return is a statement about.
 

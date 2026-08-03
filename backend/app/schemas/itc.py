@@ -84,6 +84,12 @@ class ITCSummaryOut(BaseModel):
     available: TaxHeadsOut
     output_tax: TaxHeadsOut
     rule_37: Rule37Out
+    # ``rule_37.reversal`` is the standing exposure across the whole purchase
+    # register — every rupee resting on an invoice past its 180 days, whenever
+    # it lapsed. This is the slice of it that lapsed *in* this period, and so
+    # the only part this period's return gives back: Rule 37 is paid once, in
+    # the return for the month the clock ran out, and re-availed on payment.
+    rule_37_reversal: TaxHeadsOut
     proportionate: ProportionateOut
     total_reversal: TaxHeadsOut
     net_available: TaxHeadsOut

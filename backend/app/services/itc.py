@@ -262,12 +262,45 @@ class Rule37Item:
 
 @dataclass
 class Rule37Result:
-    """Credit that has reversed, and credit about to."""
+    """Credit that has reversed, and credit about to.
+
+    ``reversal`` is the standing exposure: every rupee of credit currently
+    resting on an invoice past its 180 days, however long ago it lapsed. That
+    is the right figure for a screen asking "what am I carrying", and the wrong
+    one for a return. See :meth:`reversal_in`.
+    """
 
     overdue: list[Rule37Item] = field(default_factory=list)
     approaching: list[Rule37Item] = field(default_factory=list)
     reversal: TaxHeads = field(default_factory=TaxHeads)
     approaching_amount: TaxHeads = field(default_factory=TaxHeads)
+
+    def reversal_in(self, period: str) -> TaxHeads:
+        """Of the standing exposure, the part that lapsed *during* *period*.
+
+        Rule 37 is paid once, in the return for the tax period in which the
+        180 days elapse, and re-availed when the supplier is finally paid. It
+        is not a balance that is re-declared every month — but ``reversal`` is
+        cumulative, so a 3B built from it reversed the same invoice again in
+        every return that followed. An invoice that lapsed in April was
+        reversed in April, then in May, then in June, indefinitely, each time
+        as though it were new; a business filing four months of returns gave
+        back four times the credit the rule asks for.
+
+        The lapse falls on the day *after* the 180th, because the Act allows
+        the whole of day 180 — the same boundary :func:`rule_37` draws when it
+        decides an invoice is overdue at all.
+        """
+        start = gst_calendar.period_start(period)
+        end = gst_calendar.period_end(period)
+        total = TaxHeads()
+        for item in self.overdue:
+            if item.invoice_date is None:
+                continue
+            lapsed_on = item.invoice_date + timedelta(days=RULE_37_DAYS + 1)
+            if start <= lapsed_on <= end:
+                total = total + item.tax
+        return total
 
     def as_dict(self) -> dict:
         return {
@@ -490,6 +523,20 @@ class ITCSummary:
     reconciled: bool
     invoice_count: int
     unclaimed_count: int
+    # Of ``rule_37.reversal`` — the standing exposure over the whole register —
+    # the part that lapsed during this period, and therefore the part this
+    # period's return gives back. See :meth:`Rule37Result.reversal_in`.
+    rule_37_reversal: TaxHeads = field(default_factory=TaxHeads)
+
+    @property
+    def total_reversal(self) -> TaxHeads:
+        """What this period reverses, across all three rules.
+
+        Rule 37's contribution is the period's share, not the standing
+        exposure: the rest was already given back in the returns for the months
+        it lapsed in.
+        """
+        return self.rule_37_reversal + self.proportionate.total_reversal
 
     def as_dict(self) -> dict:
         return {
@@ -497,10 +544,9 @@ class ITCSummary:
             "available": self.available.as_dict(),
             "output_tax": self.output_tax.as_dict(),
             "rule_37": self.rule_37.as_dict(),
+            "rule_37_reversal": self.rule_37_reversal.as_dict(),
             "proportionate": self.proportionate.as_dict(),
-            "total_reversal": (
-                self.rule_37.reversal + self.proportionate.total_reversal
-            ).as_dict(),
+            "total_reversal": self.total_reversal.as_dict(),
             "net_available": self.net_available.as_dict(),
             "set_off": self.set_off.as_dict(),
             "itc_at_risk": str(_q(self.itc_at_risk)),
@@ -717,7 +763,15 @@ def summarise(
 
     # What is left after every reversal, floored at zero per head: a reversal
     # larger than the period's credit produces a liability, not negative credit.
-    reversal = rule_37_result.reversal + proportionate.total_reversal
+    #
+    # Rule 37 contributes only what lapsed *in* this period. The standing
+    # exposure stays on ``rule_37`` for the screen to list, but a period's
+    # credit bears a reversal once, in the month the 180 days ran out — the
+    # earlier ones were already given back in the returns for the months they
+    # lapsed in, and charging them again here makes every month after the first
+    # understate the credit by the whole of the running total.
+    rule_37_reversal = rule_37_result.reversal_in(period)
+    reversal = rule_37_reversal + proportionate.total_reversal
     net_available = TaxHeads(
         igst=max(ZERO, available.igst + proportionate.capital_credit_this_month.igst
                  - reversal.igst),
@@ -743,6 +797,7 @@ def summarise(
         reconciled=last_run is not None,
         invoice_count=len(period_purchases),
         unclaimed_count=unclaimed,
+        rule_37_reversal=rule_37_reversal,
     )
 
 

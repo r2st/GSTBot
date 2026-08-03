@@ -818,6 +818,15 @@ def build_gstr3b(
     *as_of* overrides that anchor, for a caller reconstructing what the return
     would have said on some other day. The default is capped at today, so
     previewing a month still in progress does not reverse credit early.
+
+    Anchoring the clock is only half of it: the reversal in 4(B) is what
+    lapsed *during* this period, not everything standing at its close. Rule 37
+    is paid once, in the return for the month the 180 days ran out, and
+    re-availed when the supplier is paid. Taking the whole standing exposure
+    reversed the same invoice again in every return that followed it — April,
+    then May, then June — so a business filing four months gave back four
+    times what the rule asks for, and each of those returns still reproduced
+    itself exactly, which is what made it invisible.
     """
     if as_of is None:
         as_of = min(gst_calendar.period_end(period), gst_calendar.today_ist())
@@ -846,7 +855,7 @@ def build_gstr3b(
 
     output = summary.output_tax
     available = summary.available + summary.proportionate.capital_credit_this_month
-    reversal = summary.rule_37.reversal + summary.proportionate.total_reversal
+    reversal = summary.total_reversal
 
     return {
         "gstin": business.gstin,

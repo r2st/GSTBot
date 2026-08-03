@@ -313,7 +313,16 @@ export default function ITCPage() {
                   label: "Rule 43 — capital goods",
                   heads: proportionate.rule_43_reversal,
                 },
-                { label: "Rule 37 — unpaid suppliers", heads: rule37.reversal },
+                {
+                  // The share that lapsed in *this* period, not the standing
+                  // exposure above it. Rule 37 is paid once, in the return for
+                  // the month the 180 days ran out, so the running total the
+                  // overdue list adds up to is not what this month reverses —
+                  // and putting it in this row left the column not summing to
+                  // the total beneath it.
+                  label: "Rule 37 — unpaid suppliers",
+                  heads: summary.rule_37_reversal,
+                },
                 { label: "Total to reverse", heads: summary.total_reversal },
               ]}
             />

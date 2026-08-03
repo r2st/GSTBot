@@ -681,6 +681,158 @@ def test_summary_looks_beyond_the_period_for_rule_37(db_session, business):
     assert summary.rule_37.reversal.igst == Decimal("18000.00")
 
 
+class TestRule37IsPaidOnceNotEveryMonthAfter:
+    """The reversal belongs to the month the 180 days ran out.
+
+    Rule 37 is paid in the return for the tax period in which the clock
+    expires, and re-availed when the supplier is finally paid. It is not a
+    balance that is re-declared every month.
+
+    ``rule_37.reversal`` is the standing exposure over the whole register,
+    which is what the screen's list of overdue invoices is for. Charging that
+    to every period's credit reversed the same invoice again in every return
+    that followed it, and each of those returns still reproduced itself
+    exactly — which is what kept it out of sight.
+    """
+
+    # 181 days after 31 October 2025 is 30 April 2026, so this purchase lapses
+    # on the last day of PERIOD and in no other month.
+    LAPSES_IN_PERIOD = date(2025, 10, 31)
+
+    def lapsed_purchase(self, db, business):
+        return save(
+            db,
+            business.id,
+            invoice_number="OLD-1",
+            invoice_date=self.LAPSES_IN_PERIOD,
+            period="2025-10",
+        )
+
+    def test_the_period_it_lapsed_in_reverses_it(self, db_session, business):
+        self.lapsed_purchase(db_session, business)
+
+        summary = itc_service.summarise(
+            db_session, business.id, PERIOD, as_of=date(2026, 4, 30)
+        )
+
+        assert summary.rule_37_reversal.igst == Decimal("18000.00")
+        assert summary.total_reversal.igst == Decimal("18000.00")
+
+    def test_the_month_after_does_not_reverse_it_again(self, db_session, business):
+        self.lapsed_purchase(db_session, business)
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-05", as_of=date(2026, 5, 31)
+        )
+
+        # Still standing, and still listed for the screen...
+        assert summary.rule_37.reversal.igst == Decimal("18000.00")
+        assert len(summary.rule_37.overdue) == 1
+        # ...but May's return does not give it back a second time.
+        assert summary.rule_37_reversal.igst == Decimal("0.00")
+
+    def test_it_is_not_reversed_a_year_of_returns_later(self, db_session, business):
+        self.lapsed_purchase(db_session, business)
+
+        for period, end in (
+            ("2026-06", date(2026, 6, 30)),
+            ("2026-09", date(2026, 9, 30)),
+            ("2027-03", date(2027, 3, 31)),
+        ):
+            summary = itc_service.summarise(
+                db_session, business.id, period, as_of=end
+            )
+            assert summary.rule_37_reversal.total == Decimal("0.00"), period
+
+    def test_the_month_before_it_lapsed_reverses_nothing(self, db_session, business):
+        self.lapsed_purchase(db_session, business)
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-03", as_of=date(2026, 3, 31)
+        )
+
+        assert summary.rule_37_reversal.total == Decimal("0.00")
+        assert summary.rule_37.reversal.total == Decimal("0.00")
+
+    def test_the_period_s_own_credit_survives_a_later_month(self, db_session, business):
+        """What the double reversal actually cost.
+
+        May has ₹18,000 of its own input credit and one lapsed invoice from
+        October. Charged the standing exposure, May's net credit came out at
+        zero and the business paid the whole month's output tax in cash.
+        """
+        self.lapsed_purchase(db_session, business)
+        save(
+            db_session,
+            business.id,
+            invoice_number="MAY-1",
+            invoice_date=date(2026, 5, 10),
+            period="2026-05",
+        )
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-05", as_of=date(2026, 5, 31)
+        )
+
+        assert summary.available.igst == Decimal("18000.00")
+        assert summary.net_available.igst == Decimal("18000.00")
+
+    def test_a_purchase_still_inside_its_180_days_reverses_nowhere(
+        self, db_session, business
+    ):
+        save(
+            db_session,
+            business.id,
+            invoice_number="RECENT-1",
+            invoice_date=date(2026, 4, 1),
+            period=PERIOD,
+        )
+
+        summary = itc_service.summarise(
+            db_session, business.id, PERIOD, as_of=date(2026, 4, 30)
+        )
+
+        assert summary.rule_37_reversal.total == Decimal("0.00")
+
+    def test_a_paid_invoice_lapses_in_no_period_at_all(self, db_session, business):
+        """Paying the supplier stops the clock, wherever it had got to."""
+        save(
+            db_session,
+            business.id,
+            invoice_number="OLD-PAID",
+            invoice_date=self.LAPSES_IN_PERIOD,
+            period="2025-10",
+            paid_at=datetime(2026, 2, 1, tzinfo=UTC),
+        )
+
+        summary = itc_service.summarise(
+            db_session, business.id, PERIOD, as_of=date(2026, 4, 30)
+        )
+
+        assert summary.rule_37_reversal.total == Decimal("0.00")
+
+    def test_the_whole_of_day_180_is_still_allowed(self, db_session, business):
+        """Day 180 falls in April, day 181 in May: the reversal is May's."""
+        save(
+            db_session,
+            business.id,
+            # 180 days after this is 2026-04-30; the 181st is 2026-05-01.
+            invoice_date=date(2025, 11, 1),
+            period="2025-11",
+            invoice_number="EDGE-1",
+        )
+
+        april = itc_service.summarise(
+            db_session, business.id, PERIOD, as_of=date(2026, 4, 30)
+        )
+        may = itc_service.summarise(
+            db_session, business.id, "2026-05", as_of=date(2026, 5, 31)
+        )
+
+        assert april.rule_37_reversal.total == Decimal("0.00")
+        assert may.rule_37_reversal.igst == Decimal("18000.00")
+
+
 def test_net_available_never_goes_negative(db_session, business):
     """A reversal larger than the period's credit is a liability, not negative credit."""
     save(
@@ -744,13 +896,16 @@ def test_net_available_combines_every_term_in_the_same_period(db_session, busine
         sgst=Decimal("6000.00"),
         cess=Decimal("0.00"),
     )
-    # An earlier invoice still unpaid past 180 days: Rule 37 reverses it.
+    # An earlier invoice whose 180 days run out inside this period: Rule 37
+    # reverses it here, and only here. Dated so the 181st day is 30 April —
+    # a purchase that lapsed in some earlier month belongs to that month's
+    # return, not to this one's.
     save(
         db_session,
         business.id,
         invoice_number="OLD-1",
-        invoice_date=date(2025, 6, 1),
-        period="2025-06",
+        invoice_date=date(2025, 10, 31),
+        period="2025-10",
         igst=Decimal("0.00"),
         cgst=Decimal("500.00"),
         sgst=Decimal("500.00"),
@@ -771,7 +926,7 @@ def test_net_available_combines_every_term_in_the_same_period(db_session, busine
     assert summary.proportionate.capital_credit_this_month.cgst == Decimal("100.00")
     assert summary.proportionate.rule_42_reversal.cgst == Decimal("2250.00")
     assert summary.proportionate.rule_43_reversal.cgst == Decimal("25.00")
-    assert summary.rule_37.reversal.cgst == Decimal("500.00")
+    assert summary.rule_37_reversal.cgst == Decimal("500.00")
 
     assert summary.net_available.cgst == Decimal("6325.00")
     assert summary.net_available.sgst == Decimal("6325.00")
