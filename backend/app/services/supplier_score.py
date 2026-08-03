@@ -520,6 +520,23 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
     "At risk" is credit on invoices this supplier has not filed — the
     ``missing_in_2b`` outcome — which is the amount the provisioning
     percentage is meant to be applied to.
+
+    Only tax that is *credit* counts toward it. Blocked purchases under s.17(5)
+    and reverse-charge ones carry no claimable credit
+    (:attr:`~app.models.invoice.Invoice.claims_credit`), so the supplier's
+    failure to file costs the buyer nothing on them and there is nothing to
+    provide against. Counting them said otherwise, and said it in the one place
+    a business decides whether to hold a payment: a builder whose supplier
+    never filed a works-contract invoice was shown the whole of its tax as
+    credit they were about to lose, when none of it was ever theirs to claim.
+
+    It also put this figure in flat contradiction with the reconciliation's own
+    ``itc_at_risk``, which has always excluded them — the dashboard and the
+    supplier screen reporting two different numbers for the same money.
+
+    ``tax_total`` still totals the tax on every one of their documents. That is
+    what it says and what the count beside it is: how much of this supplier's
+    paperwork is in the books, credit or not.
     """
     invoices = db.scalars(
         select(Invoice).where(
@@ -542,7 +559,7 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
         )
         result.invoice_count += 1
         result.tax_total += tax
-        if invoice.status == InvoiceStatus.MISSING_IN_2B:
+        if invoice.status == InvoiceStatus.MISSING_IN_2B and invoice.claims_credit:
             result.tax_at_risk += tax
         if invoice.paid_at is None:
             result.unpaid_count += 1

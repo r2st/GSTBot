@@ -185,5 +185,26 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         """CGST + SGST + IGST + cess."""
         return (self.cgst or ZERO) + (self.sgst or ZERO) + (self.igst or ZERO) + (self.cess or ZERO)
 
+    @property
+    def claims_credit(self) -> bool:
+        """Whether the tax on this row is credit the buyer may actually take.
+
+        Two flags rule it out, and they are not the same thing. ``itc_eligible``
+        is false for an exempt or nil-rated purchase and for blocked credit
+        under s.17(5) — the motor car, the staff catering — where the tax was
+        paid and is simply not creditable. ``reverse_charge`` means the supplier
+        charged nothing at all: the buyer pays the tax themselves, and the
+        credit for it arises from the payment rather than from this document.
+
+        Either way the figures on the row are not credit, and every ITC
+        calculation in the product already skips them: the reconciliation's
+        at-risk pool, Rule 37's clock, Rule 43's capital pool, the period's
+        available credit. Kept on the model because it belongs to the invoice
+        rather than to whichever service asked, and because it had been written
+        out four times — which is four chances to leave one out, and one of them
+        was taken. See :func:`app.services.supplier_score.exposure`.
+        """
+        return self.itc_eligible and not self.reverse_charge
+
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Invoice {self.invoice_type} {self.invoice_number} {self.total_value}>"

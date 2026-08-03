@@ -348,7 +348,7 @@ def rule_37(invoices: list[Invoice], *, as_of: date | None = None) -> Rule37Resu
     for invoice in invoices:
         if invoice.paid_at is not None:
             continue
-        if not invoice.itc_eligible or invoice.reverse_charge:
+        if not invoice.claims_credit:
             continue
         if invoice.invoice_date is None:
             continue
@@ -496,7 +496,7 @@ def capital_goods_in_service(invoices: list[Invoice], period: str) -> TaxHeads:
     for invoice in invoices:
         if not invoice.is_capital_good:
             continue
-        if not invoice.itc_eligible or invoice.reverse_charge:
+        if not invoice.claims_credit:
             continue
         if not invoice.period or not oldest <= invoice.period <= period:
             continue
@@ -721,7 +721,7 @@ def summarise(
     available = TaxHeads()
     unclaimed = 0
     for invoice in period_purchases:
-        if not invoice.itc_eligible or invoice.reverse_charge:
+        if not invoice.claims_credit:
             unclaimed += 1
             continue
         if invoice.is_capital_good:

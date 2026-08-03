@@ -164,6 +164,38 @@ def test_total_tax_sums_every_head(db_session, tenant):
     assert invoice.total_tax == Decimal("190.00")
 
 
+class TestWhetherTheTaxOnARowIsCreditAtAll:
+    """``claims_credit`` — the rule every ITC calculation in the product uses.
+
+    It lives on the model because it is a fact about the invoice, and because
+    it had been written out separately in the reconciliation, in Rule 37, in
+    Rule 43's pool and in the period's available credit. Four copies is four
+    chances to leave one out, and the supplier exposure figure was the one that
+    had been left out.
+    """
+
+    def test_an_ordinary_purchase_carries_credit(self, db_session, tenant):
+        assert make_invoice(db_session, tenant.id).claims_credit is True
+
+    def test_a_blocked_purchase_does_not(self, db_session, tenant):
+        # s.17(5), or an exempt or nil-rated supply: the tax is real and is
+        # not creditable.
+        invoice = make_invoice(db_session, tenant.id, itc_eligible=False)
+        assert invoice.claims_credit is False
+
+    def test_a_reverse_charge_purchase_does_not(self, db_session, tenant):
+        # The supplier charged nothing; the buyer pays the tax themselves, and
+        # the credit arises from that payment rather than from this document.
+        invoice = make_invoice(db_session, tenant.id, reverse_charge=True)
+        assert invoice.claims_credit is False
+
+    def test_neither_flag_rescues_the_other(self, db_session, tenant):
+        invoice = make_invoice(
+            db_session, tenant.id, itc_eligible=False, reverse_charge=True
+        )
+        assert invoice.claims_credit is False
+
+
 def test_timestamps_are_populated(db_session, tenant):
     invoice = make_invoice(db_session, tenant.id)
     assert invoice.created_at is not None

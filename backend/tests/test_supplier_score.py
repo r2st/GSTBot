@@ -510,6 +510,109 @@ def test_exposure_counts_credit_resting_on_a_supplier(db_session, business):
     assert result.unpaid_count == 1
 
 
+class TestOnlyCreditCanBeCreditAtRisk:
+    """A supplier's silence costs the buyer nothing on tax that is not credit.
+
+    The reconciliation's ``itc_at_risk`` has always excluded blocked and
+    reverse-charge purchases; this figure did not, so the dashboard and the
+    supplier screen reported two different numbers for the same money — and the
+    screen's was the one a business reads before deciding whether to hold a
+    payment.
+    """
+
+    def supplier(self, db, business) -> Supplier:
+        row = Supplier(business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE)
+        db.add(row)
+        db.commit()
+        return row
+
+    def test_a_blocked_purchase_is_not_credit_at_risk(self, db_session, business):
+        # s.17(5): the tax was paid and is not creditable. The supplier failing
+        # to file it takes nothing away that was ever ours.
+        supplier = self.supplier(db_session, business)
+        book(
+            db_session,
+            business.id,
+            invoice_number="BLOCKED-1",
+            status=InvoiceStatus.MISSING_IN_2B,
+            itc_eligible=False,
+        )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.tax_at_risk == Decimal("0.00")
+        # Still their paperwork, and still counted as such.
+        assert result.invoice_count == 1
+        assert result.tax_total == Decimal("18000.00")
+
+    def test_a_reverse_charge_purchase_is_not_credit_at_risk(
+        self, db_session, business
+    ):
+        # The supplier charged nothing: the buyer pays the tax themselves, and
+        # the credit arises from that payment rather than from this document.
+        supplier = self.supplier(db_session, business)
+        book(
+            db_session,
+            business.id,
+            invoice_number="RCM-1",
+            status=InvoiceStatus.MISSING_IN_2B,
+            reverse_charge=True,
+        )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.tax_at_risk == Decimal("0.00")
+        assert result.invoice_count == 1
+
+    def test_the_claimable_ones_beside_them_still_count(self, db_session, business):
+        supplier = self.supplier(db_session, business)
+        book(
+            db_session,
+            business.id,
+            invoice_number="GOOD-1",
+            status=InvoiceStatus.MISSING_IN_2B,
+        )
+        book(
+            db_session,
+            business.id,
+            invoice_number="BLOCKED-1",
+            status=InvoiceStatus.MISSING_IN_2B,
+            itc_eligible=False,
+        )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.tax_at_risk == Decimal("18000.00")
+        assert result.tax_total == Decimal("36000.00")
+
+    def test_it_agrees_with_what_the_reconciliation_put_at_risk(
+        self, db_session, business
+    ):
+        """The two figures are about the same money and must not disagree."""
+        supplier = self.supplier(db_session, business)
+        book(db_session, business.id, invoice_number="INV-1")
+        book(
+            db_session,
+            business.id,
+            invoice_number="BLOCKED-1",
+            itc_eligible=False,
+        )
+
+        # A 2B declaring neither of them: both come back missing at the
+        # supplier's end, and only one of them is credit that was lost.
+        reconciliation.store_gstr2b(
+            db_session, business.id, PERIOD, [portal(invoice_number="OTHER-1")]
+        )
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.itc_at_risk == Decimal("18000.00")
+        db_session.expire_all()
+        assert (
+            scoring.exposure(db_session, business.id, supplier).tax_at_risk
+            == run.itc_at_risk
+        )
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------

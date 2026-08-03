@@ -369,8 +369,7 @@ def match(
             continue
 
         booked_tax = invoice.total_tax
-        claims_credit = invoice.itc_eligible and not invoice.reverse_charge
-        if claims_credit:
+        if invoice.claims_credit:
             result.itc_claimed += booked_tax
 
         if record is None:
@@ -379,7 +378,7 @@ def match(
             result.findings.append(
                 Finding(category=MatchCategory.MISSING_IN_2B, invoice=invoice)
             )
-            if claims_credit:
+            if invoice.claims_credit:
                 result.itc_at_risk += booked_tax
             continue
 
@@ -396,7 +395,7 @@ def match(
             )
         )
 
-        if not claims_credit:
+        if not invoice.claims_credit:
             # Blocked credit (s.17(5)) or reverse charge: matching changes
             # nothing about what may be claimed here.
             continue
