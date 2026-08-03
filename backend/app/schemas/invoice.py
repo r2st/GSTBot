@@ -168,6 +168,60 @@ class InvoiceUpdate(BaseModel):
         except gstin_service.InvalidGSTIN as exc:
             raise ValueError(str(exc)) from exc
 
+    @field_validator("place_of_supply")
+    @classmethod
+    def _real_state_code(cls, v: str | None) -> str | None:
+        """Refuse a place of supply that is not a state GST assigns.
+
+        This field is a code, not free text: it decides the IGST-versus-CGST+SGST
+        split on the invoice and it is copied verbatim into ``pos`` on every
+        GSTR-1 line. The extractor has always checked it against
+        :data:`~app.services.gstin.STATE_CODES` — a correction did not, and it
+        is the one path a person types into. ``ZZ`` was stored, validated clean
+        (the split check only compares two codes for equality, and ``ZZ`` is
+        unequal to everything), and filed, where the portal rejects the upload.
+
+        A single digit is padded rather than refused. ``7`` for Delhi is what a
+        person types and ``07`` is what the portal wants, and turning one into
+        the other is not a decision worth putting in front of a reviewer.
+        """
+        if v is None:
+            return None
+        code = v.strip()
+        if not code:
+            return None
+        if code.isdigit():
+            code = code.zfill(2)
+        if code not in gstin_service.STATE_CODES:
+            raise ValueError(
+                f"'{v}' is not a GST state code. Expected one of "
+                f"{min(gstin_service.STATE_CODES)}-38, 97 or 99."
+            )
+        return code
+
+    @field_validator("hsn_code")
+    @classmethod
+    def _real_hsn(cls, v: str | None) -> str | None:
+        """Refuse an HSN/SAC that is not the shape the portal accepts.
+
+        4, 6 or 8 digits, which is exactly what
+        :func:`~app.services.filing.validate_invoice` calls an error on the way
+        out. Saying it here as well is not duplication: caught at the filing
+        step it is a line in a report someone reads before an upload, caught
+        here it is a message next to the box while the paper is still in the
+        reviewer's hand.
+        """
+        if v is None:
+            return None
+        code = v.strip()
+        if not code:
+            return None
+        if not code.isdigit() or len(code) not in (4, 6, 8):
+            raise ValueError(
+                f"'{v}' is not an HSN or SAC code. The portal takes 4, 6 or 8 digits."
+            )
+        return code
+
     @field_validator(
         "taxable_value",
         "cgst",

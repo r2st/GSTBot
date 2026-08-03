@@ -375,7 +375,12 @@ def test_another_tenants_invoice_is_not_found(
 
     client.headers.update({"Authorization": f"Bearer {other_tenant}"})
     assert client.get(f"/api/v1/invoices/{invoice_id}").status_code == 404
-    assert client.patch(f"/api/v1/invoices/{invoice_id}", json={"hsn_code": "1"}).status_code == 404
+    # A body that passes validation, so the 404 is the tenancy check answering
+    # and not a malformed field being refused before the row is ever looked up.
+    assert (
+        client.patch(f"/api/v1/invoices/{invoice_id}", json={"hsn_code": "8471"}).status_code
+        == 404
+    )
     assert client.delete(f"/api/v1/invoices/{invoice_id}").status_code == 404
 
 
@@ -458,6 +463,79 @@ def test_patch_rejects_an_invalid_gstin(auth_client, sample_invoice_text):
         f"/api/v1/invoices/{invoice_id}", json={"counterparty_gstin": "27AAPFU0939F1ZW"}
     )
     assert response.status_code == 422
+
+
+class TestTheCodedFieldsAReviewerCanType:
+    """``place_of_supply`` and ``hsn_code`` are codes, not free text.
+
+    The extractor has always checked both. A correction did not, so the one
+    path a person types into was the one that let anything through — and what
+    it lets through is copied verbatim into the GSTR-1 the portal rejects.
+    """
+
+    @pytest.fixture()
+    def invoice_id(self, auth_client, sample_invoice_text) -> int:
+        return upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    def test_a_place_of_supply_that_is_not_a_state_is_refused(self, auth_client, invoice_id):
+        response = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": "ZZ"}
+        )
+        assert response.status_code == 422, response.text
+        assert "state code" in response.text
+
+    def test_a_state_number_that_does_not_exist_is_refused(self, auth_client, invoice_id):
+        # 88 is inside the two-digit shape and is not a code GST assigns.
+        response = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": "88"}
+        )
+        assert response.status_code == 422, response.text
+
+    def test_the_refused_code_never_reaches_the_return(self, auth_client, invoice_id):
+        before = auth_client.get(f"/api/v1/invoices/{invoice_id}").json()["place_of_supply"]
+        auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": "ZZ"})
+        after = auth_client.get(f"/api/v1/invoices/{invoice_id}").json()["place_of_supply"]
+        assert after == before
+
+    def test_a_single_digit_state_is_padded_rather_than_refused(self, auth_client, invoice_id):
+        """``7`` is what a person types for Delhi; ``07`` is what the portal wants."""
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": "7"}
+        ).json()
+        assert body["place_of_supply"] == "07"
+
+    def test_a_real_state_code_still_goes_through(self, auth_client, invoice_id):
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": "29"}
+        ).json()
+        assert body["place_of_supply"] == "29"
+
+    def test_the_place_of_supply_can_still_be_cleared(self, auth_client, invoice_id):
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": None}
+        ).json()
+        assert body["place_of_supply"] is None
+
+    @pytest.mark.parametrize("bad", ["notdigit", "12345", "123", "8471301X"])
+    def test_an_hsn_the_portal_will_not_take_is_refused(self, auth_client, invoice_id, bad):
+        response = auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"hsn_code": bad})
+        assert response.status_code == 422, response.text
+        assert "HSN" in response.text
+
+    @pytest.mark.parametrize("good", ["8471", "847130", "84713010"])
+    def test_the_three_lengths_the_portal_takes_go_through(
+        self, auth_client, invoice_id, good
+    ):
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"hsn_code": good}
+        ).json()
+        assert body["hsn_code"] == good
+
+    def test_the_hsn_can_still_be_cleared(self, auth_client, invoice_id):
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"hsn_code": None}
+        ).json()
+        assert body["hsn_code"] is None
 
 
 @pytest.mark.parametrize(
