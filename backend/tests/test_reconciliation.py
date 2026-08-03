@@ -683,3 +683,129 @@ def test_reconciliation_feeds_the_dashboard(auth_client, db_session, business):
 
     assert Decimal(body["itc_at_risk"]) == Decimal("81000.00")
     assert body["last_reconciliation"]["missing_in_2b"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Credit notes
+# ---------------------------------------------------------------------------
+
+def note(**kwargs) -> GSTR2BRecord:
+    """A credit note as the portal states it: positive figures, type "C"."""
+    defaults = dict(
+        invoice_number="CN-7",
+        invoice_date=date(2026, 4, 28),
+        document_type="C",
+        taxable_value=Decimal("50000.00"),
+        igst=Decimal("9000.00"),
+        total_value=Decimal("59000.00"),
+    )
+    defaults.update(kwargs)
+    return portal(**defaults)
+
+
+class TestACreditNoteTakesCreditBack:
+    """A credit note reverses part of a supply, and the credit goes with it.
+
+    The portal states a note's amounts as positive figures and leaves the sign
+    to the document type, so a reader going by the money alone counts a
+    reduction as a second supply. Read that way, a business whose supplier had
+    withdrawn ₹9,000 of tax was still shown the whole ₹81,000 as eligible — an
+    over-claim the 2B itself contradicts, which is the exact reversal-with-
+    interest this module exists to prevent.
+    """
+
+    def test_it_comes_off_the_eligible_pool(self):
+        result = reconciliation.match(
+            [book(invoice_number="INV-1")],
+            [portal(invoice_number="INV-1"), note()],
+            period=PERIOD,
+        )
+
+        assert result.credit_notes == Decimal("9000.00")
+        assert result.itc_eligible == Decimal("72000.00")
+
+    def test_it_is_not_mistaken_for_an_unbooked_supply(self):
+        """The finding has to say what it is, or it reads as chase the supplier."""
+        result = reconciliation.match(
+            [book(invoice_number="INV-1")],
+            [portal(invoice_number="INV-1"), note()],
+            period=PERIOD,
+        )
+
+        found = next(f for f in result.findings if f.record and f.record.is_credit_note)
+        assert found.category is MatchCategory.MISSING_IN_BOOKS
+        assert "Credit note" in (found.note or "")
+
+    def test_a_debit_note_still_adds_credit(self):
+        """"D" raises the supplier's charge; it moves the same way an invoice does."""
+        result = reconciliation.match(
+            [book(invoice_number="INV-1")],
+            [portal(invoice_number="INV-1"), note(document_type="D")],
+            period=PERIOD,
+        )
+
+        assert result.credit_notes == Decimal("0.00")
+        assert result.itc_eligible == Decimal("81000.00")
+
+    def test_notes_beyond_the_period_s_credit_leave_nothing_rather_than_less(self):
+        """A pool cannot go negative; the excess belongs to another period."""
+        result = reconciliation.match(
+            [book(invoice_number="INV-1")],
+            [portal(invoice_number="INV-1"), note(igst=Decimal("200000.00"))],
+            period=PERIOD,
+        )
+
+        assert result.itc_eligible == Decimal("0.00")
+
+    def test_a_note_never_pairs_with_a_booked_invoice(self):
+        """It is not an invoice, so it cannot be the counterpart of one.
+
+        Held in the matching index, a note whose number normalised onto a
+        booked invoice's could be consumed as that invoice's declaration —
+        leaving the real invoice reported as never filed.
+        """
+        result = reconciliation.match(
+            [book(invoice_number="CN-7")],
+            [note()],
+            period=PERIOD,
+        )
+
+        assert categories(result) == [
+            MatchCategory.MISSING_IN_2B,
+            MatchCategory.MISSING_IN_BOOKS,
+        ]
+        assert result.itc_eligible == Decimal("0.00")
+
+    def test_a_note_alone_reverses_nothing_it_cannot_reach(self):
+        """No invoices booked at all: there is no pool to take it out of."""
+        result = reconciliation.match([], [note()], period=PERIOD)
+
+        assert result.credit_notes == Decimal("9000.00")
+        assert result.itc_eligible == Decimal("0.00")
+
+    def test_the_run_records_why_the_pool_shrank(self, db_session, business):
+        save(db_session, business.id, invoice_number="INV-1")
+        import_2b(
+            db_session, business.id, [portal(invoice_number="INV-1"), note()]
+        )
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.itc_eligible == Decimal("72000.00")
+        assert run.report["credit_notes"] == "9000.00"
+        # The statement's own record count is unchanged: the note is in it.
+        assert run.report["gstr2b_record_count"] == 2
+
+    def test_the_matched_invoice_is_still_matched(self, db_session, business):
+        """Netting the note must not disturb the invoice's own verdict."""
+        invoice = save(db_session, business.id, invoice_number="INV-1")
+        import_2b(
+            db_session, business.id, [portal(invoice_number="INV-1"), note()]
+        )
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        db_session.refresh(invoice)
+
+        assert run.matched_count == 1
+        assert run.itc_at_risk == Decimal("0.00")
+        assert invoice.status is InvoiceStatus.MATCHED

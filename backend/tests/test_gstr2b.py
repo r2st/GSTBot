@@ -163,6 +163,29 @@ def test_credit_notes_are_read_from_cdnr():
     note = next(r for r in records if r.invoice_number == "CN-7")
     assert note.document_type == "C"
     assert note.igst == Decimal("1800.00")
+    # Stated positive, like every figure the portal writes. The type is the
+    # only thing that says the credit moves the other way.
+    assert note.is_credit_note is True
+
+
+@pytest.mark.parametrize(
+    ("document_type", "reverses"),
+    [
+        ("C", True),
+        ("c", True),
+        (" C ", True),
+        # Credit note issued against a supply already reported — still a "C".
+        ("CN", True),
+        # A debit note raises the charge, so it moves with an invoice.
+        ("D", False),
+        ("R", False),
+        ("ISD", False),
+        ("IMPG", False),
+    ],
+)
+def test_only_a_credit_note_takes_credit_back(document_type, reverses):
+    record = gstr2b.GSTR2BRecord(document_type=document_type)
+    assert record.is_credit_note is reverses
 
 
 def test_total_value_is_derived_when_the_portal_omits_it():

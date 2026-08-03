@@ -22,6 +22,13 @@ wins before a fuzzy one is considered.
 Amounts are compared with a tolerance because the portal and the books round
 independently, at the line and at the invoice. A one-rupee gap is arithmetic;
 it is not a dispute worth putting in front of a user.
+
+Credit notes are not matched at all. A note has no counterpart in a purchase
+register — it reverses part of a supply already declared — so it is taken off
+the period's eligible credit rather than paired with anything. The portal
+states its amounts as positive figures and leaves the sign to the document
+type, which is the trap: read as money alone, a reduction counts as a second
+supply and the pool comes out too big.
 """
 from __future__ import annotations
 
@@ -180,6 +187,10 @@ class ReconciliationResult:
     itc_eligible: Decimal = ZERO
     itc_at_risk: Decimal = ZERO
     itc_claimed: Decimal = ZERO
+    # Tax on credit notes the supplier declared, already taken off
+    # ``itc_eligible``. Reported separately because the deduction is otherwise
+    # invisible: the pool simply comes back smaller than the invoices in it.
+    credit_notes: Decimal = ZERO
     tolerance: Decimal = DEFAULT_TOLERANCE
 
     def counts(self) -> dict[MatchCategory, int]:
@@ -256,6 +267,16 @@ def match(
     plain lists rather than through a fixture.
     """
     result = ReconciliationResult(period=period, tolerance=tolerance)
+
+    # ---- Split off the documents that take credit away ----
+    # A credit note is not an invoice and has no counterpart in a purchase
+    # register, so it is held out of the matching entirely. Left in, it was
+    # paired against nothing, reported as a supply the business had forgotten
+    # to book, and — the part that costs money — left the period's eligible
+    # credit at the full value of the invoices it was issued against. The
+    # supplier has withdrawn part of that supply; the credit goes with it.
+    credit_notes = [record for record in records if record.is_credit_note]
+    records = [record for record in records if not record.is_credit_note]
 
     # ---- Index the portal side, both ways ----
     exact_index: dict[tuple[str, str], list[GSTR2BRecord]] = {}
@@ -388,6 +409,26 @@ def match(
                 note="In GSTR-2B but not in the purchase register",
             )
         )
+
+    # ---- ...and whatever it has taken back ----
+    # Floored at zero rather than allowed to go negative: a period whose notes
+    # exceed its invoices has no credit left, not credit owed the other way. The
+    # excess belongs to the period holding the invoices the notes were issued
+    # against, and inventing a negative pool here would carry it into a set-off
+    # that has no shape for one.
+    for record in credit_notes:
+        result.credit_notes += record.total_tax
+        result.findings.append(
+            Finding(
+                category=MatchCategory.MISSING_IN_BOOKS,
+                record=record,
+                note=(
+                    "Credit note in GSTR-2B, not in the purchase register. The "
+                    "credit it reverses has been taken off the eligible pool."
+                ),
+            )
+        )
+    result.itc_eligible = max(ZERO, result.itc_eligible - result.credit_notes)
 
     return result
 
@@ -669,6 +710,8 @@ def run_reconciliation(
             "tolerance": str(tolerance),
             "gstr2b_return_id": gstr_return.id,
             "gstr2b_record_count": len(records),
+            # Why ``itc_eligible`` can be smaller than the invoices that matched.
+            "credit_notes": str(result.credit_notes),
             "findings": [finding.as_dict() for finding in result.findings],
             "suppliers": suppliers,
         }

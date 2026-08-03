@@ -87,6 +87,18 @@ class GSTR2BRecord:
     def total_tax(self) -> Decimal:
         return self.cgst + self.sgst + self.igst + self.cess
 
+    @property
+    def is_credit_note(self) -> bool:
+        """Whether this document *takes credit away* rather than granting it.
+
+        The portal states the amounts on a credit note as positive figures and
+        leaves the sign to ``document_type``, so a reader that goes by the money
+        alone reads a reduction as a second supply. Only "C" reverses: a debit
+        note ("D") raises the supplier's charge and the buyer's credit with it,
+        which is the same direction as an invoice.
+        """
+        return self.document_type.strip().upper().startswith("C")
+
     def as_dict(self) -> dict:
         """JSON-safe form, for storing on the return row."""
         return {
