@@ -14,7 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
-    UniqueConstraint,
+    text,
 )
 from sqlalchemy import (
     Enum as SAEnum,
@@ -81,12 +81,26 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         # invoice number, within one tenant and direction. This is what makes
         # a re-upload of the same bundle idempotent — and duplicate ITC claims
         # on one invoice are exactly what triggers a departmental notice.
-        UniqueConstraint(
+        #
+        # Over the *undeleted* rows only, which is what "one invoice on file"
+        # means here. Deleting is soft, so a plain constraint counted the
+        # tombstone and the key stayed occupied by a row nobody can see: a
+        # business that deleted a badly-read invoice and re-scanned it — the
+        # ordinary way to fix one — got the second upload marked ``failed``
+        # and was told it was "already on file", naming a document the API
+        # returns 404 for. There was no way back from that short of SQL,
+        # because the delete that was supposed to undo it had already
+        # happened. ``find_duplicate`` has always excluded tombstones; this is
+        # the constraint agreeing with it.
+        Index(
+            "uq_invoices_business_type_party_number",
             "business_id",
             "invoice_type",
             "counterparty_gstin",
             "invoice_number",
-            name="uq_invoices_business_type_party_number",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
         ),
         Index("ix_invoices_business_created", "business_id", "created_at"),
         Index("ix_invoices_business_period", "business_id", "period"),

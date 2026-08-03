@@ -245,6 +245,88 @@ def test_the_same_file_may_be_uploaded_by_a_different_tenant(
     assert upload(client, sample_invoice_text).status_code == 201
 
 
+class TestDeletingAnInvoiceFreesItsNumber:
+    """Deleting is soft, and the natural key has to agree.
+
+    Delete a badly-read invoice, re-scan the paper, upload it again: that is
+    the ordinary way to fix one, and it is the only way, because a re-scan is
+    different bytes and so the file-hash check never fires. A tombstone that
+    kept holding the key turned the second upload into ``failed`` — "already
+    on file", naming an invoice the API answers 404 for — and there was no way
+    back, because the delete that was meant to undo it had already happened.
+    """
+
+    def _rescan(self, client, text: str, *, name: str):
+        """The same invoice, photographed again: same fields, different bytes."""
+        return upload(client, text + "\n \n", name=name).json()["invoice"]
+
+    def test_the_same_invoice_can_be_uploaded_again_after_a_delete(
+        self, auth_client, sample_invoice_text
+    ):
+        first = upload(auth_client, sample_invoice_text).json()["invoice"]
+        assert auth_client.delete(f"/api/v1/invoices/{first['id']}").status_code == 204
+
+        second = self._rescan(auth_client, sample_invoice_text, name="rescan.txt")
+        assert second["status"] == "parsed", second
+        assert second["id"] != first["id"]
+
+    def test_the_replacement_carries_the_figures_rather_than_an_error(
+        self, auth_client, sample_invoice_text
+    ):
+        first = upload(auth_client, sample_invoice_text).json()["invoice"]
+        auth_client.delete(f"/api/v1/invoices/{first['id']}")
+
+        second = self._rescan(auth_client, sample_invoice_text, name="rescan.txt")
+        assert second["parse_error"] is None
+        assert second["invoice_number"] == first["invoice_number"]
+        assert Decimal(second["taxable_value"]) == Decimal(first["taxable_value"])
+
+    def test_the_replacement_is_the_one_the_period_files(
+        self, auth_client, sample_invoice_text
+    ):
+        """A ``failed`` row is out of the filing pool; the point is to be in it."""
+        first = upload(auth_client, sample_invoice_text).json()["invoice"]
+        auth_client.delete(f"/api/v1/invoices/{first['id']}")
+        second = self._rescan(auth_client, sample_invoice_text, name="rescan.txt")
+
+        listed = auth_client.get("/api/v1/invoices").json()["items"]
+        assert [row["id"] for row in listed] == [second["id"]]
+
+    def test_a_duplicate_is_still_refused_while_the_original_lives(
+        self, auth_client, sample_invoice_text
+    ):
+        """The constraint still does its job — that is the whole reason it exists.
+
+        Two live copies of one invoice are two claims of the same credit, which
+        is what draws a departmental notice.
+        """
+        upload(auth_client, sample_invoice_text)
+        second = self._rescan(auth_client, sample_invoice_text, name="rescan.txt")
+        assert second["status"] == "failed"
+        assert "already on file" in second["parse_error"]
+
+    def test_deleting_twice_over_leaves_the_number_free_each_time(
+        self, auth_client, sample_invoice_text
+    ):
+        """Two tombstones on one key, which a partial index has to tolerate."""
+        for round_number in range(3):
+            invoice = self._rescan(
+                auth_client, sample_invoice_text + " " * round_number, name=f"r{round_number}.txt"
+            )
+            assert invoice["status"] == "parsed", invoice
+            auth_client.delete(f"/api/v1/invoices/{invoice['id']}")
+
+    def test_the_tombstones_are_kept_rather_than_overwritten(
+        self, auth_client, db_session, sample_invoice_text
+    ):
+        """Soft delete is an audit record; freeing the key must not drop it."""
+        first = upload(auth_client, sample_invoice_text).json()["invoice"]
+        auth_client.delete(f"/api/v1/invoices/{first['id']}")
+        self._rescan(auth_client, sample_invoice_text, name="rescan.txt")
+
+        assert db_session.get(Invoice, first["id"]).deleted_at is not None
+
+
 # --------------------------------------------------------------------------
 # Plan limits
 # --------------------------------------------------------------------------
