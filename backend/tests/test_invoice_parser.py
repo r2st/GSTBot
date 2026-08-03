@@ -380,6 +380,56 @@ def test_a_fractional_rate_is_read_as_a_percentage(stub_openrouter, sample_invoi
     assert parse_invoice(text=sample_invoice_text).tax_rate == Decimal("18")
 
 
+class TestTheSubOnePercentSlabs:
+    """A rate below 1% is a rate, not a fraction to be scaled.
+
+    ``0.25`` is a real GST rate and sits in the parser's own list of them.
+    Scaling every sub-1 value before checking that list turned it into 25 —
+    which is not a slab — and dropped it, so an invoice on rough diamonds could
+    never carry the rate it plainly printed.
+    """
+
+    def test_a_quarter_percent_survives(self):
+        assert invoice_parser._normalize_rate("0.25") == Decimal("0.25")
+
+    def test_it_is_still_a_rate_when_it_arrives_as_a_number(self):
+        assert invoice_parser._normalize_rate(0.25) == Decimal("0.25")
+
+    def test_a_fraction_that_is_not_itself_a_rate_is_still_scaled(self):
+        """Reading the literal first must not stop 0.18 meaning 18%."""
+        assert invoice_parser._normalize_rate("0.18") == Decimal("18")
+        assert invoice_parser._normalize_rate("0.05") == Decimal("5")
+
+    def test_a_fraction_of_a_rate_that_is_not_one_is_still_dropped(self):
+        """0.5 is neither a slab nor a fraction of one; 50% does not exist."""
+        assert invoice_parser._normalize_rate("0.5") is None
+
+    def test_the_two_readings_never_both_land_on_a_slab(self):
+        """Why preferring the literal costs nothing.
+
+        If some value were a slab both as itself and as a fraction, the
+        preference would be a guess. None is, so it is not.
+        """
+        both = [
+            rate
+            for rate in invoice_parser.VALID_TAX_RATES
+            if Decimal("0") < rate < Decimal("1") and rate * 100 in invoice_parser.VALID_TAX_RATES
+        ]
+        assert both == []
+
+    def test_a_quarter_percent_invoice_keeps_its_rate_end_to_end(
+        self, stub_openrouter, sample_invoice_text
+    ):
+        stub_openrouter.update(
+            {
+                "supplier_gstin": SUPPLIER_GSTIN_OTHER_STATE,
+                "tax_rate": 0.25,
+                "total_value": 531000,
+            }
+        )
+        assert parse_invoice(text=sample_invoice_text).tax_rate == Decimal("0.25")
+
+
 def test_a_model_failure_falls_back_to_heuristics(monkeypatch, sample_invoice_text):
     """A free-tier rate limit must not lose an invoice."""
     monkeypatch.setattr(invoice_parser, "is_configured", lambda: True)

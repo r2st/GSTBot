@@ -209,11 +209,26 @@ def _clean_str(value: object, max_length: int = 255) -> str | None:
 
 
 def _normalize_rate(value: object) -> Decimal | None:
-    """Coerce a tax rate, dropping anything that is not a real GST rate."""
+    """Coerce a tax rate, dropping anything that is not a real GST rate.
+
+    A model asked for "18" sometimes answers "0.18", so a value below 1 is
+    read as a fraction and scaled — but only when it is not already a rate in
+    its own right. Scaling first made the sub-1% slabs unreachable: 0.25 is a
+    real GST rate, it sits in :data:`VALID_TAX_RATES` a few lines above, and it
+    was multiplied into 25 — which is not a slab at all — and then discarded.
+    An invoice on rough diamonds could therefore never carry its own rate,
+    however plainly the document printed it.
+
+    Reading the literal first is unambiguous rather than merely safer, because
+    the two readings never both land on a slab. 0.25 as a fraction is 25%, and
+    0.1 as a fraction is 10%; neither is a rate GST levies, so preferring the
+    literal costs nothing anywhere it does not gain a real one.
+    """
     rate = to_decimal(value, default=None)
     if rate is None:
         return None
-    # A model asked for "18" sometimes answers "0.18".
+    if rate in VALID_TAX_RATES:
+        return rate
     if Decimal("0") < rate < Decimal("1"):
         rate = rate * 100
     return rate if rate in VALID_TAX_RATES else None
