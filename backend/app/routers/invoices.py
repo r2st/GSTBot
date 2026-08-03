@@ -294,9 +294,24 @@ def get_invoice(
         "pool rather than the error queue — sets `parsed_with` to `manual`, and "
         "sets confidence to 1.0. Changing `invoice_date` re-derives the filing "
         "period, and setting a `counterparty_gstin` on a purchase links or "
-        "creates the supplier."
+        "creates the supplier.\n\n"
+        "`paid_at` and `is_capital_good` are the exception: they are ledger "
+        "facts, not readings off the document, so recording one does not mark "
+        "the extraction reviewed. They are also the two inputs the ITC reversal "
+        "rules turn on — Rule 37 reverses the credit on a purchase left unpaid "
+        "180 days past its invoice date, and Rule 43 spreads a capital good's "
+        "credit over sixty months — so this is where a reversal is prevented or "
+        "brought about."
     ),
-    responses={404: {"description": "No such invoice in this tenant."}},
+    responses={
+        404: {"description": "No such invoice in this tenant."},
+        422: {
+            "description": (
+                "A payment date in the future, or one before the invoice was "
+                "issued."
+            )
+        },
+    },
     dependencies=[Depends(_write_limit)],
 )
 def update_invoice(
@@ -313,21 +328,53 @@ def update_invoice(
     """
     invoice = _owned_invoice(db, business, invoice_id)
     changes = payload.model_dump(exclude_unset=True)
+
+    # Rule 37 counts from the invoice date, so a payment before it is not a
+    # payment — it is a mistyped year, and it would silently cancel a reversal
+    # that is genuinely due. Checked here rather than in the schema because it
+    # needs the invoice: the date being compared against may itself be arriving
+    # in this same request.
+    paid_at = changes.get("paid_at")
+    invoice_date = changes.get("invoice_date", invoice.invoice_date)
+    if paid_at is not None and invoice_date is not None and paid_at < invoice_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Paid on {paid_at.isoformat()}, but the invoice is dated "
+                f"{invoice_date.isoformat()}. An invoice cannot be paid before it "
+                "was issued."
+            ),
+        )
+
     for attr, value in changes.items():
         setattr(invoice, attr, value)
 
     if "invoice_date" in changes and invoice.invoice_date:
         invoice.period = invoice.invoice_date.strftime("%Y-%m")
-    if changes:
+
+    # Two kinds of edit arrive here and they must not be conflated. Correcting a
+    # field means a human has read the document and overridden what the
+    # extractor made of it, which is what ``manual`` and a confidence of 1.0
+    # assert. Recording that a supplier was paid, or that a purchase was capital
+    # goods, asserts nothing about the extraction at all — those facts are not
+    # on the invoice to be read. Treating them as a correction marked the row
+    # reviewed and took it off the needs-review list, so a document nobody had
+    # looked at stopped being flagged for it; on a ``failed`` row it also
+    # promoted the invoice into the filing pool, putting fields that were never
+    # extracted into a return.
+    LEDGER_FIELDS = {"paid_at", "is_capital_good"}
+    corrections = set(changes) - LEDGER_FIELDS
+
+    if corrections:
         invoice.parsed_with = "manual"
         invoice.extraction_confidence = 1.0
         if invoice.status in (InvoiceStatus.FAILED, InvoiceStatus.UPLOADED):
             invoice.status = InvoiceStatus.PARSED
-        if invoice.invoice_type == InvoiceType.PURCHASE and invoice.counterparty_gstin:
-            supplier = invoice_service.get_or_create_supplier(
-                db, business.id, invoice.counterparty_gstin, invoice.counterparty_name
-            )
-            invoice.supplier_id = supplier.id
+    if changes and invoice.invoice_type == InvoiceType.PURCHASE and invoice.counterparty_gstin:
+        supplier = invoice_service.get_or_create_supplier(
+            db, business.id, invoice.counterparty_gstin, invoice.counterparty_name
+        )
+        invoice.supplier_id = supplier.id
 
     db.commit()
     db.refresh(invoice)

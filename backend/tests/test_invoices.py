@@ -9,7 +9,8 @@ import pytest
 from app.models.business import BusinessPlan
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.supplier import Supplier
-from app.services import invoice_service
+from app.services import gst_calendar, invoice_service
+from app.services import itc as itc_service
 from tests.conftest import BUSINESS_GSTIN, SUPPLIER_GSTIN_OTHER_STATE, SUPPLIER_GSTIN_SAME_STATE
 
 
@@ -19,6 +20,10 @@ def upload(client, text: str, *, name: str = "invoice.txt", invoice_type: str = 
         files={"file": (name, text.encode(), "text/plain")},
         data={"invoice_type": invoice_type},
     )
+
+
+def _business_of(db, invoice_id: int) -> int:
+    return db.get(Invoice, invoice_id).business_id
 
 
 # --------------------------------------------------------------------------
@@ -425,6 +430,192 @@ def test_a_correction_links_a_supplier(auth_client, db_session):
     invoice = db_session.get(Invoice, invoice_id)
     assert invoice.supplier_id is not None
     assert db_session.get(Supplier, invoice.supplier_id).gstin == SUPPLIER_GSTIN_SAME_STATE
+
+
+# --------------------------------------------------------------------------
+# The two facts the ITC reversal rules turn on
+#
+# Rule 37 reverses the credit on a purchase left unpaid 180 days past its
+# invoice date; Rule 43 spreads a capital good's credit over sixty months
+# rather than claiming it in the month of purchase. Both are read off the
+# invoice row by app.services.itc, and neither was settable through the API —
+# so a business could not prevent a reversal that was not due, and every
+# capital good claimed its whole credit in one month.
+# --------------------------------------------------------------------------
+
+def test_recording_a_payment_takes_the_invoice_off_the_rule_37_clock(
+    auth_client, db_session, sample_invoice_text
+):
+    """Nothing could set ``paid_at``, so the reversal was unavoidable.
+
+    Every purchase reversed its credit 180 days after its invoice date and
+    stayed reversed for good, which over-reverses table 4(B) of GSTR-3B: the
+    business pays cash it does not owe on a supplier it has actually paid.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    as_of = date(2026, 4, 15) + timedelta(days=200)
+
+    before = itc_service.rule_37(
+        itc_service.purchase_invoices(db_session, _business_of(db_session, invoice_id)),
+        as_of=as_of,
+    )
+    assert before.reversal.igst == Decimal("81000.00")
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"}
+    ).json()
+    assert body["paid_at"] == "2026-05-01"
+
+    db_session.expire_all()
+    after = itc_service.rule_37(
+        itc_service.purchase_invoices(db_session, _business_of(db_session, invoice_id)),
+        as_of=as_of,
+    )
+    assert after.reversal.igst == Decimal("0.00")
+    assert after.overdue == []
+
+
+def test_a_payment_can_be_taken_back_off_an_invoice(auth_client, sample_invoice_text):
+    """``null`` means "not paid after all", which puts it back on the clock."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"})
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"paid_at": None}
+    ).json()
+
+    assert body["paid_at"] is None
+
+
+def test_a_payment_date_in_the_future_is_refused(auth_client, sample_invoice_text):
+    """A mistyped year would silently cancel a reversal that is genuinely due."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    tomorrow = gst_calendar.today_ist() + timedelta(days=1)
+
+    response = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"paid_at": tomorrow.isoformat()}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "future" in response.text
+
+
+def test_a_payment_before_the_invoice_was_issued_is_refused(
+    auth_client, sample_invoice_text
+):
+    """Rule 37 counts from the invoice date, so this is not a payment at all."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    response = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2025-04-01"}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "cannot be paid before it was issued" in response.text
+
+
+def test_a_payment_and_a_corrected_date_are_judged_against_each_other(
+    auth_client, sample_invoice_text
+):
+    """Both dates can arrive together, and the new one is what governs."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    response = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"invoice_date": "2026-01-10", "paid_at": "2026-02-01"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["paid_at"] == "2026-02-01"
+
+
+def test_marking_a_purchase_capital_goods_moves_its_credit_to_rule_43(
+    auth_client, db_session, sample_invoice_text
+):
+    """Its credit belongs to sixty months, not to the month of purchase."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    business_id = _business_of(db_session, invoice_id)
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"is_capital_good": True}
+    ).json()
+    assert body["is_capital_good"] is True
+
+    db_session.expire_all()
+    summary = itc_service.summarise(db_session, business_id, "2026-04")
+    assert summary.available.igst == Decimal("0.00")
+    assert summary.proportionate.capital_credit.igst == Decimal("81000.00")
+    assert summary.proportionate.capital_credit_this_month.igst == Decimal("1350.00")
+
+
+def test_is_capital_good_cannot_be_cleared_to_null(auth_client, sample_invoice_text):
+    """The column is NOT NULL; ``false`` is how it is turned off."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+    assert (
+        auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"is_capital_good": None}
+        ).status_code
+        == 422
+    )
+    assert (
+        auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"is_capital_good": False}
+        ).json()["is_capital_good"]
+        is False
+    )
+
+
+def test_recording_a_payment_does_not_claim_the_extraction_was_reviewed(
+    auth_client, sample_invoice_text
+):
+    """A payment is a ledger fact, not a reading off the document.
+
+    Every PATCH set ``parsed_with`` to manual and confidence to 1.0, which is an
+    assertion that a human checked what the extractor made of the invoice.
+    Recording a payment asserts nothing of the kind — and it took the row off
+    the needs-review list, so a document nobody had looked at stopped being
+    flagged for it.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    before = auth_client.get(f"/api/v1/invoices/{invoice_id}").json()
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"paid_at": "2026-05-01", "is_capital_good": True},
+    ).json()
+
+    assert body["paid_at"] == "2026-05-01"
+    assert body["parsed_with"] == before["parsed_with"]
+    assert body["extraction_confidence"] == before["extraction_confidence"]
+
+
+def test_a_payment_does_not_promote_a_failed_invoice_into_the_filing_pool(
+    auth_client, db_session
+):
+    """A ``failed`` row has fields that were never extracted.
+
+    Promoting it to ``parsed`` on a payment puts those blanks into a return,
+    and takes the row out of the error queue where someone was going to fix it.
+    """
+    invoice_id = upload(auth_client, "nothing readable here", name="blank.txt").json()[
+        "invoice"
+    ]["id"]
+    invoice = db_session.get(Invoice, invoice_id)
+    invoice.status = InvoiceStatus.FAILED
+    invoice.invoice_date = date(2026, 4, 15)
+    db_session.commit()
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"}
+    ).json()
+
+    assert body["status"] == InvoiceStatus.FAILED.value
+    # A real correction still promotes it, which is what that rule is for.
+    promoted = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"invoice_number": "FIXED-1"}
+    ).json()
+    assert promoted["status"] == InvoiceStatus.PARSED.value
 
 
 def test_reparse_reruns_extraction(auth_client, sample_invoice_text):

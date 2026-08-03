@@ -7,6 +7,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.invoice import InvoiceSource, InvoiceStatus, InvoiceType
+from app.services import gst_calendar
 from app.services import gstin as gstin_service
 
 
@@ -37,6 +38,11 @@ class InvoiceOut(BaseModel):
     tax_rate: Decimal | None = None
     itc_eligible: bool
     reverse_charge: bool
+    # What the Rule 37 and Rule 43 reversals are computed from. Returned so the
+    # review screen can show why an invoice is on the reversal list, and so a
+    # client can tell "not paid" from "we never asked".
+    paid_at: date | None = None
+    is_capital_good: bool = False
 
     source_filename: str | None = None
     parsed_with: str | None = None
@@ -99,9 +105,13 @@ class InvoiceUpdate(BaseModel):
 
     Omitted and ``null`` are different things here. Omitting a field leaves it
     alone; sending ``null`` clears it, which is how a misread GSTIN or date is
-    taken back off an invoice. The money and the two credit flags have no
-    cleared state — an invoice always carries a figure for every head, zero
-    included — so a ``null`` there is refused rather than written.
+    taken back off an invoice. The money and the boolean flags have no cleared
+    state — an invoice always carries a figure for every head, zero included —
+    so a ``null`` there is refused rather than written.
+
+    ``paid_at`` is the exception among the dates: clearing it is meaningful, and
+    means "not paid after all". Under Rule 37 that is what puts an invoice back
+    on the 180-day clock, so it has to be expressible.
     """
 
     counterparty_gstin: str | None = None
@@ -119,6 +129,34 @@ class InvoiceUpdate(BaseModel):
     tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
     itc_eligible: bool | None = None
     reverse_charge: bool | None = None
+
+    # ---- The two facts the reversal rules turn on ----
+    # Rule 37 reverses the credit on a purchase left unpaid 180 days past its
+    # invoice date, and Rule 43 spreads a capital good's credit over sixty
+    # months instead of claiming it in the month of purchase. Both are
+    # bookkeeping facts about the invoice rather than anything a document says,
+    # so a person is the only possible source for them.
+    paid_at: date | None = None
+    is_capital_good: bool | None = None
+
+    @field_validator("paid_at")
+    @classmethod
+    def _not_in_the_future(cls, v: date | None) -> date | None:
+        """Refuse a payment date that has not arrived yet.
+
+        Not pedantry: an unpaid invoice past 180 days reverses its credit, and a
+        ``paid_at`` in the future takes it off that list. A mistyped year is
+        therefore an under-reported reversal in GSTR-3B — over-claimed credit,
+        with interest running on it — and it would sit there silently until the
+        typo happened to come due.
+
+        Measured against the Indian date, like every other deadline here.
+        """
+        if v is not None and v > gst_calendar.today_ist():
+            raise ValueError(
+                f"A payment date of {v.isoformat()} is in the future."
+            )
+        return v
 
     @field_validator("counterparty_gstin")
     @classmethod
@@ -139,6 +177,7 @@ class InvoiceUpdate(BaseModel):
         "total_value",
         "itc_eligible",
         "reverse_charge",
+        "is_capital_good",
     )
     @classmethod
     def _not_cleared(cls, v, info):
