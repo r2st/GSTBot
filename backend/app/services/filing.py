@@ -236,6 +236,26 @@ def validate_invoice(
 
     if taxable <= ZERO and tax <= ZERO:
         add("taxable_value", Severity.ERROR, "Invoice has no taxable value and no tax")
+    elif taxable <= ZERO:
+        # Tax on nothing. GST is a percentage of a value, so there is no rate
+        # and no supply that produces this — it is an extraction that read the
+        # tax boxes off the document and missed the one they were computed
+        # from, which is a common enough way for a photographed invoice to come
+        # back.
+        #
+        # Caught here or not at all. The rate cross-check below is skipped when
+        # there is no taxable value to apply a rate to, and the check above only
+        # fires when *both* are empty, so an invoice carrying ₹18,000 of IGST
+        # against a taxable value of zero validated completely clean. It then
+        # filed as a rate-zero line carrying tax — ``_rate_of`` derives the rate
+        # from the figures and gets 0% — which the portal rejects on upload.
+        # That is the afternoon this module exists to save.
+        add(
+            "taxable_value",
+            Severity.ERROR,
+            f"Tax of {_q(tax)} on a taxable value of zero. Tax is a percentage "
+            "of a value, so the value is missing rather than nil.",
+        )
 
     if invoice.tax_rate is not None and invoice.tax_rate not in VALID_RATES:
         add(

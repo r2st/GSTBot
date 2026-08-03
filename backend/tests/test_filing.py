@@ -283,6 +283,56 @@ def test_an_invoice_with_no_value_at_all_is_an_error():
     assert issues_for(invoice)["taxable_value"] is Severity.ERROR
 
 
+class TestTaxOnATaxableValueOfZero:
+    """The gap between the two money checks, which nothing else covered.
+
+    "No value and no tax" fires only when both are empty, and the rate
+    cross-check below it is skipped when there is no taxable value to apply a
+    rate to. An invoice carrying real tax against a taxable value of zero fell
+    between them and validated completely clean — then filed as a rate-zero
+    line carrying tax, which the portal rejects on upload.
+
+    It is not an exotic row either: it is what a photographed invoice comes
+    back as when the extractor reads the tax boxes and misses the figure they
+    were computed from.
+    """
+
+    def broken(self, **kwargs) -> Invoice:
+        return sale(taxable_value=Decimal("0.00"), tax_rate=None, **kwargs)
+
+    def test_it_is_an_error(self):
+        assert issues_for(self.broken())["taxable_value"] is Severity.ERROR
+
+    def test_the_message_says_the_value_is_missing_not_nil(self):
+        found = filing_service.validate_invoice(
+            self.broken(), business_state="27", period=PERIOD
+        )
+        message = next(i.message for i in found if i.field == "taxable_value")
+        assert "18000.00" in message
+        assert "missing rather than nil" in message
+
+    def test_it_blocks_the_period_from_being_filed(self, db_session, business):
+        save(db_session, business.id, self.broken())
+        report = filing_service.validate_period(db_session, business, PERIOD)
+        assert report.ok is False
+
+    def test_a_purchase_is_caught_the_same_way(self):
+        # Tax from nothing is not a direction-specific mistake, and on the
+        # purchase side it also throws off the 2B comparison.
+        invoice = self.broken(invoice_type=InvoiceType.PURCHASE)
+        assert issues_for(invoice)["taxable_value"] is Severity.ERROR
+
+    def test_an_exempt_supply_is_still_not_an_error(self):
+        # Value with no tax is the nil-rated and exempt case, which is a real
+        # supply and files in its own block. Only the reverse is impossible.
+        invoice = sale(
+            igst=Decimal("0.00"),
+            total_value=Decimal("100000.00"),
+            tax_rate=Decimal("0"),
+        )
+        assert issues_for(invoice) == {}
+
+
 def test_validate_period_reports_ok_only_when_nothing_blocks(db_session, business):
     save(db_session, business.id, sale())
     clean = filing_service.validate_period(db_session, business, PERIOD)
