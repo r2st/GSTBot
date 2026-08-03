@@ -307,8 +307,10 @@ def get_invoice(
         404: {"description": "No such invoice in this tenant."},
         422: {
             "description": (
-                "A payment date in the future, or one before the invoice was "
-                "issued."
+                "A payment date in the future, or a pair of dates leaving the "
+                "invoice paid before it was issued — whichever of the two this "
+                "request moves. Clear `paid_at` in the same call to correct a "
+                "date past a payment that never happened."
             )
         },
     },
@@ -332,9 +334,18 @@ def update_invoice(
     # Rule 37 counts from the invoice date, so a payment before it is not a
     # payment — it is a mistyped year, and it would silently cancel a reversal
     # that is genuinely due. Checked here rather than in the schema because it
-    # needs the invoice: the date being compared against may itself be arriving
-    # in this same request.
-    paid_at = changes.get("paid_at")
+    # needs the invoice: either date being compared may itself be arriving in
+    # this same request.
+    #
+    # Both are read as "what the row will hold once this PATCH lands", not "what
+    # this PATCH sends". Comparing only the incoming payment date left the rule
+    # enforced in one direction: moving the *invoice* forward past a payment
+    # already on file produced exactly the state the check exists to refuse, and
+    # did it silently. That is not a hypothetical edit — correcting a misread
+    # year is the commonest reason anyone touches this field — and the invoice
+    # it leaves behind reads as paid forever, so its credit never reverses under
+    # Rule 37 however long the supplier goes unpaid.
+    paid_at = changes.get("paid_at", invoice.paid_at)
     invoice_date = changes.get("invoice_date", invoice.invoice_date)
     if paid_at is not None and invoice_date is not None and paid_at < invoice_date:
         raise HTTPException(

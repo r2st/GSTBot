@@ -529,6 +529,93 @@ def test_a_payment_and_a_corrected_date_are_judged_against_each_other(
     assert response.json()["paid_at"] == "2026-02-01"
 
 
+def test_moving_the_invoice_past_a_recorded_payment_is_refused(
+    auth_client, sample_invoice_text
+):
+    """The same rule, from the other side, where it was not being enforced.
+
+    Only the *incoming* payment date was compared, so an edit that moved the
+    invoice forward past a payment already on file produced exactly the state
+    the check exists to refuse — and produced it silently. Correcting a misread
+    year is the commonest reason anyone touches this field, so it is not an
+    exotic route into it.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"})
+
+    response = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"invoice_date": "2026-06-01"}
+    )
+
+    assert response.status_code == 422, response.text
+    assert "cannot be paid before it was issued" in response.text
+
+
+def test_the_invoice_the_refusal_protects_is_left_untouched(
+    auth_client, sample_invoice_text
+):
+    """What the silent version cost: a purchase that never reverses again.
+
+    An invoice reading as paid is off the Rule 37 clock for good. Written with
+    a payment predating it, the row asserts a payment that could not have
+    happened and quietly suppresses a reversal that is genuinely due, however
+    long the supplier goes unpaid.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"})
+
+    auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"invoice_date": "2026-06-01"}
+    )
+
+    body = auth_client.get(f"/api/v1/invoices/{invoice_id}").json()
+    assert body["invoice_date"] == "2026-04-15"
+    assert body["paid_at"] == "2026-05-01"
+    assert body["period"] == "2026-04"
+
+
+def test_clearing_the_payment_frees_the_invoice_date_to_move(
+    auth_client, sample_invoice_text
+):
+    """The refusal names a real conflict, and says how to resolve it.
+
+    Both dates travel in one PATCH, so a reviewer who has decided the invoice
+    was never paid can say so and correct the date in the same request.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"})
+
+    response = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}",
+        json={"invoice_date": "2026-06-01", "paid_at": None},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["invoice_date"] == "2026-06-01"
+    assert response.json()["paid_at"] is None
+
+
+def test_an_edit_touching_neither_date_is_still_allowed(
+    auth_client, sample_invoice_text
+):
+    """Comparing the stored dates must not block edits that do not move them.
+
+    The check now reads what the row *will* hold rather than what the request
+    sends, and every PATCH goes through it — so a row already holding a
+    consistent pair has to keep passing.
+    """
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"paid_at": "2026-05-01"})
+
+    response = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"hsn_code": "84713010"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["hsn_code"] == "84713010"
+    assert response.json()["paid_at"] == "2026-05-01"
+
+
 def test_marking_a_purchase_capital_goods_moves_its_credit_to_rule_43(
     auth_client, db_session, sample_invoice_text
 ):
