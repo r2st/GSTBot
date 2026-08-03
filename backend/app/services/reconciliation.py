@@ -455,6 +455,42 @@ def match(
     return result
 
 
+# How many GSTINs go into one ``IN`` clause. Every driver bounds the parameters
+# a statement may carry — SQLite's default is under a thousand — and a tenant
+# whose month happens to cross that bound must not be the one who finds out.
+_SUPPLIER_LOOKUP_CHUNK = 500
+
+
+def _suppliers_by_gstin(
+    db: Session, business_id: int, gstins: list[str]
+) -> dict[str, Supplier]:
+    """This tenant's supplier rows for *gstins*, keyed by GSTIN.
+
+    One statement per five hundred GSTINs rather than one per GSTIN. A period
+    is reconciled against every supplier who appears in it or in the 2B, so the
+    loop below ran a primary-key-less lookup per distinct counterparty: a
+    business buying from three hundred suppliers paid three hundred round trips
+    inside a request the user is waiting on, and the count grows with the
+    tenant rather than with anything about the work.
+    """
+    found: dict[str, Supplier] = {}
+    for start in range(0, len(gstins), _SUPPLIER_LOOKUP_CHUNK):
+        chunk = gstins[start : start + _SUPPLIER_LOOKUP_CHUNK]
+        rows = db.scalars(
+            select(Supplier).where(
+                Supplier.business_id == business_id,
+                Supplier.gstin.in_(chunk),
+                Supplier.deleted_at.is_(None),
+            )
+        ).all()
+        for row in rows:
+            # A GSTIN is unique per tenant among the undeleted, so the first is
+            # the only. setdefault rather than assignment keeps that true of the
+            # answer even if the constraint is ever relaxed.
+            found.setdefault(row.gstin, row)
+    return found
+
+
 def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult) -> dict:
     """Roll the run's findings into each supplier's compliance record.
 
@@ -502,15 +538,11 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
         elif finding.category is MatchCategory.MISSING_IN_2B:
             bucket["missing"] += 1
 
+    suppliers = _suppliers_by_gstin(db, business_id, list(per_gstin))
+
     summary: dict[str, dict] = {}
     for gstin, tally in per_gstin.items():
-        supplier = db.scalar(
-            select(Supplier).where(
-                Supplier.business_id == business_id,
-                Supplier.gstin == gstin,
-                Supplier.deleted_at.is_(None),
-            )
-        )
+        supplier = suppliers.get(gstin)
         if supplier is None:
             continue
 

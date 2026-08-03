@@ -549,3 +549,104 @@ class TestNormalizeGstin:
         # The router calls this on user-supplied filter values, so a raise
         # here would be a 500 on a typo.
         assert reconciliation.normalize_gstin(value) is None
+
+
+# ---------------------------------------------------------------------------
+# What the run costs the database
+# ---------------------------------------------------------------------------
+
+def _valid_gstins(count: int) -> list[str]:
+    """*count* distinct GSTINs that pass the check digit."""
+    from app.services import gstin as gstin_service
+
+    out = []
+    for index in range(count):
+        body = f"29AAGCB{1000 + index}J1Z"
+        out.append(body + gstin_service.compute_check_digit(body))
+    return out
+
+
+class TestScoringDoesNotQueryPerSupplier:
+    """The lookup was one statement per distinct counterparty in the period.
+
+    A period is scored against every supplier appearing in the books or in the
+    2B, so the count grew with the tenant rather than with anything about the
+    work: a business buying from three hundred suppliers paid three hundred
+    round trips inside a request someone is waiting on. On SQLite in a test
+    that is invisible; against a Postgres across a network it is the run.
+    """
+
+    def statements(self, db, monkeypatch) -> list[str]:
+        """Every SELECT against ``suppliers`` issued while the run executes.
+
+        Both spellings are wrapped. The version this replaces asked with
+        ``scalar`` and the batched one asks with ``scalars``, so watching
+        either alone would count the wrong code's zero.
+        """
+        seen: list[str] = []
+
+        for name in ("scalar", "scalars"):
+            original = getattr(db, name)
+
+            def _record(statement, *args, _original=original, **kwargs):
+                if "FROM suppliers" in str(statement):
+                    seen.append(str(statement))
+                return _original(statement, *args, **kwargs)
+
+            monkeypatch.setattr(db, name, _record)
+        return seen
+
+    def run_with(self, db, business, supplier_count, monkeypatch):
+        gstins = _valid_gstins(supplier_count)
+        for index, gstin in enumerate(gstins):
+            db.add(Supplier(business_id=business.id, gstin=gstin))
+            save(
+                db,
+                business.id,
+                counterparty_gstin=gstin,
+                invoice_number=f"INV-{index}",
+            )
+        import_2b(db, business.id, [portal(invoice_number="NONE-OF-THEM")])
+
+        seen = self.statements(db, monkeypatch)
+        run = reconciliation.run_reconciliation(db, business.id, PERIOD)
+        assert run.status is ReconciliationStatus.COMPLETED
+        return seen
+
+    def test_thirty_suppliers_take_one_lookup_not_thirty(
+        self, db_session, business, monkeypatch
+    ):
+        seen = self.run_with(db_session, business, 30, monkeypatch)
+        assert len(seen) == 1
+
+    def test_every_supplier_is_still_found_and_scored(self, db_session, business):
+        gstins = _valid_gstins(30)
+        for index, gstin in enumerate(gstins):
+            db_session.add(Supplier(business_id=business.id, gstin=gstin))
+            save(
+                db_session,
+                business.id,
+                counterparty_gstin=gstin,
+                invoice_number=f"INV-{index}",
+            )
+        import_2b(db_session, business.id, [portal(invoice_number="NONE-OF-THEM")])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        # Batching must not lose a supplier: each one filed nothing, so each
+        # one carries a period of history saying so.
+        assert set(run.report["suppliers"]) == set(gstins)
+        db_session.expire_all()
+        for gstin in gstins:
+            supplier = db_session.query(Supplier).filter_by(gstin=gstin).one()
+            assert supplier.missing_invoices == 1
+
+    def test_more_suppliers_than_the_chunk_still_take_one_pass_each(
+        self, db_session, business, monkeypatch
+    ):
+        # The chunk exists because every driver bounds a statement's
+        # parameters. Shrunk here so the boundary is reachable in a test
+        # instead of needing five hundred suppliers to cross it.
+        monkeypatch.setattr(reconciliation, "_SUPPLIER_LOOKUP_CHUNK", 10)
+        seen = self.run_with(db_session, business, 25, monkeypatch)
+        assert len(seen) == 3
