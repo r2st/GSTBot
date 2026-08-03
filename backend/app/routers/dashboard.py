@@ -13,7 +13,6 @@ from app.core.rate_limit import RateLimit
 from app.models.alert import OPEN_STATUSES, Alert
 from app.models.business import Business
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
-from app.models.reconciliation_run import ReconciliationRun
 from app.schemas.dashboard import (
     DashboardOut,
     InvoiceCounts,
@@ -22,7 +21,7 @@ from app.schemas.dashboard import (
     PlanUsage,
     TaxBucket,
 )
-from app.services import gst_calendar, invoice_service
+from app.services import gst_calendar, invoice_service, reconciliation
 from app.services.gst_calendar import gstr3b_due_date
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -146,17 +145,11 @@ def get_dashboard(
     net_liability = _net_liability(sales, purchase)
 
     # ITC resting on invoices the supplier has not filed, from the latest
-    # completed reconciliation for this period.
-    last_run = db.scalar(
-        select(ReconciliationRun)
-        .where(
-            ReconciliationRun.business_id == business.id,
-            ReconciliationRun.period == period,
-            ReconciliationRun.deleted_at.is_(None),
-        )
-        .order_by(ReconciliationRun.created_at.desc())
-        .limit(1)
-    )
+    # reconciliation for this period that finished. A failed or still-running
+    # row carries zeros for every figure, and reading one here reports the risk
+    # as nil — the reassuring answer, on the one screen a business checks to
+    # decide whether to chase a supplier.
+    last_run = reconciliation.latest_completed_run(db, business.id, period)
 
     # ---- History for the chart ----
     recent: list[PeriodSummary] = []

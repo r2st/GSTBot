@@ -33,8 +33,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
-from app.models.reconciliation_run import ReconciliationRun
-from app.services import gst_calendar
+from app.services import gst_calendar, reconciliation
 
 ZERO = Decimal("0.00")
 
@@ -591,13 +590,17 @@ def summarise(
 ) -> ITCSummary:
     """The full ITC position for *period*.
 
-    Credit availability comes from the latest reconciliation when there is one,
-    because only the 2B knows what a supplier actually declared. Without a
-    reconciliation the books are all there is, so the figure is what has been
-    *claimed* rather than what is safe — the ``reconciled`` flag says which,
-    and the caller is expected to say so on screen. Presenting an unreconciled
-    total as "eligible" is exactly the overstatement that produces a reversal
-    with interest.
+    Credit availability comes from the latest reconciliation *that finished*,
+    because only the 2B knows what a supplier actually declared. Without one the
+    books are all there is, so the figure is what has been *claimed* rather than
+    what is safe — the ``reconciled`` flag says which, and the caller is
+    expected to say so on screen. Presenting an unreconciled total as "eligible"
+    is exactly the overstatement that produces a reversal with interest.
+
+    A run that failed or is still running is not a reconciliation for this
+    purpose, however recent it is: its figures are column defaults, and reading
+    them here caps the period's credit at zero. See
+    :func:`~app.services.reconciliation.latest_completed_run`.
 
     Rule 37 deliberately looks at the whole purchase register, not just this
     period: an invoice from eight months ago is the one that crosses 180 days,
@@ -606,16 +609,7 @@ def summarise(
     period_purchases = _purchases(db, business_id, period)
     all_purchases = _purchases(db, business_id)
 
-    last_run = db.scalar(
-        select(ReconciliationRun)
-        .where(
-            ReconciliationRun.business_id == business_id,
-            ReconciliationRun.period == period,
-            ReconciliationRun.deleted_at.is_(None),
-        )
-        .order_by(ReconciliationRun.created_at.desc(), ReconciliationRun.id.desc())
-        .limit(1)
-    )
+    last_run = reconciliation.latest_completed_run(db, business_id, period)
 
     # Claimable credit by head, from the books. Capital goods are excluded from
     # the input pool: their credit belongs to Rule 43's sixty months.

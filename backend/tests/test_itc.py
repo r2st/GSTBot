@@ -7,7 +7,8 @@ from decimal import Decimal
 import pytest
 
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
-from app.services import gst_calendar, reconciliation
+from app.models.reconciliation_run import ReconciliationRun, ReconciliationStatus
+from app.services import filing, gst_calendar, reconciliation
 from app.services import itc as itc_service
 from app.services.gstr2b import GSTR2BRecord
 from tests.conftest import SUPPLIER_GSTIN_OTHER_STATE, SUPPLIER_GSTIN_SAME_STATE
@@ -414,6 +415,88 @@ def test_summary_caps_credit_at_what_reconciliation_found_eligible(db_session, b
     assert summary.reconciled is True
     assert summary.available.igst == Decimal("18000.00")  # Not 36,000.
     assert summary.itc_at_risk == Decimal("18000.00")
+
+
+def test_a_failed_run_does_not_cap_the_period_s_credit_at_nothing(db_session, business):
+    """The zeros on an unfinished run are column defaults, not a 2B's verdict.
+
+    A run that fails is recorded rather than swallowed, so it becomes the newest
+    row for the period with ``itc_eligible`` still at 0.00. Read as the current
+    position, that scaled the whole pool to nought and reported ``reconciled``:
+    the GSTR-3B built from it fills table 4(A) with zeros and pays the entire
+    output tax in cash, while the credit sits unclaimed.
+    """
+    save(db_session, business.id, invoice_number="A-1")
+    save(db_session, business.id, invoice_number="A-2")
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.FAILED,
+            error="the 2B row was unreadable",
+        )
+    )
+    db_session.commit()
+
+    summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+    assert summary.available.igst == Decimal("36000.00")
+    assert summary.reconciled is False
+
+
+def test_a_failed_re_run_leaves_the_last_completed_cap_standing(db_session, business):
+    """Periods are reconciled repeatedly, and the later attempt can fail.
+
+    The completed run's cap is still the best evidence about what suppliers
+    declared. Falling back to the books instead would *raise* the claim above
+    what the 2B supports, which is the overstatement that draws a notice.
+    """
+    save(db_session, business.id, invoice_number="A-1")
+    save(db_session, business.id, invoice_number="A-2")
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.COMPLETED,
+            itc_eligible=Decimal("18000.00"),
+            itc_at_risk=Decimal("18000.00"),
+        )
+    )
+    db_session.commit()
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.FAILED,
+            error="boom",
+        )
+    )
+    db_session.commit()
+
+    summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+    assert summary.reconciled is True
+    assert summary.available.igst == Decimal("18000.00")
+    assert summary.itc_at_risk == Decimal("18000.00")
+
+
+def test_the_3b_it_builds_still_claims_the_credit_after_a_failed_run(db_session, business):
+    """The figure that actually costs money: table 4(A) of GSTR-3B."""
+    save(db_session, business.id, invoice_number="A-1")
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.FAILED,
+            error="boom",
+        )
+    )
+    db_session.commit()
+
+    document = filing.build_gstr3b(db_session, business, PERIOD)
+
+    assert document["itc_elg"]["itc_avl"][0]["iamt"] == 18000.00
+    assert document["itc_elg"]["itc_net"]["iamt"] == 18000.00
 
 
 def test_summary_looks_beyond_the_period_for_rule_37(db_session, business):

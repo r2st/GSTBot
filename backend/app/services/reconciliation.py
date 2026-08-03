@@ -541,6 +541,43 @@ def latest_gstr2b(db: Session, business_id: int, period: str) -> GSTRReturn | No
     )
 
 
+def latest_completed_run(
+    db: Session, business_id: int, period: str
+) -> ReconciliationRun | None:
+    """The newest run for *period* that actually finished, if there is one.
+
+    Every figure a reconciliation produces — ``itc_eligible``, ``itc_at_risk``,
+    the counts — is left at its column default until the run completes, so an
+    unfinished row carries zeros rather than nothing. Read as the current
+    position, those zeros are indistinguishable from a period in which no
+    supplier declared anything: the ITC screen caps the period's credit at
+    ``itc_eligible`` and would scale the whole pool to nought, and the GSTR-3B
+    built from it fills table 4(A) with zeros — a return that pays the entire
+    output tax in cash while the credit sits unclaimed in the ledger.
+
+    A failed run is exactly how that happens, because a failure is recorded
+    rather than swallowed: :func:`run_reconciliation` rolls its work back and
+    writes a FAILED row, which is then the newest row for the period. A RUNNING
+    row left behind by a worker that died mid-run does the same. Neither is
+    evidence about what suppliers filed, so neither may be read as any.
+
+    ``latest_gstr2b``'s counterpart, and used by every caller that reads money
+    off a run. The runs *list* deliberately does not filter: "what did we try,
+    and when" is the question that row exists to answer.
+    """
+    return db.scalar(
+        select(ReconciliationRun)
+        .where(
+            ReconciliationRun.business_id == business_id,
+            ReconciliationRun.period == period,
+            ReconciliationRun.deleted_at.is_(None),
+            ReconciliationRun.status == ReconciliationStatus.COMPLETED,
+        )
+        .order_by(ReconciliationRun.created_at.desc(), ReconciliationRun.id.desc())
+        .limit(1)
+    )
+
+
 def records_from_return(gstr_return: GSTRReturn) -> list[GSTR2BRecord]:
     """Rebuild records from a stored return's normalised ``invoices`` block."""
     from app.services.invoice_parser import to_date

@@ -286,6 +286,82 @@ def test_itc_at_risk_comes_from_the_latest_reconciliation(auth_client, db_sessio
     assert body["last_reconciliation"]["missing_in_2b"] == 2
 
 
+def test_a_later_failed_run_does_not_reset_the_risk_to_nil(
+    auth_client, db_session, business
+):
+    """A failed run's zeros are column defaults, not a reconciled position.
+
+    Reconciling again after a completed run is routine — suppliers file late and
+    the portal regenerates the 2B — and the attempt can fail. It is then the
+    newest row for the period, and every figure on it is zero, so the dashboard
+    reported no ITC at risk at all: the reassuring answer, on the one screen a
+    business checks to decide whether to chase a supplier.
+    """
+    for status, at_risk in (
+        (ReconciliationStatus.COMPLETED, Decimal("12000.00")),
+        (ReconciliationStatus.FAILED, Decimal("0.00")),
+    ):
+        db_session.add(
+            ReconciliationRun(
+                business_id=business.id,
+                period="2026-04",
+                status=status,
+                matched_count=8 if status is ReconciliationStatus.COMPLETED else 0,
+                missing_in_2b_count=2 if status is ReconciliationStatus.COMPLETED else 0,
+                itc_at_risk=at_risk,
+                error=None if status is ReconciliationStatus.COMPLETED else "boom",
+            )
+        )
+        db_session.commit()
+
+    body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+    assert Decimal(body["itc_at_risk"]) == Decimal("12000.00")
+    assert body["last_reconciliation"]["status"] == "completed"
+    assert body["last_reconciliation"]["matched"] == 8
+
+
+def test_a_run_still_in_flight_is_not_read_as_a_result(auth_client, db_session, business):
+    """A worker that died mid-run leaves a RUNNING row behind for good."""
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period="2026-04",
+            status=ReconciliationStatus.COMPLETED,
+            itc_at_risk=Decimal("12000.00"),
+        )
+    )
+    db_session.commit()
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period="2026-04",
+            status=ReconciliationStatus.RUNNING,
+        )
+    )
+    db_session.commit()
+
+    body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+    assert Decimal(body["itc_at_risk"]) == Decimal("12000.00")
+
+
+def test_a_period_whose_only_run_failed_reads_as_unreconciled(
+    auth_client, db_session, business
+):
+    """No completed run is no reconciliation, not one that found nothing."""
+    db_session.add(
+        ReconciliationRun(
+            business_id=business.id,
+            period="2026-04",
+            status=ReconciliationStatus.FAILED,
+            error="boom",
+        )
+    )
+    db_session.commit()
+
+    body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+    assert body["last_reconciliation"] is None
+
+
 def test_a_malformed_period_is_rejected(auth_client):
     assert auth_client.get("/api/v1/dashboard?period=2026-4").status_code == 422
     assert auth_client.get("/api/v1/dashboard?period=April").status_code == 422
