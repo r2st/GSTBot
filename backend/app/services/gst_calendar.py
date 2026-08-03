@@ -105,6 +105,23 @@ def previous_period(period: str) -> str:
     return f"{year - 1:04d}-12" if month == 1 else f"{year:04d}-{month - 1:02d}"
 
 
+def months_before(period: str, count: int) -> str:
+    """The ``YYYY-MM`` period *count* months before *period*.
+
+    Repeated :func:`previous_period` would do, and does not scale: Rule 43
+    spreads a capital good's credit over sixty months, so the window it needs
+    is five years wide. Counting in months-since-year-zero keeps the rollover
+    in one place rather than in sixty subtractions.
+
+    Because periods are zero-padded ``YYYY-MM``, the string order is the
+    calendar order — so the result can be compared against a stored period
+    directly, in Python or in SQL, without parsing either side.
+    """
+    year, month = (int(part) for part in period.split("-"))
+    index = year * 12 + (month - 1) - count
+    return f"{index // 12:04d}-{index % 12 + 1:02d}"
+
+
 def completed_periods(today: date, count: int) -> list[str]:
     """The *count* periods that have ended as of *today*, newest first.
 

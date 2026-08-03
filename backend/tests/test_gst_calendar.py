@@ -96,6 +96,48 @@ class TestWhichPeriodsHaveEnded:
         assert gst_calendar.previous_period("2026-01") == "2025-12"
 
 
+class TestCountingBackWholeYears:
+    """``months_before`` — the five-year window Rule 43 spreads credit over."""
+
+    def test_no_months_back_is_the_period_itself(self):
+        assert gst_calendar.months_before("2026-04", 0) == "2026-04"
+
+    def test_it_agrees_with_previous_period_one_step_out(self):
+        for period in ("2026-04", "2026-01", "2026-12"):
+            assert gst_calendar.months_before(period, 1) == gst_calendar.previous_period(
+                period
+            )
+
+    def test_it_crosses_the_january_boundary_without_landing_on_month_zero(self):
+        # Three back from March is December, not "2026-00" — the off-by-one a
+        # modulo over 1..12 rather than 0..11 would produce.
+        assert gst_calendar.months_before("2026-03", 3) == "2025-12"
+        assert gst_calendar.months_before("2026-03", 4) == "2025-11"
+
+    def test_a_whole_year_back_keeps_the_month(self):
+        assert gst_calendar.months_before("2026-07", 12) == "2025-07"
+
+    def test_it_spans_the_fifty_nine_months_rule_43_needs(self):
+        # A capital good bought in May 2021 is in its sixtieth and final
+        # instalment in April 2026.
+        assert gst_calendar.months_before("2026-04", 59) == "2021-05"
+
+    def test_it_agrees_with_repeated_single_steps(self):
+        period = "2026-04"
+        for step in range(1, 61):
+            period = gst_calendar.previous_period(period)
+            assert gst_calendar.months_before("2026-04", step) == period
+
+    def test_the_result_sorts_as_a_calendar(self):
+        # The window is compared with ``<=`` against stored periods, so string
+        # order has to be calendar order across the year boundary.
+        assert gst_calendar.months_before("2026-01", 1) < "2026-01"
+        assert gst_calendar.months_before("2026-01", 1) < "2026-10"
+
+    def test_a_negative_count_walks_forward(self):
+        assert gst_calendar.months_before("2026-12", -1) == "2027-01"
+
+
 class TestDispatchingOnReturnType:
     @pytest.mark.parametrize(
         ("return_type", "expected"),

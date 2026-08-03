@@ -387,6 +387,169 @@ def test_capital_goods_credit_is_not_pooled_with_inputs(db_session, business):
     assert summary.proportionate.capital_credit_this_month.igst == Decimal("300.00")
 
 
+class TestCapitalCreditIsDueForSixtyMonths:
+    """Rule 43 gives a capital good sixty instalments, not one.
+
+    ``summarise`` pooled capital credit from the period's own purchases, so a
+    machine bought in April got a sixtieth of its credit in April and nothing
+    in May — fifty-nine sixtieths of the credit, 98% of it, was simply never
+    claimed. ``filing`` puts ``capital_credit_this_month`` into table 4(A)(5)
+    of GSTR-3B, so the loss went into the filed return and the business paid
+    the difference in cash.
+    """
+
+    def _capital_good(self, db, business, **kwargs):
+        return save(
+            db,
+            business.id,
+            invoice_number=kwargs.pop("invoice_number", "CAP-1"),
+            is_capital_good=True,
+            igst=Decimal("60000.00"),
+            **kwargs,
+        )
+
+    def test_the_instalment_keeps_coming_in_later_months(self, db_session, business):
+        self._capital_good(
+            db_session, business, invoice_date=date(2026, 4, 15), period="2026-04"
+        )
+
+        for period in ("2026-04", "2026-05", "2027-04", "2031-03"):
+            summary = itc_service.summarise(db_session, business.id, period)
+            assert summary.proportionate.capital_credit_this_month.igst == Decimal(
+                "1000.00"
+            ), period
+
+    def test_the_sixtieth_month_is_the_last_one(self, db_session, business):
+        # Bought April 2026: April 2026 is instalment 1, March 2031 is
+        # instalment 60, and April 2031 is past the end of the schedule.
+        self._capital_good(
+            db_session, business, invoice_date=date(2026, 4, 15), period="2026-04"
+        )
+
+        last = itc_service.summarise(db_session, business.id, "2031-03")
+        after = itc_service.summarise(db_session, business.id, "2031-04")
+
+        assert last.proportionate.capital_credit_this_month.igst == Decimal("1000.00")
+        assert after.proportionate.capital_credit.igst == Decimal("0.00")
+        assert after.proportionate.capital_credit_this_month.igst == Decimal("0.00")
+
+    def test_the_sixty_instalments_add_up_to_the_whole_credit(self, db_session, business):
+        self._capital_good(
+            db_session, business, invoice_date=date(2026, 4, 15), period="2026-04"
+        )
+
+        claimed = sum(
+            (
+                itc_service.summarise(
+                    db_session, business.id, gst_calendar.months_before("2031-03", back)
+                ).proportionate.capital_credit_this_month.igst
+                for back in range(60)
+            ),
+            Decimal("0.00"),
+        )
+
+        assert claimed == Decimal("60000.00")
+
+    def test_goods_still_in_service_pool_together(self, db_session, business):
+        """Each contributes its own sixtieth, so the month's instalment is both."""
+        self._capital_good(
+            db_session,
+            business,
+            invoice_number="CAP-OLD",
+            invoice_date=date(2024, 7, 3),
+            period="2024-07",
+        )
+        self._capital_good(
+            db_session,
+            business,
+            invoice_number="CAP-NEW",
+            invoice_date=date(2026, 4, 15),
+            period="2026-04",
+        )
+
+        summary = itc_service.summarise(db_session, business.id, "2026-04")
+
+        assert summary.proportionate.capital_credit.igst == Decimal("120000.00")
+        assert summary.proportionate.capital_credit_this_month.igst == Decimal("2000.00")
+
+    def test_a_good_that_has_run_out_drops_out_of_the_pool(self, db_session, business):
+        """Sixty months on, only the one still in service is left."""
+        self._capital_good(
+            db_session,
+            business,
+            invoice_number="CAP-EXPIRED",
+            invoice_date=date(2021, 4, 5),
+            period="2021-04",
+        )
+        self._capital_good(
+            db_session,
+            business,
+            invoice_number="CAP-LIVE",
+            invoice_date=date(2026, 4, 15),
+            period="2026-04",
+        )
+
+        summary = itc_service.summarise(db_session, business.id, "2026-04")
+
+        assert summary.proportionate.capital_credit.igst == Decimal("60000.00")
+        assert summary.proportionate.capital_credit_this_month.igst == Decimal("1000.00")
+
+    def test_a_purchase_the_period_predates_is_not_claimed(self, db_session, business):
+        """Re-opening March must not claim credit on April's machine."""
+        self._capital_good(
+            db_session, business, invoice_date=date(2026, 4, 15), period="2026-04"
+        )
+
+        summary = itc_service.summarise(db_session, business.id, "2026-03")
+
+        assert summary.proportionate.capital_credit_this_month.igst == Decimal("0.00")
+
+    def test_a_blocked_capital_good_has_no_credit_to_spread(self, db_session, business):
+        self._capital_good(
+            db_session,
+            business,
+            invoice_number="CAP-BLOCKED",
+            invoice_date=date(2026, 4, 15),
+            period="2026-04",
+            itc_eligible=False,
+        )
+        self._capital_good(
+            db_session,
+            business,
+            invoice_number="CAP-RCM",
+            invoice_date=date(2026, 4, 15),
+            period="2026-04",
+            reverse_charge=True,
+        )
+
+        summary = itc_service.summarise(db_session, business.id, "2026-04")
+
+        assert summary.proportionate.capital_credit.igst == Decimal("0.00")
+
+    def test_a_capital_good_with_no_period_is_not_placed_on_the_schedule(
+        self, db_session, business
+    ):
+        """A date that was never extracted cannot anchor sixty months."""
+        self._capital_good(
+            db_session, business, invoice_date=None, period=None, status=InvoiceStatus.PARSED
+        )
+
+        summary = itc_service.summarise(db_session, business.id, "2026-04")
+
+        assert summary.proportionate.capital_credit.igst == Decimal("0.00")
+
+    def test_the_instalment_reaches_the_return(self, db_session, business):
+        """``filing`` reads it into table 4(A)(5), which is where the loss landed."""
+        self._capital_good(
+            db_session, business, invoice_date=date(2026, 4, 15), period="2026-04"
+        )
+
+        may = filing.build_gstr3b(db_session, business, "2026-05")
+
+        assert may["itc_elg"]["itc_avl"][0]["iamt"] == 1000.00
+        assert may["itc_elg"]["itc_net"]["iamt"] == 1000.00
+
+
 def test_summary_caps_credit_at_what_reconciliation_found_eligible(db_session, business):
     """Only GSTR-2B establishes what a supplier actually declared."""
     save(db_session, business.id, invoice_number="A-1")

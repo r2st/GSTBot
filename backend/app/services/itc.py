@@ -435,6 +435,42 @@ def proportionate_reversal(
     )
 
 
+def capital_goods_in_service(invoices: list[Invoice], period: str) -> TaxHeads:
+    """``Tc`` for *period*: every capital good still inside its sixty months.
+
+    Rule 43 does not give a capital good's credit to the month it was bought.
+    It gives one sixtieth of it to each of sixty months beginning with that
+    one, so the instalment a business may claim in any period is a sixtieth of
+    the *pool* of capital goods bought in that period or in the fifty-nine
+    before it — not a sixtieth of what it happened to buy this month.
+
+    Pooling matters because the caller divides once. Summing the goods still in
+    service and dividing the total by sixty gives the same figure as dividing
+    each good by sixty and adding, and it is the shape ``proportionate_reversal``
+    already takes.
+
+    A purchase with no period is skipped. The instalment schedule is anchored to
+    the month of purchase, and a row whose date was never extracted cannot be
+    placed on it; guessing a month would start the sixty running from the wrong
+    end. Purchases *after* the period are skipped too, so re-opening an earlier
+    month does not claim credit on a machine that had not been bought yet.
+
+    Blocked and reverse-charge purchases carry no credit to spread, exactly as
+    in the input pool.
+    """
+    oldest = gst_calendar.months_before(period, RULE_43_MONTHS - 1)
+    pool = TaxHeads()
+    for invoice in invoices:
+        if not invoice.is_capital_good:
+            continue
+        if not invoice.itc_eligible or invoice.reverse_charge:
+            continue
+        if not invoice.period or not oldest <= invoice.period <= period:
+            continue
+        pool = pool + _invoice_tax(invoice)
+    return pool
+
+
 # ---------------------------------------------------------------------------
 # The period summary the API serves
 # ---------------------------------------------------------------------------
@@ -605,6 +641,12 @@ def summarise(
     Rule 37 deliberately looks at the whole purchase register, not just this
     period: an invoice from eight months ago is the one that crosses 180 days,
     and scoping it to the period under review would never show it.
+
+    Rule 43 looks past the period for the opposite reason. A capital good's
+    credit is due in sixty monthly instalments starting with the month of
+    purchase, so fifty-nine of them fall in periods later than the one that
+    bought it. Reading only this period's purchases gave a business the first
+    instalment and then nothing — see :func:`capital_goods_in_service`.
     """
     period_purchases = _purchases(db, business_id, period)
     all_purchases = _purchases(db, business_id)
@@ -614,17 +656,16 @@ def summarise(
     # Claimable credit by head, from the books. Capital goods are excluded from
     # the input pool: their credit belongs to Rule 43's sixty months.
     available = TaxHeads()
-    capital_credit = TaxHeads()
     unclaimed = 0
     for invoice in period_purchases:
         if not invoice.itc_eligible or invoice.reverse_charge:
             unclaimed += 1
             continue
-        tax = _invoice_tax(invoice)
         if invoice.is_capital_good:
-            capital_credit = capital_credit + tax
-        else:
-            available = available + tax
+            continue
+        available = available + _invoice_tax(invoice)
+
+    capital_credit = capital_goods_in_service(all_purchases, period)
 
     # Where a reconciliation exists, cap the pool at what it found eligible.
     # The run reports one total rather than a per-head split, so scale the
