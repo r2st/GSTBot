@@ -809,3 +809,76 @@ class TestACreditNoteTakesCreditBack:
         assert run.matched_count == 1
         assert run.itc_at_risk == Decimal("0.00")
         assert invoice.status is InvoiceStatus.MATCHED
+
+
+# ---------------------------------------------------------------------------
+# Which pool the eligible credit belongs to
+# ---------------------------------------------------------------------------
+
+class TestCapitalCreditIsCountedApart:
+    """A capital good's eligible credit is reported separately from an input's.
+
+    Both are credit the supplier declared, so both belong in ``itc_eligible``.
+    But Rule 43 gives a capital good's credit to sixty months rather than to
+    this one, and the ITC screen therefore holds it in a different pool — where
+    it cannot be compared against a total that has capital credit folded in.
+    """
+
+    def test_the_split_is_reported(self):
+        result = reconciliation.match(
+            [
+                book(invoice_number="INV-1"),
+                book(invoice_number="CAP-1", is_capital_good=True),
+            ],
+            [portal(invoice_number="INV-1"), portal(invoice_number="CAP-1")],
+            period=PERIOD,
+        )
+
+        assert result.itc_eligible == Decimal("162000.00")
+        assert result.itc_eligible_capital == Decimal("81000.00")
+        assert result.input_itc_eligible == Decimal("81000.00")
+
+    def test_the_capital_share_is_capped_by_the_2b_like_any_other(self):
+        """Only what the supplier declared reaches either pool."""
+        result = reconciliation.match(
+            [book(invoice_number="CAP-1", is_capital_good=True)],
+            [portal(invoice_number="CAP-1", igst=Decimal("50000.00"))],
+            period=PERIOD,
+        )
+
+        assert result.itc_eligible_capital == Decimal("50000.00")
+        assert result.input_itc_eligible == Decimal("0.00")
+
+    def test_a_capital_good_the_supplier_never_filed_reaches_neither(self):
+        result = reconciliation.match(
+            [book(invoice_number="CAP-1", is_capital_good=True)], [], period=PERIOD
+        )
+
+        assert result.itc_eligible_capital == Decimal("0.00")
+        assert result.itc_at_risk == Decimal("81000.00")
+
+    def test_credit_notes_cannot_drive_the_input_share_negative(self):
+        """The notes come off the total after the split, so the floor matters."""
+        result = reconciliation.match(
+            [book(invoice_number="CAP-1", is_capital_good=True)],
+            [portal(invoice_number="CAP-1"), note()],
+            period=PERIOD,
+        )
+
+        assert result.itc_eligible == Decimal("72000.00")
+        assert result.itc_eligible_capital == Decimal("81000.00")
+        assert result.input_itc_eligible == Decimal("0.00")
+
+    def test_the_run_records_the_split(self, db_session, business):
+        save(db_session, business.id, invoice_number="INV-1")
+        save(db_session, business.id, invoice_number="CAP-1", is_capital_good=True)
+        import_2b(
+            db_session,
+            business.id,
+            [portal(invoice_number="INV-1"), portal(invoice_number="CAP-1")],
+        )
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.itc_eligible == Decimal("162000.00")
+        assert run.report["itc_eligible_capital"] == "81000.00"

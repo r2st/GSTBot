@@ -1011,3 +1011,148 @@ def test_itc_does_not_leak_across_tenants(auth_client, db_session, business, oth
 @pytest.mark.parametrize("bad", ["2026-4", "202604", "april"])
 def test_itc_rejects_a_malformed_period(auth_client, bad):
     assert auth_client.get(f"/api/v1/itc?period={bad}").status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# The reconciliation cap on the input pool
+# ---------------------------------------------------------------------------
+
+class TestTheCapComparesInputsWithInputs:
+    """A capital purchase must not stop the 2B capping the input pool.
+
+    A run's ``itc_eligible`` covers every purchase the supplier declared,
+    capital goods included. ``available`` here is inputs only — Rule 43 holds
+    capital credit in its own pool over sixty months. Compared against each
+    other, a single machine's credit dwarfs the input pool and the cap never
+    binds, so whatever a supplier left out of their own filing is claimed in
+    full: an over-claim the 2B on file already contradicts.
+    """
+
+    def _run(self, db, business, **kwargs):
+        run = ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.COMPLETED,
+            **kwargs,
+        )
+        db.add(run)
+        db.commit()
+        return run
+
+    def test_a_shortfall_still_caps_the_pool_when_a_machine_was_bought(
+        self, db_session, business
+    ):
+        save(db_session, business.id, invoice_number="INV-1", igst=Decimal("18000.00"))
+        save(
+            db_session,
+            business.id,
+            invoice_number="CAP-1",
+            igst=Decimal("180000.00"),
+            is_capital_good=True,
+        )
+        # The supplier declared 10,000 of the 18,000 on inputs, and the machine
+        # in full: 1,90,000 eligible, of which 1,80,000 is the machine's.
+        self._run(
+            db_session,
+            business,
+            itc_eligible=Decimal("190000.00"),
+            report={"itc_eligible_capital": "180000.00"},
+        )
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.available.igst == Decimal("10000.00")
+
+    def test_the_capital_pool_is_untouched_by_the_cap(self, db_session, business):
+        """Rule 43's sixty months are computed from the books, not from the run."""
+        save(
+            db_session,
+            business.id,
+            invoice_number="CAP-1",
+            igst=Decimal("180000.00"),
+            is_capital_good=True,
+        )
+        self._run(
+            db_session,
+            business,
+            itc_eligible=Decimal("180000.00"),
+            report={"itc_eligible_capital": "180000.00"},
+        )
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.available.total == Decimal("0.00")
+        assert summary.proportionate.capital_credit.igst == Decimal("180000.00")
+        assert summary.proportionate.capital_credit_this_month.igst == Decimal("3000.00")
+
+    def test_a_period_with_no_capital_goods_is_capped_exactly_as_before(
+        self, db_session, business
+    ):
+        save(db_session, business.id, invoice_number="INV-1", igst=Decimal("18000.00"))
+        self._run(
+            db_session,
+            business,
+            itc_eligible=Decimal("10000.00"),
+            report={"itc_eligible_capital": "0.00"},
+        )
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.available.igst == Decimal("10000.00")
+
+    @pytest.mark.parametrize("report", [None, {}, {"itc_eligible_capital": "oops"}])
+    def test_a_run_without_the_split_is_read_as_having_no_capital_share(
+        self, db_session, business, report
+    ):
+        """Runs recorded before the field existed reproduce the old figure.
+
+        Not the right answer where a machine was bought, but the honest one:
+        the evidence is not on the row, and re-running the period supplies it.
+        """
+        save(db_session, business.id, invoice_number="INV-1", igst=Decimal("18000.00"))
+        self._run(
+            db_session, business, itc_eligible=Decimal("10000.00"), report=report
+        )
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.available.igst == Decimal("10000.00")
+
+    def test_end_to_end_the_shortfall_reaches_the_screen(self, db_session, business):
+        """The whole path: books, a 2B, a real run, then the ITC summary."""
+        save(db_session, business.id, invoice_number="INV-1", igst=Decimal("18000.00"))
+        save(
+            db_session,
+            business.id,
+            invoice_number="CAP-1",
+            igst=Decimal("180000.00"),
+            taxable_value=Decimal("1000000.00"),
+            is_capital_good=True,
+        )
+
+        def declared(number, igst, taxable):
+            return GSTR2BRecord(
+                supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+                invoice_number=number,
+                invoice_date=date(2026, 4, 15),
+                period=PERIOD,
+                taxable_value=taxable,
+                igst=igst,
+                total_value=taxable + igst,
+            )
+
+        reconciliation.store_gstr2b(
+            db_session,
+            business.id,
+            PERIOD,
+            [
+                declared("INV-1", Decimal("10000.00"), Decimal("100000.00")),
+                declared("CAP-1", Decimal("180000.00"), Decimal("1000000.00")),
+            ],
+        )
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        assert run.itc_eligible == Decimal("190000.00")
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.available.igst == Decimal("10000.00")

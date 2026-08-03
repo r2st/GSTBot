@@ -191,7 +191,23 @@ class ReconciliationResult:
     # ``itc_eligible``. Reported separately because the deduction is otherwise
     # invisible: the pool simply comes back smaller than the invoices in it.
     credit_notes: Decimal = ZERO
+    # Of ``itc_eligible``, the part sitting on capital goods. Rule 43 gives that
+    # credit to sixty months rather than to this one, so :mod:`app.services.itc`
+    # keeps it in a separate pool — and cannot compare its input pool against a
+    # total that has capital credit mixed into it. Reported so it can be taken
+    # back out; see :attr:`input_itc_eligible`.
+    itc_eligible_capital: Decimal = ZERO
     tolerance: Decimal = DEFAULT_TOLERANCE
+
+    @property
+    def input_itc_eligible(self) -> Decimal:
+        """Eligible credit on inputs alone — capital goods taken out.
+
+        Floored at zero because credit notes come off the total after the split,
+        so a period whose notes exceed its input credit has none left rather
+        than a negative amount of it.
+        """
+        return max(ZERO, self.itc_eligible - self.itc_eligible_capital)
 
     def counts(self) -> dict[MatchCategory, int]:
         tally = dict.fromkeys(MatchCategory, 0)
@@ -394,7 +410,14 @@ def match(
         # more than the portal shows is what a notice is issued over. Anything
         # booked above that figure is at risk.
         portal_tax = _sum_tax(record)
-        result.itc_eligible += min(booked_tax, portal_tax)
+        allowed = min(booked_tax, portal_tax)
+        result.itc_eligible += allowed
+        if invoice.is_capital_good:
+            # Tracked separately because it is spent over sixty months, not
+            # this one. Pooled with the rest, it makes the period's eligible
+            # total far larger than the input credit the ITC screen holds, and
+            # a cap on that pool then never binds.
+            result.itc_eligible_capital += allowed
         if booked_tax > portal_tax:
             result.itc_at_risk += booked_tax - portal_tax
 
@@ -712,6 +735,10 @@ def run_reconciliation(
             "gstr2b_record_count": len(records),
             # Why ``itc_eligible`` can be smaller than the invoices that matched.
             "credit_notes": str(result.credit_notes),
+            # How much of ``itc_eligible`` belongs to Rule 43's sixty months
+            # rather than to this period's input pool. Kept here rather than in
+            # a column so the ITC screen can subtract it without a migration.
+            "itc_eligible_capital": str(result.itc_eligible_capital),
             "findings": [finding.as_dict() for finding in result.findings],
             "suppliers": suppliers,
         }

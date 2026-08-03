@@ -615,6 +615,23 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
     return exempt, total
 
 
+def _input_eligible(run) -> Decimal:
+    """A run's eligible credit with the capital-goods share taken out.
+
+    The capital share is written to the run's ``report`` rather than to a
+    column. A run recorded before that field existed does not carry it, and is
+    read as having none: that reproduces the old figure rather than inventing a
+    new one, and re-running the period is what corrects it.
+    """
+    total = run.itc_eligible or ZERO
+    report = run.report if isinstance(run.report, dict) else {}
+    try:
+        capital = Decimal(str(report.get("itc_eligible_capital") or "0"))
+    except (ArithmeticError, ValueError):
+        capital = ZERO
+    return max(ZERO, total - capital)
+
+
 def summarise(
     db: Session,
     business_id: int,
@@ -671,8 +688,16 @@ def summarise(
     # The run reports one total rather than a per-head split, so scale the
     # book split down by the same proportion rather than inventing a shape the
     # evidence does not have.
+    #
+    # Capital goods come off the run's total first, because they are not in
+    # ``available`` — Rule 43 holds their credit in its own pool above. Compared
+    # against the whole of what the run found eligible, the cap stopped binding
+    # the moment a business bought anything capital: a machine's ₹1.8 lakh sat
+    # in the run's total, dwarfed the input pool, and the shortfall a supplier
+    # had left in their own filing was claimed in full. The cap exists to catch
+    # exactly that shortfall, so both sides of it have to mean inputs.
     if last_run is not None and available.total > ZERO:
-        eligible_total = last_run.itc_eligible or ZERO
+        eligible_total = _input_eligible(last_run)
         if eligible_total < available.total:
             available = available.scaled(eligible_total / available.total)
 
