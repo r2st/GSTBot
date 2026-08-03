@@ -56,6 +56,14 @@ class PeriodSummary(BaseModel):
     period: str
     sales: TaxBucket
     purchase: TaxBucket
+    credit: TaxBucket = Field(
+        default_factory=TaxBucket,
+        description=(
+            "The claimable part of `purchase`: tax on purchases whose credit is "
+            "neither blocked under s.17(5) nor under reverse charge. This is "
+            "what `net_liability` is computed against."
+        ),
+    )
     net_liability: NetLiability
 
 
@@ -66,10 +74,19 @@ class DashboardOut(BaseModel):
     counts: InvoiceCounts
     sales: TaxBucket
     purchase: TaxBucket
+    credit: TaxBucket = Field(
+        default_factory=TaxBucket,
+        description=(
+            "The claimable part of `purchase`: tax on purchases whose credit is "
+            "neither blocked under s.17(5) nor under reverse charge. Reported "
+            "beside `purchase` so a business can see why the two differ."
+        ),
+    )
     net_liability: NetLiability
     # Output tax owed on sales for the period, before credit is applied.
     output_tax: Decimal = Decimal("0.00")
-    # Input credit available from purchases for the period.
+    # Input credit available from purchases for the period. The claimable part
+    # only — this is `credit.total_tax`, not `purchase.total_tax`.
     input_tax_credit: Decimal = Decimal("0.00")
     itc_at_risk: Decimal = Decimal("0.00")
     plan_usage: PlanUsage

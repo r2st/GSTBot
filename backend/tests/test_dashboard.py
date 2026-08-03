@@ -378,3 +378,176 @@ def test_dashboard_reflects_a_real_upload(auth_client, sample_invoice_text):
     assert body["counts"]["purchase"] == 1
     assert Decimal(body["purchase"]["igst"]) == Decimal("81000.00")
     assert Decimal(body["input_tax_credit"]) == Decimal("81000.00")
+
+
+class TestNotEveryPurchaseIsCredit:
+    """Tax paid on a purchase and credit claimable from it are two figures.
+
+    Netting output tax against every purchase overstates the credit a business
+    holds, and so understates the cash it has to find by the twentieth. The
+    dashboard reports both: ``purchase`` is what the invoices say, ``credit``
+    is the claimable part, and only the second discharges liability.
+    """
+
+    def test_a_blocked_purchase_shows_as_purchase_but_not_as_credit(
+        self, auth_client, db_session, business
+    ):
+        """s.17(5) — a car, a staff lunch, a club membership.
+
+        The tax was genuinely paid and belongs on the purchase side; it is
+        simply not claimable, so it cannot pay down the month's liability.
+        """
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-1",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+            total_value=Decimal("118000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-BLOCKED",
+            taxable_value=Decimal("50000.00"), igst=Decimal("9000.00"),
+            total_value=Decimal("59000.00"), itc_eligible=False,
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+
+        assert Decimal(body["purchase"]["igst"]) == Decimal("9000.00")
+        assert Decimal(body["credit"]["igst"]) == Decimal("0.00")
+        assert Decimal(body["input_tax_credit"]) == Decimal("0.00")
+        assert Decimal(body["net_liability"]["igst"]) == Decimal("18000.00")
+
+    def test_a_reverse_charge_purchase_is_not_credit_either(
+        self, auth_client, db_session, business
+    ):
+        """The supplier charged nothing; the buyer self-assesses.
+
+        There is no tax on this document for the buyer to have paid to the
+        supplier, so treating it as credit would net a liability against tax
+        that never changed hands.
+        """
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-1",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+            total_value=Decimal("118000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-RCM",
+            taxable_value=Decimal("40000.00"), igst=Decimal("7200.00"),
+            total_value=Decimal("47200.00"), reverse_charge=True,
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+
+        assert Decimal(body["purchase"]["igst"]) == Decimal("7200.00")
+        assert Decimal(body["credit"]["igst"]) == Decimal("0.00")
+        assert Decimal(body["net_liability"]["igst"]) == Decimal("18000.00")
+
+    def test_the_claimable_purchases_in_a_mixed_period_still_net(
+        self, auth_client, db_session, business
+    ):
+        """One of each: only the clean purchase reduces what is owed."""
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-1",
+            taxable_value=Decimal("200000.00"), igst=Decimal("36000.00"),
+            total_value=Decimal("236000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-OK",
+            taxable_value=Decimal("50000.00"), igst=Decimal("9000.00"),
+            total_value=Decimal("59000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-BLOCKED",
+            taxable_value=Decimal("30000.00"), igst=Decimal("5400.00"),
+            total_value=Decimal("35400.00"), itc_eligible=False,
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-RCM",
+            taxable_value=Decimal("20000.00"), igst=Decimal("3600.00"),
+            total_value=Decimal("23600.00"), reverse_charge=True,
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+
+        assert body["purchase"]["count"] == 3
+        assert Decimal(body["purchase"]["igst"]) == Decimal("18000.00")
+        assert Decimal(body["purchase"]["taxable_value"]) == Decimal("100000.00")
+        # Only P-OK survives both tests.
+        assert body["credit"]["count"] == 1
+        assert Decimal(body["credit"]["igst"]) == Decimal("9000.00")
+        assert Decimal(body["credit"]["taxable_value"]) == Decimal("50000.00")
+        assert Decimal(body["input_tax_credit"]) == Decimal("9000.00")
+        assert Decimal(body["net_liability"]["igst"]) == Decimal("27000.00")
+
+    def test_a_sale_never_contributes_to_the_credit_bucket(
+        self, auth_client, db_session, business
+    ):
+        """Credit comes off the purchase side only.
+
+        A sale carries the same ``itc_eligible`` default as anything else, so
+        a claimable-total that scanned every row would fold output tax into
+        the credit pool and wipe out the liability it is meant to discharge.
+        """
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-1",
+            taxable_value=Decimal("100000.00"), cgst=Decimal("9000.00"),
+            sgst=Decimal("9000.00"), total_value=Decimal("118000.00"),
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+
+        assert body["credit"]["count"] == 0
+        assert Decimal(body["credit"]["total_tax"]) == Decimal("0.00")
+        assert Decimal(body["net_liability"]["total"]) == Decimal("18000.00")
+
+    def test_recent_periods_net_against_credit_too(
+        self, auth_client, db_session, business
+    ):
+        """The trend row is the same arithmetic, and has to agree with it."""
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-MAR",
+            period="2026-03", invoice_date=date(2026, 3, 9),
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+            total_value=Decimal("118000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-MAR",
+            period="2026-03", invoice_date=date(2026, 3, 11),
+            taxable_value=Decimal("50000.00"), igst=Decimal("9000.00"),
+            total_value=Decimal("59000.00"), itc_eligible=False,
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+        march = next(p for p in body["recent_periods"] if p["period"] == "2026-03")
+
+        assert Decimal(march["purchase"]["igst"]) == Decimal("9000.00")
+        assert Decimal(march["credit"]["igst"]) == Decimal("0.00")
+        assert Decimal(march["net_liability"]["igst"]) == Decimal("18000.00")
+
+    def test_a_failed_purchase_is_kept_out_of_credit_as_well(
+        self, auth_client, db_session, business
+    ):
+        """The status filter has to apply to the claimable columns too."""
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-FAILED",
+            status=InvoiceStatus.FAILED, extraction_confidence=0.1,
+            taxable_value=Decimal("50000.00"), igst=Decimal("9000.00"),
+            total_value=Decimal("59000.00"),
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+
+        assert body["purchase"]["count"] == 0
+        assert body["credit"]["count"] == 0
+        assert Decimal(body["credit"]["igst"]) == Decimal("0.00")

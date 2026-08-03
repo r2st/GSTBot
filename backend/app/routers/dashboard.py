@@ -55,8 +55,14 @@ def _bucket(data: dict) -> TaxBucket:
     return TaxBucket(**{key: data[key] for key in TaxBucket.model_fields if key in data})
 
 
-def _net_liability(sales: TaxBucket, purchase: TaxBucket) -> NetLiability:
+def _net_liability(sales: TaxBucket, credit: TaxBucket) -> NetLiability:
     """Output tax less input credit, per head, floored at zero.
+
+    *credit* is the claimable part of the purchase side, not the whole of it.
+    Netting against every purchase subtracted credit the business is not
+    allowed to take — blocked under s.17(5), or reverse-charge tax the supplier
+    never charged — and the shortfall landed on the one figure the landing
+    screen exists to give: how much has to be paid this month.
 
     Floored because a head where credit exceeds liability produces a carried-
     forward balance, not a refund the business can spend — showing it as a
@@ -66,10 +72,10 @@ def _net_liability(sales: TaxBucket, purchase: TaxBucket) -> NetLiability:
     def _net(out_tax: Decimal, in_tax: Decimal) -> Decimal:
         return max(Decimal("0.00"), out_tax - in_tax)
 
-    cgst = _net(sales.cgst, purchase.cgst)
-    sgst = _net(sales.sgst, purchase.sgst)
-    igst = _net(sales.igst, purchase.igst)
-    cess = _net(sales.cess, purchase.cess)
+    cgst = _net(sales.cgst, credit.cgst)
+    sgst = _net(sales.sgst, credit.sgst)
+    igst = _net(sales.igst, credit.igst)
+    cess = _net(sales.cess, credit.cess)
     return NetLiability(cgst=cgst, sgst=sgst, igst=igst, cess=cess, total=cgst + sgst + igst + cess)
 
 
@@ -142,7 +148,8 @@ def get_dashboard(
     summary = invoice_service.tax_summary(db, business.id, period)
     sales = _bucket(summary["sales"])
     purchase = _bucket(summary["purchase"])
-    net_liability = _net_liability(sales, purchase)
+    credit = _bucket(summary["credit"])
+    net_liability = _net_liability(sales, credit)
 
     # ITC resting on invoices the supplier has not filed, from the latest
     # reconciliation for this period that finished. A failed or still-running
@@ -157,12 +164,14 @@ def get_dashboard(
         past_summary = invoice_service.tax_summary(db, business.id, past)
         past_sales = _bucket(past_summary["sales"])
         past_purchase = _bucket(past_summary["purchase"])
+        past_credit = _bucket(past_summary["credit"])
         recent.append(
             PeriodSummary(
                 period=past,
                 sales=past_sales,
                 purchase=past_purchase,
-                net_liability=_net_liability(past_sales, past_purchase),
+                credit=past_credit,
+                net_liability=_net_liability(past_sales, past_credit),
             )
         )
 
@@ -192,9 +201,10 @@ def get_dashboard(
         counts=counts,
         sales=sales,
         purchase=purchase,
+        credit=credit,
         net_liability=net_liability,
         output_tax=sales.total_tax,
-        input_tax_credit=purchase.total_tax,
+        input_tax_credit=credit.total_tax,
         itc_at_risk=last_run.itc_at_risk if last_run else Decimal("0.00"),
         plan_usage=PlanUsage(
             plan=business.plan.value,

@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -402,6 +402,16 @@ def tax_summary(
     figures are stale from an earlier read is not in the return, and must not
     be in the total either. The status counts above are unaffected: those are
     lifetime counts of documents, and a failed one still needs attention.
+
+    Three buckets, not two. ``sales`` and ``purchase`` are the tax that appears
+    on invoices in each direction; ``credit`` is the part of the purchase side
+    that may actually be claimed, which is a smaller and different number. Tax
+    on a purchase is not credit if the credit is blocked under s.17(5) — a car,
+    a staff lunch, a club membership — or if the supply is under reverse
+    charge, where the supplier charges nothing and the buyer self-assesses.
+    :mod:`app.services.itc` has always drawn that line; the dashboard's net
+    liability is what it is drawn for, because subtracting a blocked credit
+    from output tax tells a business it owes less than it does.
     """
     conditions = [
         Invoice.business_id == business_id,
@@ -411,16 +421,29 @@ def tax_summary(
     if period:
         conditions.append(Invoice.period == period)
 
+    # The same test ``itc.summarise`` applies before pooling a purchase into
+    # available credit, expressed in SQL so the claimable totals come back from
+    # the same grouped scan rather than a second pass over the table.
+    claims_credit = and_(
+        Invoice.itc_eligible.is_(True), Invoice.reverse_charge.is_(False)
+    )
+    MONEY = ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value")
+
+    def _summed(name: str):
+        return func.coalesce(func.sum(getattr(Invoice, name)), 0)
+
+    def _summed_if_claimable(name: str):
+        return func.coalesce(
+            func.sum(case((claims_credit, getattr(Invoice, name)), else_=0)), 0
+        )
+
     rows = db.execute(
         select(
             Invoice.invoice_type,
             func.count(Invoice.id),
-            func.coalesce(func.sum(Invoice.taxable_value), 0),
-            func.coalesce(func.sum(Invoice.cgst), 0),
-            func.coalesce(func.sum(Invoice.sgst), 0),
-            func.coalesce(func.sum(Invoice.igst), 0),
-            func.coalesce(func.sum(Invoice.cess), 0),
-            func.coalesce(func.sum(Invoice.total_value), 0),
+            *(_summed(name) for name in MONEY),
+            func.count(case((claims_credit, Invoice.id))),
+            *(_summed_if_claimable(name) for name in MONEY),
         )
         .where(*conditions)
         .group_by(Invoice.invoice_type)
@@ -438,18 +461,22 @@ def tax_summary(
             "total_tax": Decimal("0.00"),
         }
 
-    summary = {"sales": _blank(), "purchase": _blank()}
-    for invoice_type, count, taxable, cgst, sgst, igst, cess, total in rows:
-        key = invoice_type.value if hasattr(invoice_type, "value") else str(invoice_type)
-        bucket = summary.setdefault(key, _blank())
+    def _fill(bucket: dict, count, money) -> None:
         bucket["count"] = int(count)
-        bucket["taxable_value"] = Decimal(str(taxable))
-        bucket["cgst"] = Decimal(str(cgst))
-        bucket["sgst"] = Decimal(str(sgst))
-        bucket["igst"] = Decimal(str(igst))
-        bucket["cess"] = Decimal(str(cess))
-        bucket["total_value"] = Decimal(str(total))
+        for name, value in zip(MONEY, money, strict=True):
+            bucket[name] = Decimal(str(value))
         bucket["total_tax"] = (
             bucket["cgst"] + bucket["sgst"] + bucket["igst"] + bucket["cess"]
         )
+
+    summary = {"sales": _blank(), "purchase": _blank(), "credit": _blank()}
+    width = len(MONEY)
+    for row in rows:
+        invoice_type, count, *rest = row
+        key = invoice_type.value if hasattr(invoice_type, "value") else str(invoice_type)
+        _fill(summary.setdefault(key, _blank()), count, rest[:width])
+        # Only a purchase can carry credit; a sale's claimable columns are the
+        # same arithmetic over rows that never had credit to begin with.
+        if key == InvoiceType.PURCHASE.value:
+            _fill(summary["credit"], rest[width], rest[width + 1 :])
     return summary
