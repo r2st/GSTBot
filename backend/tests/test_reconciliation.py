@@ -796,6 +796,91 @@ class TestACreditNoteTakesCreditBack:
         # The statement's own record count is unchanged: the note is in it.
         assert run.report["gstr2b_record_count"] == 2
 
+    def test_the_stored_statement_totals_net_it_too(self):
+        """The import screen and the run that follows must agree.
+
+        Summing the money alone read the note as a second supply, so a
+        statement carrying one ₹18,000 invoice and a ₹9,000 note against it
+        was stored — and shown back on import — as ₹27,000 of tax, while the
+        reconciliation that followed found ₹9,000.
+        """
+        totals = reconciliation.summarise_records(
+            [portal(invoice_number="INV-1"), note()]
+        )
+
+        assert totals["total_igst"] == Decimal("72000.00")
+        assert totals["total_taxable_value"] == Decimal("400000.00")
+
+    def test_a_debit_note_still_adds_to_the_stored_totals(self):
+        totals = reconciliation.summarise_records(
+            [portal(invoice_number="INV-1"), note(document_type="D")]
+        )
+
+        assert totals["total_igst"] == Decimal("90000.00")
+
+    def test_the_stored_totals_floor_at_zero(self):
+        """The month after a large return, the notes can outweigh the invoices."""
+        totals = reconciliation.summarise_records([note(igst=Decimal("200000.00"))])
+
+        assert totals["total_igst"] == Decimal("0.00")
+        assert totals["total_taxable_value"] == Decimal("0.00")
+
+    def test_the_document_count_still_counts_the_note(self):
+        """It answers "did the whole file come through", and the note is in it."""
+        totals = reconciliation.summarise_records(
+            [portal(invoice_number="INV-1"), note()]
+        )
+
+        assert totals["invoice_count"] == 2
+
+    def test_the_import_endpoint_reports_the_net_statement(
+        self, auth_client, db_session, business
+    ):
+        """What the user is shown the moment the file lands."""
+        payload = {
+            "data": {
+                "rtnprd": "042026",
+                "docdata": {
+                    "b2b": [
+                        {
+                            "ctin": SUPPLIER_GSTIN_OTHER_STATE,
+                            "inv": [
+                                {
+                                    "inum": "INV-1",
+                                    "dt": "15-04-2026",
+                                    "val": 531000,
+                                    "itms": [{"txval": 450000, "igst": 81000}],
+                                }
+                            ],
+                        }
+                    ],
+                    "cdnr": [
+                        {
+                            "ctin": SUPPLIER_GSTIN_OTHER_STATE,
+                            "nt": [
+                                {
+                                    "nt_num": "CN-7",
+                                    "nt_dt": "28-04-2026",
+                                    "typ": "C",
+                                    "val": 59000,
+                                    "itms": [{"txval": 50000, "igst": 9000}],
+                                }
+                            ],
+                        }
+                    ],
+                },
+            }
+        }
+        response = auth_client.post(
+            "/api/v1/reconciliation/gstr2b/import",
+            files={"file": ("2b.json", json.dumps(payload), "application/json")},
+        )
+
+        assert response.status_code == 201
+        body = response.json()
+        assert Decimal(body["total_igst"]) == Decimal("72000.00")
+        assert body["invoice_count"] == 2
+
     def test_the_matched_invoice_is_still_matched(self, db_session, business):
         """Netting the note must not disturb the invoice's own verdict."""
         invoice = save(db_session, business.id, invoice_number="INV-1")

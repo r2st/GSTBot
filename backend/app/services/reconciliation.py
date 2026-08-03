@@ -823,14 +823,47 @@ def store_gstr2b(
 
 
 def summarise_records(records: list[GSTR2BRecord]) -> dict[str, Decimal | int]:
-    """Totals for the ``gstr_returns`` summary columns."""
+    """Totals for the ``gstr_returns`` summary columns.
+
+    A credit note is subtracted, exactly as :func:`match` subtracts it from the
+    eligible pool. The portal states a note's amounts as positive figures and
+    leaves the sign to the document type, so summing the money alone read a
+    supplier withdrawing half a supply as a second supply: a statement with one
+    ₹18,000 invoice and a ₹9,000 note against it was stored — and shown back on
+    the import screen — as ₹27,000 of tax, when the credit it actually carries
+    is ₹9,000.
+
+    That was the same misreading :func:`match` was fixed for, left behind in
+    the summary columns, and it put the two figures in direct contradiction:
+    the import said the statement was worth ₹27,000 and the reconciliation that
+    followed it found ₹9,000.
+
+    ``invoice_count`` stays a count of the documents in the statement, notes
+    included. It answers "did the whole file come through", which is what the
+    number beside a freshly imported file is read for, and a note is a document
+    that has to be there.
+
+    Floored at zero per column: a statement whose notes exceed its invoices —
+    the month after a large return — carries no credit rather than a negative
+    amount of it, which is the same floor the eligible pool takes.
+    """
+    def net(field: str) -> Decimal:
+        total = sum(
+            (
+                -getattr(record, field) if record.is_credit_note else getattr(record, field)
+                for record in records
+            ),
+            ZERO,
+        )
+        return max(ZERO, total)
+
     return {
         "invoice_count": len(records),
-        "total_taxable_value": sum((r.taxable_value for r in records), ZERO),
-        "total_cgst": sum((r.cgst for r in records), ZERO),
-        "total_sgst": sum((r.sgst for r in records), ZERO),
-        "total_igst": sum((r.igst for r in records), ZERO),
-        "total_cess": sum((r.cess for r in records), ZERO),
+        "total_taxable_value": net("taxable_value"),
+        "total_cgst": net("cgst"),
+        "total_sgst": net("sgst"),
+        "total_igst": net("igst"),
+        "total_cess": net("cess"),
     }
 
 
