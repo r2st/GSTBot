@@ -30,10 +30,37 @@ from app.services.openrouter_client import OpenRouterError, chat_json, image_dat
 
 logger = logging.getLogger(__name__)
 
-# The rates GST actually uses. An extracted rate outside this set is a
-# misread — most often a total mistaken for a percentage.
-VALID_TAX_RATES = (Decimal("0"), Decimal("0.25"), Decimal("3"), Decimal("5"),
-                   Decimal("12"), Decimal("18"), Decimal("28"))
+# The rates GST actually levies, and the one definition of them. An extracted
+# rate outside this set is a misread — most often a total mistaken for a
+# percentage — and there is no 15% or 20% slab to be generous about.
+#
+# This module owns the list because it is the lowest one that needs it, and
+# ``app.services.filing`` imports it rather than keeping a second copy. It had
+# a second copy, and the two disagreed: filing knew about 0.1%, 1%, 1.5%, 6%
+# and 7.5% and the parser did not, so every invoice on one of those slabs had
+# its rate discarded here as impossible and reached filing with nothing in the
+# field. That is not a cosmetic loss — filing's "tax does not match rate x
+# taxable value" check is skipped when there is no rate to apply, so precisely
+# the invoices whose rate the product could not read were also the ones whose
+# arithmetic it never verified.
+#
+# 1.5% is the affordable-housing rate and 0.1% is the merchant-export one;
+# both are printed on real invoices, halved into CGST and SGST, and both now
+# survive the round trip.
+VALID_TAX_RATES = (
+    Decimal("0"),
+    Decimal("0.1"),
+    Decimal("0.25"),
+    Decimal("1"),
+    Decimal("1.5"),
+    Decimal("3"),
+    Decimal("5"),
+    Decimal("6"),
+    Decimal("7.5"),
+    Decimal("12"),
+    Decimal("18"),
+    Decimal("28"),
+)
 
 # A number with optional Indian digit grouping and up to two decimals.
 _NUMBER_PATTERN = re.compile(r"-?\d[\d,]*(?:\.\d{1,2})?")

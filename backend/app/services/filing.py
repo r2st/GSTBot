@@ -38,7 +38,7 @@ from app.core.sanitize import csv_safe
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
-from app.services import gst_calendar, invoice_service
+from app.services import gst_calendar, invoice_parser, invoice_service
 from app.services import gstin as gstin_service
 from app.services import itc as itc_service
 
@@ -46,20 +46,13 @@ ZERO = Decimal("0.00")
 
 # The rates GST actually levies. A rate outside this set is a data-entry error
 # every time — there is no 15% or 20% slab — and the portal rejects it.
-VALID_RATES = (
-    Decimal("0"),
-    Decimal("0.1"),
-    Decimal("0.25"),
-    Decimal("1"),
-    Decimal("1.5"),
-    Decimal("3"),
-    Decimal("5"),
-    Decimal("6"),
-    Decimal("7.5"),
-    Decimal("12"),
-    Decimal("18"),
-    Decimal("28"),
-)
+#
+# Imported rather than restated. This file and the parser each held a list, and
+# they had drifted apart: the parser's was short five slabs, so it dropped the
+# rate off any invoice on one of them, and the check below then had no rate to
+# verify the tax against. Two lists of what GST charges is one of them being
+# wrong, and neither module is the obvious loser when they disagree.
+VALID_RATES = invoice_parser.VALID_TAX_RATES
 
 # Tolerance when checking that tax equals rate x taxable value, or that the
 # total equals value plus tax. Both sides round independently at the line and

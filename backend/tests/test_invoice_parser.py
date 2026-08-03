@@ -6,6 +6,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.services import filing as filing_service
 from app.services import invoice_parser
 from app.services.invoice_parser import (
     ParsedInvoice,
@@ -378,6 +379,42 @@ def test_a_fractional_rate_is_read_as_a_percentage(stub_openrouter, sample_invoi
         {"supplier_gstin": SUPPLIER_GSTIN_OTHER_STATE, "tax_rate": 0.18, "total_value": 531000}
     )
     assert parse_invoice(text=sample_invoice_text).tax_rate == Decimal("18")
+
+
+class TestTheParserAndTheFilingValidatorAgreeOnTheSlabs:
+    """One list of what GST charges, not two that drift.
+
+    The parser's list was short 0.1%, 1%, 1.5%, 6% and 7.5%. An invoice on one
+    of those had its rate discarded here as impossible, and reached filing with
+    the field empty — where filing's "tax does not match rate x taxable value"
+    check is skipped for want of a rate to apply. The invoices whose rate the
+    product could not read were exactly the ones whose arithmetic it never
+    verified.
+    """
+
+    def test_there_is_only_one_definition(self):
+        assert filing_service.VALID_RATES is invoice_parser.VALID_TAX_RATES
+
+    @pytest.mark.parametrize(
+        "rate", ["0.1", "1", "1.5", "6", "7.5"]
+    )
+    def test_a_slab_the_parser_used_to_drop_now_survives(self, rate):
+        assert invoice_parser._normalize_rate(rate) == Decimal(rate)
+
+    def test_an_affordable_housing_invoice_keeps_its_rate(self):
+        """1.5% is printed as 0.75% CGST plus 0.75% SGST."""
+        text = (
+            "CGST @ 0.75%   750.00\n"
+            "SGST @ 0.75%   750.00\n"
+            "Taxable Value: 100000.00\n"
+        )
+        assert parse_heuristic(text).tax_rate == Decimal("1.5")
+
+    def test_a_rate_that_is_not_a_slab_is_still_dropped(self):
+        """Completing the list must not turn it into "anything goes"."""
+        assert invoice_parser._normalize_rate("17") is None
+        assert invoice_parser._normalize_rate("20") is None
+        assert invoice_parser._normalize_rate("15") is None
 
 
 class TestTheSubOnePercentSlabs:
