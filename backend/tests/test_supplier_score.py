@@ -132,6 +132,76 @@ def test_timeliness_averages_across_periods():
     assert component(result, "timeliness").score == Decimal("50")
 
 
+class TestAnEarlyFilingCannotPayForALateOne:
+    """Each period is scored, then the scores are averaged — not the delays.
+
+    Averaging the delays first let a supplier who filed a month early offset a
+    month they filed a month late, which is the supplier this component exists
+    to mark: the buyer's claim for the late period was not rescued by the
+    punctual one, because a claim is made in the period it belongs to.
+    """
+
+    def test_a_month_early_does_not_cancel_a_month_late(self):
+        result = score(
+            [
+                observed("2026-03", matched=5, delay=-30),
+                observed("2026-04", matched=5, delay=30),
+            ]
+        )
+        # Scoring the average delay of zero gave this a perfect 100.
+        assert component(result, "timeliness").score == Decimal("50")
+
+    def test_filing_early_is_worth_no_more_than_filing_on_time(self):
+        """100 is a cap, so there is no surplus to lend to another period."""
+        very_early = score(
+            [
+                observed("2026-03", matched=5, delay=-90),
+                observed("2026-04", matched=5, delay=15),
+            ]
+        )
+        on_time = score(
+            [
+                observed("2026-03", matched=5, delay=0),
+                observed("2026-04", matched=5, delay=15),
+            ]
+        )
+        assert component(very_early, "timeliness").score == Decimal("75")
+        assert (
+            component(very_early, "timeliness").score
+            == component(on_time, "timeliness").score
+        )
+
+    def test_a_period_a_full_month_late_still_scores_nothing_for_itself(self):
+        """One period past the cliff contributes zero, not a negative offset."""
+        result = score(
+            [
+                observed("2026-02", matched=5, delay=0),
+                observed("2026-03", matched=5, delay=0),
+                observed("2026-04", matched=5, delay=400),
+            ]
+        )
+        # Two clean periods and one hopeless one: 200/3, not 100 - 400/90.
+        assert component(result, "timeliness").score.quantize(
+            Decimal("0.01")
+        ) == Decimal("66.67")
+
+    def test_the_detail_names_the_periods_that_were_late(self):
+        result = score(
+            [
+                observed("2026-03", matched=5, delay=-30),
+                observed("2026-04", matched=5, delay=30),
+            ]
+        )
+        # It used to read "Files on the due date" for exactly this supplier.
+        assert component(result, "timeliness").detail == (
+            "Late on 1 of 2 filings, by 30 days on average"
+        )
+
+    def test_the_detail_says_so_when_nothing_was_late(self):
+        result = score([observed(PERIOD, matched=5, delay=-3)])
+        assert component(result, "timeliness").detail == "Files on or before the due date"
+
+
 # ---------------------------------------------------------------------------
 # Consistency
 # ---------------------------------------------------------------------------

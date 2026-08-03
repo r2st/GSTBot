@@ -202,35 +202,65 @@ def _match_rate_component(observations: list[Observation]) -> Component:
     )
 
 
-def _timeliness_component(observations: list[Observation]) -> Component:
-    """How close to the due date the supplier files, on average.
+def _plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
+def _timeliness_of(delay: int) -> Decimal:
+    """Timeliness for a single period's filing delay.
 
     On or before the due date scores 100; a full period late scores 0; in
     between it falls off linearly. Filing early earns nothing extra — the
-    buyer's claim is not improved by it.
+    buyer's claim is not improved by the supplier having filed on the 4th
+    rather than the 11th.
+    """
+    if delay <= 0:
+        return Decimal("100")
+    if delay >= TIMELINESS_ZERO_AT_DAYS:
+        return ZERO
+    return (
+        Decimal("100")
+        * (Decimal(TIMELINESS_ZERO_AT_DAYS) - Decimal(delay))
+        / Decimal(TIMELINESS_ZERO_AT_DAYS)
+    )
+
+
+def _timeliness_component(observations: list[Observation]) -> Component:
+    """How close to the due date the supplier files, period by period.
+
+    Each period is scored on its own and the *scores* are averaged, which is
+    not the same as scoring the average delay — and the difference is the whole
+    reason this is spelled out.
+
+    Averaging the delays first let an early filing pay for a late one. A
+    supplier who filed a month early in March and a month late in April
+    averaged to zero days and scored a clean 100, described as filing "on the
+    due date", when half of what the buyer claimed had in fact arrived a full
+    period after the deadline. That is precisely the supplier this component
+    exists to mark: the buyer's April claim was not rescued by March's
+    punctuality, because a claim is made in the period it belongs to and
+    credit filed late does not arrive in time for it.
+
+    Scoring each period first also makes the cap mean what it says. Filing
+    early earns nothing above 100, so it cannot lend anything to another
+    period, and a month that is a month late scores zero however early the
+    supplier was either side of it.
     """
     delays = [o.filing_delay_days for o in observations if o.filing_delay_days is not None]
     if not delays:
         return Component("timeliness", None, WEIGHT_TIMELINESS, "No filing dates observed")
 
-    average = Decimal(sum(delays)) / Decimal(len(delays))
-    if average <= 0:
-        score = Decimal("100")
-    elif average >= TIMELINESS_ZERO_AT_DAYS:
-        score = ZERO
-    else:
-        score = (
-            Decimal("100")
-            * (Decimal(TIMELINESS_ZERO_AT_DAYS) - average)
-            / Decimal(TIMELINESS_ZERO_AT_DAYS)
-        )
+    score = sum((_timeliness_of(delay) for delay in delays), ZERO) / Decimal(len(delays))
 
-    days = float(_q(average))
-    detail = (
-        f"Files {abs(days):.0f} days {'late' if days > 0 else 'early'} on average"
-        if days
-        else "Files on the due date"
-    )
+    late = [delay for delay in delays if delay > 0]
+    if not late:
+        detail = "Files on or before the due date"
+    else:
+        average_late = float(_q(Decimal(sum(late)) / Decimal(len(late))))
+        detail = (
+            f"Late on {len(late)} of {_plural(len(delays), 'filing')}, "
+            f"by {average_late:.0f} days on average"
+        )
     return Component("timeliness", score, WEIGHT_TIMELINESS, detail)
 
 
