@@ -75,6 +75,96 @@ def test_two_invoices_from_one_supplier_share_a_supplier_row(auth_client, db_ses
     assert db_session.query(Supplier).filter_by(gstin=SUPPLIER_GSTIN_OTHER_STATE).count() == 1
 
 
+class TestTwoWorkersMeetingAtANewSupplier:
+    """Concurrent uploads from a supplier neither worker has seen before.
+
+    ``get_or_create_supplier`` looks, finds nothing, and inserts. When a
+    business drags in a folder of invoices from a new supplier, several workers
+    do that at once and only the first insert survives ``uq_suppliers_business_gstin``.
+    The loser's invoice was being marked ``failed`` and told the user its
+    document was already on file — a statement about a duplicate that does not
+    exist, over a supplier row the winner had already created correctly.
+    """
+
+    @staticmethod
+    def _blind_the_lookup(monkeypatch, db_session):
+        """Make the *next* supplier lookup miss, as a concurrent one would."""
+        real_scalar = db_session.scalar
+        missed = {"once": False}
+
+        def blind(statement, *args, **kwargs):
+            found = real_scalar(statement, *args, **kwargs)
+            if isinstance(found, Supplier) and not missed["once"]:
+                missed["once"] = True
+                return None
+            return found
+
+        monkeypatch.setattr(db_session, "scalar", blind)
+
+    def test_the_loser_of_the_race_still_gets_its_invoice(
+        self, auth_client, db_session, business, sample_invoice_text, monkeypatch
+    ):
+        db_session.add(
+            Supplier(
+                business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE, state_code="29"
+            )
+        )
+        db_session.flush()
+        self._blind_the_lookup(monkeypatch, db_session)
+
+        invoice = upload(auth_client, sample_invoice_text).json()["invoice"]
+
+        assert invoice["status"] != InvoiceStatus.FAILED.value
+        assert invoice["parse_error"] is None
+        assert invoice["counterparty_gstin"] == SUPPLIER_GSTIN_OTHER_STATE
+
+    def test_it_is_linked_to_the_row_the_winner_created(
+        self, auth_client, db_session, business, sample_invoice_text, monkeypatch
+    ):
+        db_session.add(
+            Supplier(
+                business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE, state_code="29"
+            )
+        )
+        db_session.flush()
+        self._blind_the_lookup(monkeypatch, db_session)
+
+        invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+
+        suppliers = db_session.query(Supplier).filter_by(
+            gstin=SUPPLIER_GSTIN_OTHER_STATE
+        ).all()
+        assert len(suppliers) == 1
+        assert db_session.get(Invoice, invoice_id).supplier_id == suppliers[0].id
+
+    def test_the_lost_race_is_not_reported_as_a_duplicate_invoice(
+        self, auth_client, db_session, business, sample_invoice_text, monkeypatch
+    ):
+        db_session.add(
+            Supplier(
+                business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE, state_code="29"
+            )
+        )
+        db_session.flush()
+        self._blind_the_lookup(monkeypatch, db_session)
+
+        invoice = upload(auth_client, sample_invoice_text).json()["invoice"]
+
+        assert "already on file" not in (invoice["parse_error"] or "")
+
+    def test_a_genuine_duplicate_is_still_refused(self, auth_client, sample_invoice_text):
+        """The race fix must not swallow the constraint it shares a handler with."""
+        upload(auth_client, sample_invoice_text)
+        # Same invoice number and supplier, different bytes, so the file-hash
+        # check at upload cannot catch it and the natural key has to.
+        second = upload(
+            auth_client, sample_invoice_text + "\nDuplicate re-scan\n", name="rescan.txt"
+        ).json()["invoice"]
+
+        assert second["status"] == InvoiceStatus.FAILED.value
+        assert "already on file" in second["parse_error"]
+
+
 def test_a_sales_upload_does_not_create_a_supplier(auth_client, db_session, sample_invoice_text):
     upload(auth_client, sample_invoice_text, invoice_type="sales")
     assert db_session.query(Supplier).count() == 0

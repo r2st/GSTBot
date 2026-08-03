@@ -180,27 +180,60 @@ def find_duplicate(
     return None
 
 
-def get_or_create_supplier(
-    db: Session, business_id: int, gstin: str, name: str | None = None
-) -> Supplier:
-    """The supplier row for *gstin* under this tenant, creating it if new."""
-    supplier = db.scalar(
+def _find_supplier(db: Session, business_id: int, gstin: str) -> Supplier | None:
+    return db.scalar(
         select(Supplier).where(
             Supplier.business_id == business_id,
             Supplier.gstin == gstin,
             Supplier.deleted_at.is_(None),
         )
     )
+
+
+def get_or_create_supplier(
+    db: Session, business_id: int, gstin: str, name: str | None = None
+) -> Supplier:
+    """The supplier row for *gstin* under this tenant, creating it if new.
+
+    Look-then-insert has a window in it, and this is the one place in the
+    product that runs concurrently on the same key: a business uploading a
+    folder of invoices from a supplier they have never bought from before has
+    several workers reaching this line at once, each having looked and found
+    nothing. One of them inserts; the rest hit ``uq_suppliers_business_gstin``.
+
+    That is a lost race, not a failure, and it was being reported as neither.
+    The insert happens inside the caller's transaction, so the integrity error
+    surfaced up in :func:`process_invoice` — whose handler exists for the
+    *invoice's* natural key and assumes any conflict is one. A perfectly good
+    invoice was therefore marked ``failed`` and told the user "This invoice is
+    already on file", which was false, named a document that does not exist, and
+    dropped the invoice out of the filing pool over a row the other worker had
+    already created correctly.
+
+    The insert is wrapped in a SAVEPOINT so a conflict rolls back that statement
+    alone and leaves the session usable, and the winner's row is then read back.
+    Whoever inserts, both callers end up with the same supplier.
+    """
+    supplier = _find_supplier(db, business_id, gstin)
     if supplier is None:
-        supplier = Supplier(
-            business_id=business_id,
-            gstin=gstin,
-            legal_name=name,
-            state_code=gstin_service.state_code_of(gstin),
-        )
-        db.add(supplier)
-        db.flush()
-    elif name and not supplier.legal_name:
+        try:
+            with db.begin_nested():
+                supplier = Supplier(
+                    business_id=business_id,
+                    gstin=gstin,
+                    legal_name=name,
+                    state_code=gstin_service.state_code_of(gstin),
+                )
+                db.add(supplier)
+                db.flush()
+        except IntegrityError:
+            # Somebody else got there first. Their row is the one that exists.
+            supplier = _find_supplier(db, business_id, gstin)
+            if supplier is None:
+                # The conflict was not the one this handles — a soft-deleted row
+                # holding the GSTIN, say. Let it surface rather than pretending.
+                raise
+    if name and not supplier.legal_name:
         supplier.legal_name = name
     return supplier
 
