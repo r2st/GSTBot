@@ -640,6 +640,19 @@ def _rate_of(invoice: Invoice) -> Decimal:
     return min(VALID_RATES, key=lambda rate: abs(rate - derived))
 
 
+def _invoice_value(invoice: Invoice) -> Decimal:
+    """The invoice's value including tax — what the portal calls ``val``.
+
+    ``total_value`` is not null and not reliable: it defaults to zero and is
+    only filled when the parser found a grand-total label on the document, so a
+    perfectly good invoice whose total was printed as "Amount Payable" carries
+    a stored total of zero. Every place that reads the invoice's *value* has to
+    fall back to the figures that are always there, or it reads a real supply
+    as one worth nothing.
+    """
+    return invoice.total_value or _q((invoice.taxable_value or ZERO) + _tax_total(invoice))
+
+
 def _item_block(invoice: Invoice) -> dict:
     """The portal's ``itms`` entry for a single-rate invoice."""
     return {
@@ -683,25 +696,29 @@ def build_gstr1(db: Session, business: Business, period: str) -> dict:
         rate = _rate_of(invoice)
         taxable = _q(invoice.taxable_value or ZERO)
         interstate = place_of_supply != business.state_code
+        # Derived rather than read straight off the row: which block a B2C
+        # supply belongs in turns on this number, and a stored zero would put a
+        # ₹3 lakh invoice in the summary that exists for small ones.
+        value = _invoice_value(invoice)
 
         if invoice.counterparty_gstin and gstin_service.is_valid(invoice.counterparty_gstin):
             b2b.setdefault(invoice.counterparty_gstin, []).append(
                 {
                     "inum": invoice.invoice_number or "",
                     "idt": to_portal_date(invoice.invoice_date),
-                    "val": float(_q(invoice.total_value or (taxable + _tax_total(invoice)))),
+                    "val": float(value),
                     "pos": place_of_supply,
                     "rchrg": "Y" if invoice.reverse_charge else "N",
                     "inv_typ": "R",  # Regular. SEZ and deemed export are not modelled yet.
                     "itms": [_item_block(invoice)],
                 }
             )
-        elif interstate and (invoice.total_value or ZERO) > B2CL_THRESHOLD:
+        elif interstate and value > B2CL_THRESHOLD:
             b2cl.setdefault(place_of_supply, []).append(
                 {
                     "inum": invoice.invoice_number or "",
                     "idt": to_portal_date(invoice.invoice_date),
-                    "val": float(_q(invoice.total_value or ZERO)),
+                    "val": float(value),
                     "itms": [_item_block(invoice)],
                 }
             )

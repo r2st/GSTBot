@@ -475,6 +475,109 @@ def test_gstr1_lists_large_interstate_unregistered_sales_separately(db_session, 
     assert block["inv"][0]["val"] == 354000.00
 
 
+class TestAnInvoiceWorthWhatItIsWorth:
+    """The invoice value is derived when the row does not carry one.
+
+    ``total_value`` defaults to zero and is only filled when the parser found a
+    grand-total label, so a real invoice whose total was printed as "Amount
+    Payable" is stored as worth nothing. Read literally, that decided which
+    GSTR-1 block a large B2C supply went in — the one place in the return where
+    the value is not just a figure but a routing decision.
+    """
+
+    def test_a_large_b2c_sale_is_listed_even_with_no_stored_total(
+        self, db_session, business
+    ):
+        """₹3.54 lakh belongs in b2cl whether or not the parser read the total.
+
+        Summarised into b2cs it is a return that reports the supply — so
+        nothing looks missing — while omitting the invoice-level detail the
+        portal requires above the threshold.
+        """
+        save(
+            db_session,
+            business.id,
+            sale(
+                counterparty_gstin=None,
+                place_of_supply="29",
+                taxable_value=Decimal("300000.00"),
+                igst=Decimal("54000.00"),
+                total_value=Decimal("0.00"),
+            ),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert "b2cs" not in document
+        (block,) = document["b2cl"]
+        assert block["inv"][0]["val"] == 354000.00
+
+    def test_a_small_b2c_sale_is_still_summarised(self, db_session, business):
+        """The derivation must not push everything into b2cl."""
+        save(
+            db_session,
+            business.id,
+            sale(
+                counterparty_gstin=None,
+                place_of_supply="29",
+                total_value=Decimal("0.00"),
+            ),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert "b2cl" not in document
+        assert document["b2cs"][0]["txval"] == 100000.00
+
+    def test_the_threshold_is_the_value_with_tax_on_it(self, db_session, business):
+        """₹2.4 lakh plus 18% is above ₹2.5 lakh; the taxable value alone is not."""
+        save(
+            db_session,
+            business.id,
+            sale(
+                counterparty_gstin=None,
+                place_of_supply="29",
+                taxable_value=Decimal("240000.00"),
+                igst=Decimal("43200.00"),
+                total_value=Decimal("0.00"),
+            ),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert document["b2cl"][0]["inv"][0]["val"] == 283200.00
+
+    def test_a_stored_total_still_wins(self, db_session, business):
+        """Where the invoice says what it is worth, that is the figure filed.
+
+        A rounded-off or discounted grand total is the number on the document,
+        and the portal is being told what the document says.
+        """
+        save(
+            db_session,
+            business.id,
+            sale(
+                counterparty_gstin=None,
+                place_of_supply="29",
+                taxable_value=Decimal("300000.00"),
+                igst=Decimal("54000.00"),
+                total_value=Decimal("353999.00"),
+            ),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert document["b2cl"][0]["inv"][0]["val"] == 353999.00
+
+    def test_a_b2b_sale_reports_the_derived_value_too(self, db_session, business):
+        """b2b already fell back; it keeps doing so through the shared helper."""
+        save(db_session, business.id, sale(total_value=Decimal("0.00")))
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert document["b2b"][0]["inv"][0]["val"] == 118000.00
+
+
 def test_gstr1_summarises_hsn_by_code_and_rate(db_session, business):
     save(db_session, business.id, sale(invoice_number="S-1"))
     save(db_session, business.id, sale(invoice_number="S-2"))
