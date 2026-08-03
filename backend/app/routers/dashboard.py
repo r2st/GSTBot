@@ -144,8 +144,14 @@ def get_dashboard(
         needs_review=needs_review,
     )
 
-    # ---- Money for the selected period ----
-    summary = invoice_service.tax_summary(db, business.id, period)
+    # ---- Money for the selected period, and for the chart behind it ----
+    # One scan for all seven months rather than one each. The chart's periods
+    # end at the selected one, so the selected period's own summary is among
+    # them and is read out of the same result.
+    history = _previous_periods(period, RECENT_PERIOD_COUNT)
+    summaries = invoice_service.tax_summaries(db, business.id, [period, *history])
+
+    summary = summaries[period]
     sales = _bucket(summary["sales"])
     purchase = _bucket(summary["purchase"])
     credit = _bucket(summary["credit"])
@@ -160,8 +166,8 @@ def get_dashboard(
 
     # ---- History for the chart ----
     recent: list[PeriodSummary] = []
-    for past in _previous_periods(period, RECENT_PERIOD_COUNT):
-        past_summary = invoice_service.tax_summary(db, business.id, past)
+    for past in history:
+        past_summary = summaries[past]
         past_sales = _bucket(past_summary["sales"])
         past_purchase = _bucket(past_summary["purchase"])
         past_credit = _bucket(past_summary["credit"])

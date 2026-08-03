@@ -551,3 +551,158 @@ class TestNotEveryPurchaseIsCredit:
         assert body["purchase"]["count"] == 0
         assert body["credit"]["count"] == 0
         assert Decimal(body["credit"]["igst"]) == Decimal("0.00")
+
+
+class TestTheChartCostsOneScanRatherThanSeven:
+    """The dashboard's seven period summaries came from seven scans.
+
+    ``tax_summary`` is documented as one grouped query "because the dashboard
+    is the most-hit endpoint in the product and a business can hold tens of
+    thousands of invoices" — and the dashboard then called it once for the
+    selected period and once per month of history, six of the seven differing
+    only in which month they filtered to.
+    """
+
+    def test_one_aggregate_covers_every_period_on_the_screen(
+        self, auth_client, db_session, business
+    ):
+        from sqlalchemy import event
+
+        make_invoice(db_session, business.id, invoice_number="A-1")
+        statements: list[str] = []
+        engine = db_session.get_bind()
+
+        def _record(conn, cursor, statement, parameters, context, executemany):
+            squashed = " ".join(statement.split()).lower()
+            if "from invoices" in squashed and "sum(" in squashed:
+                statements.append(squashed)
+
+        event.listen(engine, "before_cursor_execute", _record)
+        try:
+            assert auth_client.get("/api/v1/dashboard?period=2026-04").status_code == 200
+        finally:
+            event.remove(engine, "before_cursor_execute", _record)
+
+        assert len(statements) == 1, f"{len(statements)} scans:\n" + "\n".join(statements)
+        # Grouped by period as well as direction, which is what lets the one
+        # scan answer for all seven months.
+        assert "group by" in statements[0]
+
+    def test_the_history_still_reads_month_by_month(
+        self, auth_client, db_session, business
+    ):
+        """One query must not mean one bucket: the months stay separate."""
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-FEB",
+            period="2026-02", invoice_date=date(2026, 2, 5),
+            taxable_value=Decimal("10000.00"), igst=Decimal("1800.00"),
+            total_value=Decimal("11800.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-MAR",
+            period="2026-03", invoice_date=date(2026, 3, 5),
+            taxable_value=Decimal("20000.00"), igst=Decimal("3600.00"),
+            total_value=Decimal("23600.00"),
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+        by_period = {row["period"]: row for row in body["recent_periods"]}
+
+        assert Decimal(by_period["2026-02"]["sales"]["igst"]) == Decimal("1800.00")
+        assert Decimal(by_period["2026-03"]["sales"]["igst"]) == Decimal("3600.00")
+        assert Decimal(by_period["2026-04"]["sales"]["igst"]) == Decimal("0.00")
+
+    def test_a_month_with_no_invoices_is_a_zero_row_not_a_missing_one(
+        self, auth_client, db_session, business
+    ):
+        """The chart keeps its gaps: six months in, six months out."""
+        make_invoice(db_session, business.id, invoice_number="A-1")
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+        rows = body["recent_periods"]
+
+        assert [row["period"] for row in rows] == _previous_periods("2026-04", 6)
+        empty = next(row for row in rows if row["period"] == "2025-12")
+        assert empty["sales"]["count"] == 0
+        assert Decimal(empty["net_liability"]["total"]) == Decimal("0.00")
+
+    def test_the_selected_period_agrees_with_its_own_row_in_the_history(
+        self, auth_client, db_session, business
+    ):
+        """Both now come out of one result, and must not disagree."""
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-APR",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+            total_value=Decimal("118000.00"),
+        )
+
+        body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+        april = next(row for row in body["recent_periods"] if row["period"] == "2026-04")
+
+        assert april["sales"] == body["sales"]
+        assert april["net_liability"] == body["net_liability"]
+
+
+class TestTaxSummariesAgreesWithTaxSummary:
+    """The batched form has to be the same arithmetic, period by period."""
+
+    def test_each_period_matches_the_single_period_call(self, db_session, business):
+        from app.services import invoice_service
+
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-1",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+            total_value=Decimal("118000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.PURCHASE, invoice_number="P-1",
+            period="2026-03", invoice_date=date(2026, 3, 9),
+            taxable_value=Decimal("50000.00"), igst=Decimal("9000.00"),
+            total_value=Decimal("59000.00"), reverse_charge=True,
+        )
+
+        periods = ["2026-03", "2026-04", "2026-05"]
+        batched = invoice_service.tax_summaries(db_session, business.id, periods)
+
+        for period in periods:
+            assert batched[period] == invoice_service.tax_summary(
+                db_session, business.id, period
+            ), period
+
+    def test_a_repeated_period_is_asked_for_once_and_answered_once(
+        self, db_session, business
+    ):
+        from app.services import invoice_service
+
+        make_invoice(db_session, business.id, invoice_number="A-1")
+        batched = invoice_service.tax_summaries(
+            db_session, business.id, ["2026-04", "2026-04", "2026-03"]
+        )
+        assert sorted(batched) == ["2026-03", "2026-04"]
+
+    def test_no_periods_asks_the_database_nothing(self, db_session, business):
+        from app.services import invoice_service
+
+        assert invoice_service.tax_summaries(db_session, business.id, []) == {}
+
+    def test_another_tenants_invoices_are_not_in_any_period(
+        self, db_session, business, other_tenant
+    ):
+        """The batched form still scopes to one tenant, as the single one does."""
+        from app.models.business import Business
+        from app.services import invoice_service
+
+        rival = db_session.query(Business).filter(Business.id != business.id).one()
+        make_invoice(
+            db_session, rival.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-OTHER",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+        )
+        batched = invoice_service.tax_summaries(db_session, business.id, ["2026-04"])
+
+        assert batched["2026-04"]["sales"]["count"] == 0

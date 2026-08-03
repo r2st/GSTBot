@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -423,11 +424,15 @@ def _duplicate_message(number: str | None, existing: Invoice | None) -> str:
 def tax_summary(
     db: Session, business_id: int, period: str | None = None
 ) -> dict[str, dict[str, int | Decimal]]:
-    """Aggregate tax by direction, for the dashboard.
+    """Aggregate tax by direction, for one period or for all of them.
 
     One grouped query rather than a query per figure: the dashboard is the
     most-hit endpoint in the product and a business can hold tens of thousands
     of invoices.
+
+    :func:`tax_summaries` is the same query over several periods at once, and
+    is what the dashboard uses. This remains for the callers that want exactly
+    one.
 
     Failed extractions are left out, because the returns leave them out. The
     dashboard's net liability is the number a business plans its cash around,
@@ -446,13 +451,78 @@ def tax_summary(
     liability is what it is drawn for, because subtracting a blocked credit
     from output tax tells a business it owes less than it does.
     """
+    if period is None:
+        return _summarise(db, business_id, group_by_period=False)[None]
+    return _summarise(db, business_id, periods=[period], group_by_period=False)[None]
+
+
+def tax_summaries(
+    db: Session, business_id: int, periods: Sequence[str]
+) -> dict[str, dict[str, dict[str, int | Decimal]]]:
+    """:func:`tax_summary` for several periods, in one scan of the table.
+
+    The dashboard shows the selected period beside six months of history, and
+    it asked for each of them separately — seven aggregate scans of the
+    invoice table on the most-hit endpoint in the product, six of them
+    differing only in which month they filtered to. The period is the second
+    column of ``ix_invoices_business_period``, so one ``IN`` over the seven
+    reads the same span of the index the first of those seven already read.
+
+    Periods with no invoices come back as empty buckets rather than being
+    absent, so the chart keeps its gaps and the caller does not have to know
+    which months were missing.
+    """
+    wanted = list(dict.fromkeys(periods))
+    if not wanted:
+        return {}
+    found = _summarise(db, business_id, periods=wanted, group_by_period=True)
+    return {period: found.get(period) or _blank_summary() for period in wanted}
+
+
+def _blank_bucket() -> dict[str, int | Decimal]:
+    return {
+        "count": 0,
+        "taxable_value": Decimal("0.00"),
+        "cgst": Decimal("0.00"),
+        "sgst": Decimal("0.00"),
+        "igst": Decimal("0.00"),
+        "cess": Decimal("0.00"),
+        "total_value": Decimal("0.00"),
+        "total_tax": Decimal("0.00"),
+    }
+
+
+def _blank_summary() -> dict[str, dict[str, int | Decimal]]:
+    return {"sales": _blank_bucket(), "purchase": _blank_bucket(), "credit": _blank_bucket()}
+
+
+# The money columns summed, in the order the select puts them and the order the
+# rows are unpacked in. One tuple, so the two cannot drift.
+_MONEY = ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value")
+
+
+def _summarise(
+    db: Session,
+    business_id: int,
+    *,
+    periods: Sequence[str] | None = None,
+    group_by_period: bool,
+) -> dict[str | None, dict[str, dict[str, int | Decimal]]]:
+    """The grouped scan behind both entry points, keyed by period.
+
+    ``group_by_period`` decides whether the period reaches the ``GROUP BY`` or
+    only the ``WHERE``: a caller asking about one period wants its three
+    buckets under a single key, and gets ``None`` for it.
+    """
     conditions = [
         Invoice.business_id == business_id,
         Invoice.deleted_at.is_(None),
         Invoice.status != InvoiceStatus.FAILED,
     ]
-    if period:
-        conditions.append(Invoice.period == period)
+    if periods:
+        conditions.append(
+            Invoice.period == periods[0] if len(periods) == 1 else Invoice.period.in_(periods)
+        )
 
     # The same test ``itc.summarise`` applies before pooling a purchase into
     # available credit, expressed in SQL so the claimable totals come back from
@@ -460,7 +530,6 @@ def tax_summary(
     claims_credit = and_(
         Invoice.itc_eligible.is_(True), Invoice.reverse_charge.is_(False)
     )
-    MONEY = ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value")
 
     def _summed(name: str):
         return func.coalesce(func.sum(getattr(Invoice, name)), 0)
@@ -470,46 +539,43 @@ def tax_summary(
             func.sum(case((claims_credit, getattr(Invoice, name)), else_=0)), 0
         )
 
+    grouping = [Invoice.period, Invoice.invoice_type] if group_by_period else [Invoice.invoice_type]
     rows = db.execute(
         select(
-            Invoice.invoice_type,
+            *grouping,
             func.count(Invoice.id),
-            *(_summed(name) for name in MONEY),
+            *(_summed(name) for name in _MONEY),
             func.count(case((claims_credit, Invoice.id))),
-            *(_summed_if_claimable(name) for name in MONEY),
+            *(_summed_if_claimable(name) for name in _MONEY),
         )
         .where(*conditions)
-        .group_by(Invoice.invoice_type)
+        .group_by(*grouping)
     ).all()
-
-    def _blank() -> dict[str, int | Decimal]:
-        return {
-            "count": 0,
-            "taxable_value": Decimal("0.00"),
-            "cgst": Decimal("0.00"),
-            "sgst": Decimal("0.00"),
-            "igst": Decimal("0.00"),
-            "cess": Decimal("0.00"),
-            "total_value": Decimal("0.00"),
-            "total_tax": Decimal("0.00"),
-        }
 
     def _fill(bucket: dict, count, money) -> None:
         bucket["count"] = int(count)
-        for name, value in zip(MONEY, money, strict=True):
+        for name, value in zip(_MONEY, money, strict=True):
             bucket[name] = Decimal(str(value))
         bucket["total_tax"] = (
             bucket["cgst"] + bucket["sgst"] + bucket["igst"] + bucket["cess"]
         )
 
-    summary = {"sales": _blank(), "purchase": _blank(), "credit": _blank()}
-    width = len(MONEY)
+    summaries: dict[str | None, dict[str, dict[str, int | Decimal]]] = {}
+    if not group_by_period:
+        summaries[None] = _blank_summary()
+
+    width = len(_MONEY)
     for row in rows:
-        invoice_type, count, *rest = row
+        if group_by_period:
+            row_period, invoice_type, count, *rest = row
+        else:
+            row_period = None
+            invoice_type, count, *rest = row
+        summary = summaries.setdefault(row_period, _blank_summary())
         key = invoice_type.value if hasattr(invoice_type, "value") else str(invoice_type)
-        _fill(summary.setdefault(key, _blank()), count, rest[:width])
+        _fill(summary.setdefault(key, _blank_bucket()), count, rest[:width])
         # Only a purchase can carry credit; a sale's claimable columns are the
         # same arithmetic over rows that never had credit to begin with.
         if key == InvoiceType.PURCHASE.value:
             _fill(summary["credit"], rest[width], rest[width + 1 :])
-    return summary
+    return summaries
