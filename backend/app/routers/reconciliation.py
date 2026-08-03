@@ -84,7 +84,10 @@ _read_limit = RateLimit("reconcile_read", "240/minute")
 async def import_gstr2b(
     file: UploadFile = File(..., description="GSTR-2B download: portal JSON or CSV export"),
     period: str | None = Form(
-        default=None, description="YYYY-MM; taken from the file when omitted"
+        default=None,
+        pattern=gst_calendar.PERIOD_PATTERN,
+        description="YYYY-MM; taken from the file when omitted",
+        examples=["2026-04"],
     ),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
@@ -95,6 +98,16 @@ async def import_gstr2b(
     portal stamps the statement period into the download, and a user who has
     just clicked through three months of statements should not have to keep
     track of which one this was.
+
+    A period supplied by the caller is checked against the same pattern every
+    other route spells a period with. This one was the only period input in the
+    product without it, and it is the one that *writes* a period: the two the
+    file itself can offer are derived from a date and a validated portal field,
+    so the form value was the only way an unreal month could reach the column.
+    ``2026-13`` stored a statement under a month that does not exist, which no
+    later screen can reconcile or file; anything over seven characters is
+    refused by the column itself on Postgres and silently kept whole by the
+    SQLite the suite runs on — a 500 on the deployment and a green test.
     """
     filename = safe_filename(file.filename, fallback="gstr2b")
     if not filename.lower().endswith(ALLOWED_EXTENSIONS):

@@ -293,6 +293,51 @@ class TestWhichPeriodAStatementBelongsTo:
         assert "period" in response.json()["detail"].lower()
 
 
+class TestAPeriodTheCallerNames:
+    """The form value is the only way an unreal month reaches the column.
+
+    Every other period input in the product is checked against
+    ``PERIOD_PATTERN``; this one was not, and it is the one that *writes* a
+    period. The two the file itself can offer are derived — one from an invoice
+    date, one from a validated portal field — so nothing else could put a month
+    that does not exist on a stored statement.
+    """
+
+    @pytest.mark.parametrize(
+        "period",
+        [
+            "2026-13",  # No thirteenth month; every later screen divides by it.
+            "2026-00",  # Quietly aliased onto January.
+            "2026-4",   # Unpadded: sorts and compares wrongly against stored ones.
+            "202604",   # The portal's own MMYYYY, pasted the wrong way round.
+            "April 2026",
+        ],
+    )
+    def test_a_period_that_is_not_one_is_refused(self, auth_client, period):
+        assert upload_2b(auth_client, period=period).status_code == 422
+
+    def test_a_blank_field_still_means_read_it_from_the_file(self, auth_client):
+        # A form input the user never touched submits as an empty string, and
+        # FastAPI reads that as the field being absent rather than as a period
+        # of "". Tightening the pattern must not turn the ordinary case — drop
+        # the file in, name nothing — into a validation error.
+        response = upload_2b(auth_client, period="")
+        assert response.status_code == 201, response.text
+        assert response.json()["period"] == PERIOD
+
+    def test_a_period_too_long_for_the_column_is_refused(self, auth_client):
+        # ``gstr_returns.period`` is VARCHAR(7). Postgres refuses anything
+        # longer and the API reports the failure as a 500; SQLite has no width
+        # at all and keeps the whole string, so the suite would have seen
+        # nothing wrong. Refusing it here is what makes the two agree.
+        assert upload_2b(auth_client, period="2026-04-15").status_code == 422
+
+    def test_a_real_period_still_wins_over_the_file(self, auth_client):
+        response = upload_2b(auth_client, period="2026-05")
+        assert response.status_code == 201, response.text
+        assert response.json()["period"] == "2026-05"
+
+
 class TestListingRunsByPeriod:
     def test_the_listing_can_be_filtered_to_one_period(self, auth_client):
         upload_2b(auth_client)
