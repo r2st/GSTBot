@@ -96,6 +96,43 @@ class TestWhichPeriodsHaveEnded:
         assert gst_calendar.previous_period("2026-01") == "2025-12"
 
 
+class TestTheLastDayOfAPeriod:
+    """``period_end`` — the day a return for that period is a statement about."""
+
+    def test_a_thirty_one_day_month(self):
+        assert gst_calendar.period_end("2026-01") == date(2026, 1, 31)
+
+    def test_a_thirty_day_month(self):
+        assert gst_calendar.period_end("2026-04") == date(2026, 4, 30)
+
+    def test_february_in_a_common_year(self):
+        assert gst_calendar.period_end("2026-02") == date(2026, 2, 28)
+
+    def test_february_in_a_leap_year(self):
+        assert gst_calendar.period_end("2028-02") == date(2028, 2, 29)
+
+    def test_february_in_the_century_that_is_not_a_leap_year(self):
+        assert gst_calendar.period_end("2100-02") == date(2100, 2, 28)
+
+    def test_december_does_not_roll_into_month_thirteen(self):
+        assert gst_calendar.period_end("2026-12") == date(2026, 12, 31)
+
+    def test_it_is_the_day_before_the_next_period_opens(self):
+        for period in ("2025-11", "2026-02", "2026-06", "2026-12"):
+            year, month = (int(part) for part in gst_calendar.next_period(period).split("-"))
+            assert gst_calendar.period_end(period) == date(year, month, 1) - timedelta(days=1)
+
+    def test_it_falls_inside_the_period_it_names(self):
+        for period in ("2024-02", "2026-04", "2026-12"):
+            assert gst_calendar.period_of(gst_calendar.period_end(period)) == period
+
+    def test_it_is_before_every_due_date_for_that_period(self):
+        """A return covers a month that has closed before it may be filed."""
+        for period in ("2026-01", "2026-04", "2026-12"):
+            assert gst_calendar.period_end(period) < gst_calendar.gstr1_due_date(period)
+            assert gst_calendar.period_end(period) < gst_calendar.gstr3b_due_date(period)
+
+
 class TestCountingBackWholeYears:
     """``months_before`` — the five-year window Rule 43 spreads credit over."""
 

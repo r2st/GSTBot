@@ -11,6 +11,7 @@ import pytest
 
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.services import filing as filing_service
+from app.services import gst_calendar
 from app.services.filing import Severity
 from tests.conftest import (
     BUSINESS_GSTIN,
@@ -587,6 +588,129 @@ def test_gstr3b_carries_the_set_off_for_the_screen(db_session, business):
 
     assert "gstbot_set_off" in document
     assert document["gstbot_set_off"]["cash_payable"]["igst"] == "18000.00"
+
+
+class TestAClosedPeriodsReturnDoesNotMove:
+    """A GSTR-3B for a month that has ended must read the same next year.
+
+    Rule 37 is a clock: credit reverses 180 days after the invoice date. Read
+    off *today* rather than off the period, the reversal in table 4(B) grew
+    every time the document was generated — so a business that exported its
+    January return in February and again in March had two different documents
+    for one filing, and no way to tell which one went to the portal.
+    """
+
+    def purchase(self, db, business, **kwargs):
+        return save(
+            db,
+            business.id,
+            sale(invoice_type=InvoiceType.PURCHASE, **kwargs),
+        )
+
+    def test_the_same_period_builds_the_same_document_a_year_later(
+        self, db_session, business, monkeypatch
+    ):
+        self.purchase(
+            db_session, business, invoice_number="P-1", igst=Decimal("18000.00")
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2026, 5, 2))
+        just_after = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2027, 6, 2))
+        much_later = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert just_after == much_later
+
+    def test_a_purchase_made_after_the_period_is_not_reversed_in_it(
+        self, db_session, business, monkeypatch
+    ):
+        """The worst of it: credit reversed on an invoice that did not exist.
+
+        A purchase dated five months after the period is unpaid and long past
+        180 days by the time anyone regenerates the return — but it belongs to
+        its own period's 3B, not to this one's.
+        """
+        self.purchase(
+            db_session, business, invoice_number="P-APR", igst=Decimal("18000.00")
+        )
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-SEP",
+            invoice_date=date(2026, 9, 10),
+            period="2026-09",
+            igst=Decimal("50000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2027, 6, 2))
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert document["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
+        assert document["itc_elg"]["itc_net"]["iamt"] == 18000.00
+
+    def test_credit_that_had_genuinely_lapsed_by_the_period_end_is_reversed(
+        self, db_session, business, monkeypatch
+    ):
+        """Anchoring the clock must not stop it.
+
+        A purchase from the previous October is 181 days old on 30 April, so
+        the reversal belongs in this period's return whichever day it is built.
+        """
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2026, 5, 2))
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert document["itc_elg"]["itc_rev"][0]["iamt"] == 9000.00
+
+    def test_previewing_a_month_still_running_does_not_reverse_early(
+        self, db_session, business, monkeypatch
+    ):
+        """The anchor is the period's end or today, whichever came first.
+
+        Looking at the current month on the 2nd must not answer as if the 30th
+        had already happened — that reverses credit on an invoice with four
+        weeks left to run.
+        """
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            # 180 days after this falls on 2026-04-29: inside the period, but
+            # still ahead of the 2nd.
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2026, 4, 2))
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert document["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
+
+    def test_an_explicit_as_of_overrides_the_anchor(self, db_session, business):
+        """For reconstructing what the return said on a particular day."""
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+
+        early = filing_service.build_gstr3b(
+            db_session, business, PERIOD, as_of=date(2026, 4, 1)
+        )
+        assert early["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
 
 
 def test_gstr3b_leaves_a_failed_sale_out_of_both_value_and_tax(db_session, business):

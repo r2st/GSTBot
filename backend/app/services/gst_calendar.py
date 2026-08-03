@@ -122,6 +122,21 @@ def months_before(period: str, count: int) -> str:
     return f"{index // 12:04d}-{index % 12 + 1:02d}"
 
 
+def period_end(period: str) -> date:
+    """The last day of *period* — the day its return is a statement about.
+
+    Derived by stepping back a day from the first of the following month, which
+    gets February and the leap years right without a table.
+
+    A return covers a month that has closed, so anything computed against a
+    clock rather than against a date has to be told which clock: "as of today"
+    in a document about a period that ended is a different figure every time it
+    is generated. This is the instant such a document is anchored to.
+    """
+    year, month = (int(part) for part in next_period(period).split("-"))
+    return date(year, month, 1) - timedelta(days=1)
+
+
 def completed_periods(today: date, count: int) -> list[str]:
     """The *count* periods that have ended as of *today*, newest first.
 

@@ -785,7 +785,9 @@ def build_gstr1(db: Session, business: Business, period: str) -> dict:
 # GSTR-3B — the monthly summary and payment
 # ---------------------------------------------------------------------------
 
-def build_gstr3b(db: Session, business: Business, period: str) -> dict:
+def build_gstr3b(
+    db: Session, business: Business, period: str, *, as_of: date | None = None
+) -> dict:
     """Pre-fill GSTR-3B for *period* from sales, purchases and the last run.
 
     Table 4 is filled from the reconciled ITC position rather than from the
@@ -793,8 +795,23 @@ def build_gstr3b(db: Session, business: Business, period: str) -> dict:
     establishes that. The reversals computed under Rules 37, 42 and 43 land in
     4(B), and 4(C) is the net — which is the figure that actually reduces the
     cash payable.
+
+    Rule 37 is a clock — credit reverses 180 days after an invoice date — and a
+    clock has to be told which day the return is a statement about. Reading it
+    off *today* made a closed period's return move: a business that generated
+    its January 3B in February and again in March got two different documents,
+    the second one reversing credit on invoices that had not yet crossed 180
+    days when January ended, and on invoices dated months *after* January that
+    could not belong to its return at all. Anchored to the close of the period,
+    so re-generating an old return reproduces it.
+
+    *as_of* overrides that anchor, for a caller reconstructing what the return
+    would have said on some other day. The default is capped at today, so
+    previewing a month still in progress does not reverse credit early.
     """
-    summary = itc_service.summarise(db, business.id, period)
+    if as_of is None:
+        as_of = min(gst_calendar.period_end(period), gst_calendar.today_ist())
+    summary = itc_service.summarise(db, business.id, period, as_of=as_of)
     sales = _invoices(db, business.id, period, InvoiceType.SALES)
 
     outward_taxable = ZERO
