@@ -19,7 +19,11 @@ import pytest
 
 from app.services import gstr2b
 from app.services.gstr2b import GSTR2BParseError, parse_csv, parse_json, period_from_portal
-from tests.conftest import SUPPLIER_GSTIN_OTHER_STATE
+from tests.conftest import (
+    BUSINESS_GSTIN,
+    SUPPLIER_GSTIN_OTHER_STATE,
+    SUPPLIER_GSTIN_SAME_STATE,
+)
 from tests.test_gstr2b import portal_json
 from tests.test_reconciliation import PERIOD, upload_2b
 
@@ -234,6 +238,78 @@ class TestTheImportEndpointRefusals:
 
         assert response.status_code == 422
         assert "No invoices found" in response.json()["detail"]
+
+
+class TestWhoseStatementThisIs:
+    """A GSTR-2B is generated per registration and says so.
+
+    Importing one into the wrong tenant is the mistake a practice with several
+    clients on one login is placed to make, and nothing downstream can notice
+    it: every purchase in the books reconciles as missing from the statement,
+    every document in the statement as missing from the books, and the screen
+    reports the period's whole credit at risk. Those numbers are all correct
+    and the conclusion is nonsense.
+    """
+
+    @staticmethod
+    def _addressed_to(gstin: str | None) -> bytes:
+        payload = portal_json()
+        if gstin is None:
+            del payload["data"]["gstin"]
+        else:
+            payload["data"]["gstin"] = gstin
+        return json.dumps(payload).encode()
+
+    def test_a_statement_addressed_to_another_registration_is_refused(self, auth_client):
+        response = upload_2b(auth_client, content=self._addressed_to(SUPPLIER_GSTIN_SAME_STATE))
+
+        assert response.status_code == 422, response.text
+        detail = response.json()["detail"]
+        assert SUPPLIER_GSTIN_SAME_STATE in detail
+        assert BUSINESS_GSTIN in detail
+
+    def test_the_refusal_stores_nothing(self, auth_client):
+        upload_2b(auth_client, content=self._addressed_to(SUPPLIER_GSTIN_SAME_STATE))
+
+        assert auth_client.get("/api/v1/reconciliation/gstr2b/periods").json() == []
+
+    def test_the_tenants_own_statement_goes_through(self, auth_client):
+        response = upload_2b(auth_client, content=self._addressed_to(BUSINESS_GSTIN))
+        assert response.status_code in (200, 201), response.text
+
+    def test_the_addressee_is_read_case_and_space_insensitively(self, auth_client):
+        """Hand-edited exports arrive lower-cased and padded; that is not a mismatch."""
+        response = upload_2b(
+            auth_client, content=self._addressed_to(f"  {BUSINESS_GSTIN.lower()} ")
+        )
+        assert response.status_code in (200, 201), response.text
+
+    def test_a_statement_that_names_nobody_is_still_accepted(self, auth_client):
+        """A CSV export has no envelope, and neither do some JSON ones.
+
+        Refusing what the file does not say would reject downloads the portal
+        plainly produced, so an unknown addressee is not a mismatch.
+        """
+        response = upload_2b(auth_client, content=self._addressed_to(None))
+        assert response.status_code in (200, 201), response.text
+
+    def test_a_csv_export_carries_no_addressee(self):
+        assert gstr2b.recipient_gstin(b"GSTIN of supplier,Invoice number\n", "x.csv") is None
+
+    def test_an_unreadable_file_leaves_the_parser_to_say_so(self, auth_client):
+        """A broken file is a parse error, not a "wrong registration" error."""
+        response = upload_2b(auth_client, content=b"{not json")
+        assert response.status_code == 422
+        assert "GSTIN" not in response.json()["detail"]
+
+    @pytest.mark.parametrize("payload", [b"", b"[]", b'{"data": []}', b'"a string"'])
+    def test_shapes_that_carry_no_addressee_do_not_raise(self, payload):
+        assert gstr2b.recipient_gstin(payload, "x.json") is None
+
+    def test_an_envelope_without_the_data_wrapper_is_read_too(self):
+        assert gstr2b.recipient_gstin(
+            json.dumps({"gstin": BUSINESS_GSTIN, "docdata": {"b2b": []}}).encode(), "x.json"
+        ) == BUSINESS_GSTIN
 
 
 class TestWhichPeriodAStatementBelongsTo:

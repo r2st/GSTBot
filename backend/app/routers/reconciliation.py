@@ -65,7 +65,12 @@ _read_limit = RateLimit("reconcile_read", "240/minute")
         "`replaced_previous`. Invoices in the file that belong to *other* "
         "periods are reported in `other_periods` rather than treated as an "
         "error: those are late filings, and they reconcile against the month "
-        "they belong to."
+        "they belong to.\n\n"
+        "A statement the portal addressed to a different GSTIN is refused. The "
+        "2B is generated per registration, so one imported into the wrong "
+        "tenant reconciles to nothing on either side and reports the whole "
+        "period's credit at risk — which reads as a supplier catastrophe and "
+        "is a mis-click."
     ),
     responses={
         201: {"description": "Imported. Run a reconciliation next."},
@@ -74,8 +79,9 @@ _read_limit = RateLimit("reconcile_read", "240/minute")
         415: {"description": "Not a JSON or CSV file."},
         422: {
             "description": (
-                "Not a readable GSTR-2B, it contained no invoices, or no period "
-                "could be determined from it."
+                "Not a readable GSTR-2B, it contained no invoices, no period "
+                "could be determined from it, or it is addressed to another "
+                "GSTIN."
             )
         },
     },
@@ -128,6 +134,28 @@ async def import_gstr2b(
     if len(content) > max_bytes:
         raise HTTPException(
             status_code=413, detail=f"File exceeds the {settings.max_upload_mb} MB limit"
+        )
+
+    # Whose statement this is, before anything is read out of it. A 2B is
+    # generated per registration and the portal stamps the GSTIN on it, so a
+    # file addressed to somebody else is not this tenant's evidence about
+    # anything — and importing one is the mistake a practice with several
+    # clients on one login is placed to make.
+    #
+    # Refused rather than reconciled, because reconciling it looks like a
+    # catastrophe rather than a mis-click: every purchase in the books comes
+    # back missing from the statement, every document in the statement missing
+    # from the books, and the period's entire credit is reported at risk. The
+    # numbers are all correct and the conclusion is nonsense, and no screen
+    # downstream has anything left to notice it with.
+    addressee = gstr2b.recipient_gstin(content, filename)
+    if addressee and addressee != business.gstin:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"This GSTR-2B is addressed to {addressee}, but you are signed in as "
+                f"{business.gstin}. Import it under that registration instead."
+            ),
         )
 
     try:

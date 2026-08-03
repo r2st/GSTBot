@@ -224,6 +224,57 @@ def _statement_period(payload: dict) -> str | None:
     return None
 
 
+def _addressed_to(payload: dict) -> str | None:
+    """The buyer GSTIN the portal stamped on the statement, if it carries one.
+
+    A GSTR-2B is not a generic document: the portal generates one per
+    registration, and ``gstin`` at the top of the envelope says whose inward
+    supplies these are. Sitting beside ``rtnprd`` and read the same way, since
+    exports differ on whether the envelope is wrapped in ``data``.
+
+    ``None`` when the field is absent or unreadable, which is the ordinary case
+    for a CSV export — those have no envelope at all, only the table. The
+    caller decides what an unknown addressee means; it is not this module's
+    place to refuse a file the portal plainly produced.
+    """
+    for holder in (payload.get("data") if isinstance(payload.get("data"), dict) else None, payload):
+        if isinstance(holder, dict):
+            found = gstin_service.normalize(str(holder.get("gstin") or ""))
+            if found:
+                return found
+    return None
+
+
+def recipient_gstin(content: bytes, filename: str | None = None) -> str | None:
+    """Whose GSTR-2B this file is, or ``None`` when the file does not say.
+
+    Separate from :func:`parse` rather than carried on every record: this is a
+    fact about the statement, not about any invoice in it, and putting it on
+    fifteen hundred records would invite a reader to think it could differ
+    between them.
+
+    A 2B is addressed to one registration, and importing one addressed to
+    another is the mistake a practice with several clients on one login is
+    exactly placed to make — three browser tabs, three downloads, one of them
+    dropped into the wrong tenant. Nothing downstream notices: every purchase
+    in the books reconciles as missing from the statement, every document in
+    the statement as missing from the books, and the screen reports the whole
+    period's credit at risk. That reads as a catastrophic supplier failure and
+    is a mis-click, and there is nothing on the screen to tell the two apart.
+    """
+    if not content:
+        return None
+    text = content.decode("utf-8-sig", errors="replace").lstrip()
+    if not (text.startswith(("{", "[")) or (filename or "").lower().endswith(".json")):
+        return None
+    try:
+        payload = json.loads(text)
+    except ValueError:
+        # Not readable as JSON, so :func:`parse` is about to say so properly.
+        return None
+    return _addressed_to(payload) if isinstance(payload, dict) else None
+
+
 def _items_of(document: dict) -> list[dict]:
     """The rate-wise lines of an invoice or note, whichever key holds them."""
     for key in ("items", "itms"):
