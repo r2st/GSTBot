@@ -206,6 +206,72 @@ def test_a_sale_with_no_derivable_place_of_supply_is_an_error():
     assert issues_for(invoice)["place_of_supply"] is Severity.ERROR
 
 
+# ---------------------------------------------------------------------------
+# The same split, seen from the buying end
+#
+# s.7/s.8 of the IGST Act compare the *supplier's* location with the place of
+# supply, and on a purchase the supplier is the counterparty. The place of
+# supply on a purchase is our own state — which is what a vendor prints on the
+# invoice and what the parser reads off it.
+# ---------------------------------------------------------------------------
+
+def purchase(**kwargs) -> Invoice:
+    """An inter-state purchase: Karnataka supplier, Maharashtra buyer (us)."""
+    defaults = dict(
+        invoice_type=InvoiceType.PURCHASE,
+        invoice_number="P-001",
+        # What the Karnataka vendor prints: the supply lands in our state.
+        place_of_supply="27",
+    )
+    defaults.update(kwargs)
+    return sale(**defaults)
+
+
+def test_an_interstate_purchase_is_clean_when_its_place_of_supply_was_read():
+    """Whether the parser found the field cannot decide whether it is fileable.
+
+    Comparing the place of supply with our own state made every inter-state
+    purchase look intra-state, because on a purchase the place of supply *is*
+    our state. The identical invoice with the field missing passed.
+    """
+    assert issues_for(purchase()) == {}
+    assert issues_for(purchase(place_of_supply=None)) == {}
+
+
+def test_an_interstate_purchase_charged_local_tax_is_an_error():
+    """A Karnataka supplier charging CGST/SGST is tax paid to Maharashtra.
+
+    Neither government is owed what it received, the credit will not match in
+    GSTR-2B, and this validated clean.
+    """
+    invoice = purchase(
+        igst=Decimal("0.00"),
+        cgst=Decimal("9000.00"),
+        sgst=Decimal("9000.00"),
+    )
+    assert issues_for(invoice)["igst"] is Severity.ERROR
+
+
+def test_an_intrastate_purchase_carrying_igst_is_still_an_error():
+    invoice = purchase(
+        counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        igst=Decimal("18000.00"),
+        cgst=Decimal("0.00"),
+        sgst=Decimal("0.00"),
+    )
+    assert issues_for(invoice)["igst"] is Severity.ERROR
+
+
+def test_a_clean_intrastate_purchase_raises_nothing():
+    invoice = purchase(
+        counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        igst=Decimal("0.00"),
+        cgst=Decimal("9000.00"),
+        sgst=Decimal("9000.00"),
+    )
+    assert issues_for(invoice) == {}
+
+
 def test_an_invoice_with_no_value_at_all_is_an_error():
     invoice = sale(
         taxable_value=Decimal("0.00"),

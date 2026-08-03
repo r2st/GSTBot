@@ -277,14 +277,36 @@ def validate_invoice(
     # Which applies is decided by where the supply goes, not by preference, and
     # getting it wrong means tax paid to the wrong government — recoverable
     # only by amending the return.
+    #
+    # s.7 and s.8 of the IGST Act put it as: the supply is inter-state when the
+    # *supplier's* location and the place of supply are in different states. So
+    # which end of the invoice is the supplier decides what to compare against,
+    # and it is not the same end in both directions. On a sale we are the
+    # supplier; on a purchase the counterparty is, and the place of supply is
+    # our own state — which is exactly what a vendor prints on the invoice, and
+    # what the parser reads off it.
+    #
+    # Comparing the place of supply with our own state either way made the
+    # answer depend on whether the parser found the field. An inter-state
+    # purchase with the place of supply read off it came out as "intra-state
+    # supply in 27 carrying IGST" — a blocking error on a correct invoice —
+    # while the same purchase with the field missing passed. The genuinely
+    # wrong one went the other way: a Karnataka supplier charging CGST and SGST
+    # to a Maharashtra buyer is tax paid to a government that is not owed it,
+    # and it validated clean.
     counterparty_state = (
         gstin_service.state_code_of(invoice.counterparty_gstin or "")
         if invoice.counterparty_gstin
         else None
     )
-    place_of_supply = invoice.place_of_supply or counterparty_state
-    if business_state and place_of_supply:
-        interstate = place_of_supply != business_state
+    if is_sales:
+        supplier_state = business_state
+        place_of_supply = invoice.place_of_supply or counterparty_state
+    else:
+        supplier_state = counterparty_state
+        place_of_supply = invoice.place_of_supply or business_state
+    if supplier_state and place_of_supply:
+        interstate = place_of_supply != supplier_state
         has_igst = (invoice.igst or ZERO) > ZERO
         has_local = (invoice.cgst or ZERO) > ZERO or (invoice.sgst or ZERO) > ZERO
 
@@ -292,7 +314,8 @@ def validate_invoice(
             add(
                 "igst",
                 Severity.ERROR,
-                f"Inter-state supply to {place_of_supply} carries CGST/SGST; it should be IGST",
+                f"Inter-state supply from {supplier_state} to {place_of_supply} carries "
+                "CGST/SGST; it should be IGST",
             )
         if not interstate and has_igst:
             add(
