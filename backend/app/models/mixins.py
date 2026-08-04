@@ -27,6 +27,20 @@ JSONType = JSON().with_variant(JSONB, "postgresql")
 # line without ever rounding through a float.
 Money = Numeric(16, 2)
 
+# The largest figure those columns can hold: fourteen digits before the point.
+# Declared beside the type so the two cannot drift, and exported because a
+# bound on the column alone is enforced in two different places by the two
+# databases this runs on — Postgres refuses the INSERT, SQLite keeps whatever
+# it was handed — and neither of those is where a caller should find out.
+#
+# It is also a bound on the *arithmetic*. ``Decimal.quantize`` raises
+# ``InvalidOperation`` rather than rounding once the result needs more than the
+# context's 28 significant digits, and every figure in this product is
+# quantized to the paisa on its way out. A single amount past that limit
+# therefore does not merely store wrongly: it makes every screen that totals it
+# raise, which is a 500 on a read caused by a write that answered 200.
+MONEY_MAX = Decimal("99999999999999.99")
+
 ZERO = Decimal("0.00")
 
 

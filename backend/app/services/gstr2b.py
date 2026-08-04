@@ -35,7 +35,7 @@ from decimal import Decimal
 
 from app.services import gst_calendar
 from app.services import gstin as gstin_service
-from app.services.invoice_parser import to_date, to_decimal
+from app.services.invoice_parser import to_date, to_decimal, to_money
 
 logger = logging.getLogger(__name__)
 
@@ -152,20 +152,26 @@ def period_from_portal(value: object) -> str | None:
     real download go down the same path.
     """
     text = str(value or "").strip()
-    # Month checked, not just the shape: this is the one path by which a period
-    # enters the database without passing a route's validation, and a hand-
-    # edited statement claiming ``2026-13`` would be stored and then reconciled
-    # against arithmetic that assumes the month exists.
+    # Validated rather than merely shaped: this is the one path by which a
+    # period enters the database without passing a route's validation, and a
+    # hand-edited statement claiming ``2026-13`` would be stored and then
+    # reconciled against arithmetic that assumes the month exists.
+    #
+    # The assembled candidates go back through the same check rather than
+    # trusting the month digits alone. ``129999`` is six digits with a real
+    # month in front, and it used to be accepted and stored as ``9999-12`` — a
+    # statement filed under a year whose due date ``date()`` will not construct,
+    # so every screen scoped to that period answered 500 from then on. The
+    # month was the only half of the field anyone was looking at.
     if gst_calendar.is_period(text):
         return text
     if re.fullmatch(r"\d{6}", text):
-        month, year = text[:2], text[2:]
-        if 1 <= int(month) <= 12:
-            return f"{year}-{month}"
-        # Some exports write YYYYMM instead.
-        year, month = text[:4], text[4:]
-        if 1 <= int(month) <= 12:
-            return f"{year}-{month}"
+        for candidate in (
+            f"{text[2:]}-{text[:2]}",  # MMYYYY, what the portal writes
+            f"{text[:4]}-{text[4:]}",  # YYYYMM, what some exports write
+        ):
+            if gst_calendar.is_period(candidate):
+                return candidate
     return None
 
 
@@ -182,7 +188,13 @@ def _period_of(record: GSTR2BRecord, fallback: str | None) -> str | None:
 
 
 def _money(value: object) -> Decimal:
-    return to_decimal(value) or ZERO
+    # ``to_money`` rather than ``to_decimal``: a statement is a file someone
+    # uploads, so nothing in it is trusted to be an amount a money column can
+    # hold. ``json.loads`` accepts the bare ``Infinity`` token, and one of those
+    # in a ``txval`` used to be summed into the stored statement, committed, and
+    # only *then* refused by the response model — a 500 for the caller over a
+    # row that is already there, and every later read of that period the same.
+    return to_money(value) or ZERO
 
 
 # ---------------------------------------------------------------------------

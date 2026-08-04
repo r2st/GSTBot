@@ -5,6 +5,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.mixins import MONEY_MAX
+
 
 class TaxHeadsOut(BaseModel):
     """An amount split across the four heads.
@@ -111,11 +113,16 @@ class SetOffRequest(BaseModel):
     against figures that are not in the books yet.
     """
 
-    credit_igst: Decimal = Field(default=Decimal("0"), ge=0)
-    credit_cgst: Decimal = Field(default=Decimal("0"), ge=0)
-    credit_sgst: Decimal = Field(default=Decimal("0"), ge=0)
-    credit_cess: Decimal = Field(default=Decimal("0"), ge=0)
-    liability_igst: Decimal = Field(default=Decimal("0"), ge=0)
-    liability_cgst: Decimal = Field(default=Decimal("0"), ge=0)
-    liability_sgst: Decimal = Field(default=Decimal("0"), ge=0)
-    liability_cess: Decimal = Field(default=Decimal("0"), ge=0)
+    # Bounded above as well as below: the waterfall subtracts these and
+    # quantizes the result to paise, and a figure wider than a money column can
+    # hold takes ``quantize`` past the decimal context and raises. A what-if is
+    # the one place a caller is expected to type a number nothing validated
+    # upstream, so it is the one place that has to say no to it.
+    credit_igst: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    credit_cgst: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    credit_sgst: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    credit_cess: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    liability_igst: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    liability_cgst: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    liability_sgst: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)
+    liability_cess: Decimal = Field(default=Decimal("0"), ge=0, le=MONEY_MAX)

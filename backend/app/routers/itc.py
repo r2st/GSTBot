@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
+from app.models.mixins import MONEY_MAX
 from app.schemas.itc import ITCSummaryOut, Rule37Out, SetOffOut, SetOffRequest
 from app.services import gst_calendar, invoice_service
 from app.services import itc as itc_service
@@ -43,8 +44,11 @@ _setoff_limit = RateLimit("itc_setoff", "240/minute")
 )
 def get_itc_summary(
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
-    exempt_turnover: Decimal | None = Query(default=None, ge=0),
-    total_turnover: Decimal | None = Query(default=None, ge=0),
+    # Bounded above for the same reason the stored amounts are: these two go
+    # straight into the Rule 42 ratio and out through the paise quantize, and
+    # ``1E+100`` in a query string was a 500 rather than a 422.
+    exempt_turnover: Decimal | None = Query(default=None, ge=0, le=MONEY_MAX),
+    total_turnover: Decimal | None = Query(default=None, ge=0, le=MONEY_MAX),
     as_of: date | None = Query(
         default=None, description="Date the 180-day clock is measured against"
     ),

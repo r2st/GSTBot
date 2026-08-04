@@ -7,6 +7,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.invoice import InvoiceSource, InvoiceStatus, InvoiceType
+from app.models.mixins import MONEY_MAX
 from app.services import gst_calendar
 from app.services import gstin as gstin_service
 
@@ -120,12 +121,19 @@ class InvoiceUpdate(BaseModel):
     invoice_date: date | None = None
     place_of_supply: str | None = Field(default=None, max_length=2)
     hsn_code: str | None = Field(default=None, max_length=8)
-    taxable_value: Decimal | None = Field(default=None, ge=0)
-    cgst: Decimal | None = Field(default=None, ge=0)
-    sgst: Decimal | None = Field(default=None, ge=0)
-    igst: Decimal | None = Field(default=None, ge=0)
-    cess: Decimal | None = Field(default=None, ge=0)
-    total_value: Decimal | None = Field(default=None, ge=0)
+    # Bounded above as well as below. ``ge=0`` alone let a correction of
+    # ``1E+100`` through with a 200: the column took it on SQLite, and every
+    # screen that totals the period then raised ``InvalidOperation`` out of the
+    # quantize that rounds to paise — the dashboard, the ITC summary and the
+    # GSTR-3B preview all 500ing on a read, because of a write that had said it
+    # was fine. ``MONEY_MAX`` is what ``Numeric(16, 2)`` actually holds, so the
+    # refusal happens next to the box the figure was typed into.
+    taxable_value: Decimal | None = Field(default=None, ge=0, le=MONEY_MAX)
+    cgst: Decimal | None = Field(default=None, ge=0, le=MONEY_MAX)
+    sgst: Decimal | None = Field(default=None, ge=0, le=MONEY_MAX)
+    igst: Decimal | None = Field(default=None, ge=0, le=MONEY_MAX)
+    cess: Decimal | None = Field(default=None, ge=0, le=MONEY_MAX)
+    total_value: Decimal | None = Field(default=None, ge=0, le=MONEY_MAX)
     tax_rate: Decimal | None = Field(default=None, ge=0, le=100)
     itc_eligible: bool | None = None
     reverse_charge: bool | None = None

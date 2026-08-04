@@ -24,6 +24,7 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 
 from app.core.config import settings
+from app.models.mixins import MONEY_MAX
 from app.services import document_text, gst_calendar
 from app.services import gstin as gstin_service
 from app.services.openrouter_client import OpenRouterError, chat_json, image_data_url, is_configured
@@ -64,6 +65,28 @@ VALID_TAX_RATES = (
 
 # A number with optional Indian digit grouping and up to two decimals.
 _NUMBER_PATTERN = re.compile(r"-?\d[\d,]*(?:\.\d{1,2})?")
+
+# An exponent immediately after such a match, which means the match is only the
+# mantissa of a number the pattern above cannot express.
+#
+# The pattern is deliberately narrow — an invoice does not print ``2E5`` — but
+# narrow is not the same as safe, because ``search`` returns a *prefix* rather
+# than nothing. ``"1E+100"`` matched ``"1"``, so the ceiling in :func:`to_money`
+# was handed the figure one and agreed with it: an amount a hundred orders of
+# magnitude out did not fail a bound, it silently became a rupee. ``"1.5E+30"``
+# became one rupee fifty.
+#
+# It is reachable from both directions. A model asked for JSON emits ``1e300``
+# as a bare float — caught — but ``"1.2e5"`` as a string when it decides to
+# quote its numbers, and a spreadsheet exported to CSV writes any wide column
+# in exactly this form.
+#
+# So a truncated match is refused rather than used. Refusing leaves a zero and,
+# on the model path, a warning naming what was dropped; using the mantissa
+# leaves a plausible small number with nothing to show it was ever anything
+# else. The first is a tax box a reviewer can see is empty, and the second is a
+# figure nobody has any reason to look at twice.
+_EXPONENT_SUFFIX = re.compile(r"[eE][+-]?\d")
 
 _EXTRACTION_SCHEMA = """{
   "supplier_gstin": "15-char GSTIN of the party who issued the invoice, or null",
@@ -179,18 +202,61 @@ def to_decimal(value: object, default: Decimal | None = Decimal("0.00")) -> Deci
     if value is None or isinstance(value, bool):
         return default
     if isinstance(value, Decimal):
-        return value
+        return value if value.is_finite() else default
     if isinstance(value, int | float):
-        return Decimal(str(value))
+        # ``Decimal(str(inf))`` is ``Decimal('Infinity')``, which is a Decimal
+        # and is not a number anything here can do arithmetic with. It is
+        # reachable: ``json.loads`` accepts the bare ``Infinity`` and ``NaN``
+        # tokens by default, so a portal export or a model response containing
+        # one arrives as a float and would be coerced rather than rejected.
+        coerced = Decimal(str(value))
+        return coerced if coerced.is_finite() else default
     # Match the number rather than stripping non-digits: stripping leaves the
     # full stop in "Rs. 1000.50" behind, and ".1000.50" is not a Decimal.
-    match = _NUMBER_PATTERN.search(str(value))
+    text = str(value)
+    match = _NUMBER_PATTERN.search(text)
     if match is None:
+        return default
+    # Only the mantissa of a scientific-notation number was matched, so the
+    # digits in hand are not the figure. See :data:`_EXPONENT_SUFFIX`.
+    if _EXPONENT_SUFFIX.match(text, match.end()):
         return default
     try:
         return Decimal(match.group(0).replace(",", ""))
     except InvalidOperation:
         return default
+
+
+def to_money(value: object, default: Decimal | None = Decimal("0.00")) -> Decimal | None:
+    """Coerce *value* to an amount a money column can hold, or *default*.
+
+    :func:`to_decimal` answers "is this a number"; this answers "is this an
+    amount", and the two are not the same question. ``Numeric(16, 2)`` holds
+    fourteen digits before the point, and nothing above that is a figure any
+    invoice carries — but every door into this product would take one. A model
+    asked for JSON can emit ``1e300``; a hand-edited GSTR-2B can carry a run of
+    forty digits; ``json.loads`` will hand over a bare ``Infinity``.
+
+    What made it worth a check of its own is where the failure lands. The write
+    succeeds — Postgres refuses the INSERT, but SQLite keeps whatever it was
+    handed, so the two backends disagree about whether there is a problem at
+    all — and the *read* is what breaks. Every figure in this product is
+    quantized to the paisa on its way out, and ``Decimal.quantize`` raises
+    ``InvalidOperation`` rather than rounding once a result needs more than the
+    context's 28 significant digits. So one overlarge amount is not a wrong
+    number on one screen: it is a 500 on the dashboard, the ITC summary and the
+    GSTR-3B preview, for as long as the row is there, caused by a write that
+    answered 200.
+
+    Out of range is discarded rather than clamped. Clamping invents a figure of
+    ninety-nine thousand crore and files it; discarding leaves the field at
+    zero where a reviewer can see it is missing, which is the same trade the
+    parser already makes for a GSTIN it cannot believe.
+    """
+    coerced = to_decimal(value, default=None)
+    if coerced is None or not coerced.is_finite() or abs(coerced) > MONEY_MAX:
+        return default
+    return coerced
 
 
 def to_date(value: object) -> date | None:
@@ -311,7 +377,7 @@ def _amount_on_line(line: str) -> Decimal | None:
     for an 81,000.
     """
     numbers = _NUMBER_PATTERN.findall(_PERCENT_PATTERN.sub(" ", line))
-    return to_decimal(numbers[-1], default=None) if numbers else None
+    return to_money(numbers[-1], default=None) if numbers else None
 
 
 def _rate_on_line(line: str) -> Decimal | None:
@@ -355,9 +421,9 @@ def parse_heuristic(text: str) -> ParsedInvoice:
                 rates[attr] = rate
 
     if match := _TAXABLE_PATTERN.search(text):
-        result.taxable_value = to_decimal(match.group(1)) or Decimal("0.00")
+        result.taxable_value = to_money(match.group(1)) or Decimal("0.00")
     if match := _TOTAL_PATTERN.search(text):
-        result.total_value = to_decimal(match.group(1)) or Decimal("0.00")
+        result.total_value = to_money(match.group(1)) or Decimal("0.00")
 
     # An 18% invoice is printed as 9% CGST + 9% SGST, so the invoice's rate is
     # the sum of the two halves — reporting 9 here would understate every
@@ -448,7 +514,29 @@ def _from_model_payload(payload: dict, text: str, model: str) -> ParsedInvoice:
             result.warnings.append(f"Discarded invalid {key.replace('_', ' ')}: {candidate}")
 
     for attr in ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value"):
-        setattr(result, attr, to_decimal(payload.get(attr)) or Decimal("0.00"))
+        raw = payload.get(attr)
+        amount = to_money(raw, default=None)
+        if amount is None and str(raw if raw is not None else "").strip():
+            # The model put something in this box and it is not an amount.
+            # Said out loud, beside the zero it is being left as, because a
+            # reviewer looking at a blank tax box needs to know the extractor
+            # saw something there and refused it.
+            #
+            # Keyed on "was the field filled in" rather than on "did it parse
+            # as a number", because the two most interesting refusals are not
+            # numbers by the time they get here: ``"1E+100"`` is a mantissa the
+            # number pattern cannot spell, and ``Infinity`` is not finite. A
+            # guard asking ``to_decimal`` first fell silent on exactly those.
+            #
+            # The wording distinguishes the two, since they mean different
+            # things to whoever reads the screen: a figure too large to be
+            # money says the extraction found the right box and misread the
+            # magnitude, and anything else says it did not find the box.
+            kind = "out-of-range" if to_decimal(raw, default=None) is not None else "invalid"
+            result.warnings.append(
+                f"Discarded an {kind} {attr.replace('_', ' ')}: {str(raw)[:40]}"
+            )
+        setattr(result, attr, amount or Decimal("0.00"))
     result.tax_rate = _normalize_rate(payload.get("tax_rate"))
 
     pos = _clean_str(payload.get("place_of_supply"), 2)
