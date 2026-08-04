@@ -161,8 +161,15 @@ def _message_text(choice: Any) -> str:
         return ""
     content = message.get("content")
     if isinstance(content, list):
-        # Some models return content as a list of typed parts.
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        # Some models return content as a list of typed parts. Each part's
+        # ``text`` is coerced rather than trusted: ``str.join`` raises
+        # ``TypeError`` on a part carrying a number or a nested object there,
+        # and ``TypeError`` is not :class:`OpenRouterError` — so it escapes
+        # past the caller's fallback for exactly the reason the shape checks
+        # above exist, and the invoice fails instead of degrading.
+        content = "".join(
+            str(part.get("text") or "") for part in content if isinstance(part, dict)
+        )
     if content:
         return str(content).strip()
     # Reasoning models park the whole answer here when content comes back null.

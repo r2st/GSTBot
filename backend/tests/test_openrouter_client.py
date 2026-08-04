@@ -866,3 +866,78 @@ class TestABodyOfTheWrongShape:
     def test_a_well_formed_body_still_reads(self, configured, transport):
         transport["state"]["response"] = _FakeResponse(payload=_completion("ok"))
         assert chat_completion(MESSAGES) == "ok"
+
+
+class TestAContentPartThatIsNotText:
+    """A list-shaped ``content`` whose parts do not hold strings.
+
+    The typed-part format is the one place this module joins values it did not
+    coerce, and ``str.join`` raises ``TypeError`` on anything that is not a
+    string. A part carrying a number, a null or a nested object therefore left
+    by a class no caller catches — the same escape the object-shape checks
+    above exist to close, one level further in — and the upload failed where it
+    should have fallen back to the regex reader.
+
+    Coerced rather than skipped: a model that answered ``{"text": 42}`` said
+    42, and dropping it would turn a readable completion into an empty one,
+    which is a different error with the same result.
+    """
+
+    @pytest.mark.parametrize(
+        "part",
+        [{"text": 5}, {"text": 1.5}, {"text": True}, {"text": {"a": 1}}, {"text": [1]}],
+        ids=["int", "float", "bool", "object", "list"],
+    )
+    def test_a_part_whose_text_is_not_a_string_does_not_raise_typeerror(
+        self, configured, transport, part
+    ):
+        transport["state"]["response"] = _FakeResponse(
+            payload={"choices": [{"message": {"content": [part]}}]}
+        )
+        # Whatever it makes of it, it must be a string or an OpenRouterError —
+        # never TypeError, which is what escapes the caller's fallback.
+        try:
+            assert isinstance(chat_completion(MESSAGES), str)
+        except OpenRouterError:
+            pass
+
+    def test_the_number_in_the_part_is_read_rather_than_dropped(
+        self, configured, transport
+    ):
+        transport["state"]["response"] = _FakeResponse(
+            payload={"choices": [{"message": {"content": [{"text": 42}]}}]}
+        )
+        assert chat_completion(MESSAGES) == "42"
+
+    def test_a_part_with_no_text_at_all_contributes_nothing(self, configured, transport):
+        transport["state"]["response"] = _FakeResponse(
+            payload={"choices": [{"message": {"content": [{"type": "image"}, {"text": "hi"}]}}]}
+        )
+        assert chat_completion(MESSAGES) == "hi"
+
+    def test_a_null_text_contributes_nothing(self, configured, transport):
+        transport["state"]["response"] = _FakeResponse(
+            payload={"choices": [{"message": {"content": [{"text": None}, {"text": "hi"}]}}]}
+        )
+        assert chat_completion(MESSAGES) == "hi"
+
+    def test_ordinary_typed_parts_still_concatenate(self, configured, transport):
+        transport["state"]["response"] = _FakeResponse(
+            payload={
+                "choices": [
+                    {"message": {"content": [{"text": "one "}, {"text": "two"}]}}
+                ]
+            }
+        )
+        assert chat_completion(MESSAGES) == "one two"
+
+    def test_a_bad_part_reaches_chat_json_without_a_typeerror_either(
+        self, configured, transport
+    ):
+        # chat_json is what the invoice extractor calls, and it is the caller
+        # whose fallback the escaping TypeError was skipping past.
+        transport["state"]["response"] = _FakeResponse(
+            payload={"choices": [{"message": {"content": [{"text": 5}]}}]}
+        )
+        with pytest.raises(OpenRouterError):
+            chat_json(MESSAGES)
