@@ -153,8 +153,12 @@ def _headers() -> dict[str, str]:
     }
 
 
-def _message_text(choice: dict[str, Any]) -> str:
-    message = choice.get("message") or {}
+def _message_text(choice: Any) -> str:
+    if not isinstance(choice, dict):
+        return ""
+    message = choice.get("message")
+    if not isinstance(message, dict):
+        return ""
     content = message.get("content")
     if isinstance(content, list):
         # Some models return content as a list of typed parts.
@@ -269,14 +273,25 @@ def _completion_text(response: Any) -> str:
     Separate from the retry loop because none of these failures is transient:
     a body that is not JSON, or has no choices, is a response the same request
     would get again.
+
+    Shape is checked as well as syntax. A gateway or a misbehaving provider can
+    answer 200 with valid JSON that is not an object — a bare list, a string, a
+    ``null`` — and reaching for ``choices`` on it raised ``AttributeError``.
+    Every caller here is written to catch :class:`OpenRouterError` and fall
+    back to the heuristic extractor, so a failure that arrives under any other
+    class does not degrade, it escapes: the invoice ends up ``failed`` with a
+    stack trace instead of parsed by the regex reader that was standing by.
     """
     try:
         data = response.json()
     except ValueError as exc:
         raise OpenRouterError("OpenRouter returned a non-JSON body") from exc
 
-    choices = data.get("choices") or []
-    if not choices:
+    if not isinstance(data, dict):
+        raise OpenRouterError(f"OpenRouter returned a non-object body: {str(data)[:300]}")
+
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices:
         raise OpenRouterError(f"OpenRouter returned no choices: {str(data)[:300]}")
 
     text = _message_text(choices[0])

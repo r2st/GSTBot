@@ -789,3 +789,80 @@ class TestEveryFailureIsCatchable:
     def test_the_module_exposes_what_callers_import(self):
         for name in ("is_configured", "chat_completion", "chat_json", "OpenRouterError"):
             assert hasattr(openrouter_client, name)
+
+
+# --------------------------------------------------------------------------
+# Bodies that are JSON, and still not a completion
+# --------------------------------------------------------------------------
+
+class TestABodyOfTheWrongShape:
+    """200 OK, valid JSON, and nothing where the completion should be.
+
+    A gateway in front of the free tier, or a provider having a bad day,
+    answers with a bare list, a quoted string, or `null` — all of them valid
+    JSON, none of them an object with `choices` in it. Reaching for `choices`
+    on those raised `AttributeError`, and that is the one thing this module
+    must never emit: every caller catches `OpenRouterError` to fall back to the
+    deterministic extractor, so an exception of any other class does not
+    degrade the upload, it fails it. The invoice lands in the error queue with
+    a stack trace while the regex reader that would have read it stood by.
+    """
+
+    @pytest.mark.parametrize(
+        "payload",
+        [[], [{"message": {"content": "hi"}}], "a string", 7, 1.5, True],
+        ids=["empty-list", "list-of-choices", "string", "int", "float", "bool"],
+    )
+    def test_a_body_that_is_not_an_object_is_an_openrouter_error(
+        self, configured, transport, payload
+    ):
+        transport["state"]["response"] = _FakeResponse(payload=payload)
+        with pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+
+    @pytest.mark.parametrize(
+        "choices",
+        [5, "abc", {"message": {"content": "hi"}}],
+        ids=["int", "string", "object"],
+    )
+    def test_choices_that_is_not_a_list_is_an_openrouter_error(
+        self, configured, transport, choices
+    ):
+        transport["state"]["response"] = _FakeResponse(payload={"choices": choices})
+        with pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+
+    @pytest.mark.parametrize("choice", [5, "abc", None, [1, 2]])
+    def test_a_choice_that_is_not_an_object_is_an_openrouter_error(
+        self, configured, transport, choice
+    ):
+        transport["state"]["response"] = _FakeResponse(payload={"choices": [choice]})
+        with pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+
+    @pytest.mark.parametrize("message", [5, "abc", None, [1, 2]])
+    def test_a_message_that_is_not_an_object_is_an_openrouter_error(
+        self, configured, transport, message
+    ):
+        transport["state"]["response"] = _FakeResponse(payload={"choices": [{"message": message}]})
+        with pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+
+    def test_the_error_says_what_came_back(self, configured, transport):
+        # The body is what tells whoever reads the log whether this was the
+        # provider or a proxy in the way, so it belongs in the message.
+        transport["state"]["response"] = _FakeResponse(payload=["nope"])
+        with pytest.raises(OpenRouterError, match="nope"):
+            chat_completion(MESSAGES)
+
+    def test_a_wrong_shape_reaches_chat_json_as_an_openrouter_error_too(
+        self, configured, transport
+    ):
+        # chat_json is what the invoice extractor actually calls.
+        transport["state"]["response"] = _FakeResponse(payload=[])
+        with pytest.raises(OpenRouterError):
+            chat_json(MESSAGES)
+
+    def test_a_well_formed_body_still_reads(self, configured, transport):
+        transport["state"]["response"] = _FakeResponse(payload=_completion("ok"))
+        assert chat_completion(MESSAGES) == "ok"
