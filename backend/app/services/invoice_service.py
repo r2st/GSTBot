@@ -144,6 +144,23 @@ def store_upload(content: bytes, filename: str, business_id: int) -> str:
     return str(path)
 
 
+def _discard_upload(path: str | None) -> None:
+    """Remove a stored file whose row was never committed.
+
+    Best effort, and deliberately silent about failure: this runs while an
+    exception is already on its way up, and the caller is entitled to see that
+    one rather than an unlink error raised on top of it. A file left behind
+    because the volume went read-only is the same orphan as before, which is
+    the state this is trying to improve on rather than guarantee.
+    """
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError as exc:  # noqa: BLE001 - the original failure is the story
+        logger.warning("Could not remove the orphaned upload %s: %s", path, exc)
+
+
 def find_duplicate(
     db: Session,
     business_id: int,
@@ -313,6 +330,7 @@ def create_pending_invoice(
             f"This file was already uploaded as invoice {duplicate.id}", duplicate.id
         )
 
+    stored = store_upload(content, filename, business.id)
     invoice = Invoice(
         business_id=business.id,
         invoice_type=invoice_type,
@@ -322,10 +340,28 @@ def create_pending_invoice(
         content_type=content_type,
         file_size=len(content),
         file_hash=digest,
-        storage_path=store_upload(content, filename, business.id),
+        storage_path=stored,
     )
     db.add(invoice)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        # The bytes are on disk before the row that names them exists, and they
+        # have to be: ``storage_path`` is a column on that row. So a commit
+        # that fails leaves a file nothing in the database points at, and
+        # nothing ever will — no query reads ``upload_dir``, the delete route
+        # keeps stored files on purpose, and there is no sweeper. Every upload
+        # that meets a full pool, a dropped connection or a constraint
+        # therefore leaves a permanent orphan, on a volume sized for the rows
+        # that exist rather than for the ones that failed to.
+        #
+        # Deleted here rather than swept later because this is the only moment
+        # anything knows the path is unreferenced; after the rollback it is
+        # indistinguishable from a file whose row was written by a request that
+        # is still in flight.
+        db.rollback()
+        _discard_upload(stored)
+        raise
     db.refresh(invoice)
     return invoice
 
