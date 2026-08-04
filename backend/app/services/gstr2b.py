@@ -287,18 +287,38 @@ def recipient_gstin(content: bytes, filename: str | None = None) -> str | None:
     return _addressed_to(payload) if isinstance(payload, dict) else None
 
 
+def _as_list(value: object) -> list:
+    """*value* when it is a list, and an empty list otherwise.
+
+    Used at the two places a GSTR-2B nests one list inside another. A dict or a
+    string is iterable but yields keys and characters, never documents, so it
+    is treated the same as a number: nothing to read here.
+    """
+    return value if isinstance(value, list) else []
+
+
+def _flatten_item(item: dict) -> dict:
+    """One rate line, with a nested ``itm_det`` folded up into it.
+
+    ``itm_det`` is only honoured when it is itself an object. A file that
+    carries a number or a list there is malformed, and unpacking it raised a
+    ``TypeError`` out of the middle of the parse — which reaches the caller as
+    a 500 rather than as the "this is not a readable 2B" the endpoint exists to
+    say. The rest of the line is still readable, so the bad nesting is dropped
+    rather than the invoice.
+    """
+    nested = item.get("itm_det")
+    base = nested if isinstance(nested, dict) else {}
+    return {**base, **{k: v for k, v in item.items() if k != "itm_det"}}
+
+
 def _items_of(document: dict) -> list[dict]:
     """The rate-wise lines of an invoice or note, whichever key holds them."""
     for key in ("items", "itms"):
         value = document.get(key)
         if isinstance(value, list):
             # b2b items are flat dicts; some exports nest them under "itm_det".
-            return [
-                {**item.get("itm_det", {}), **{k: v for k, v in item.items() if k != "itm_det"}}
-                if isinstance(item, dict)
-                else {}
-                for item in value
-            ]
+            return [_flatten_item(item) if isinstance(item, dict) else {} for item in value]
     return []
 
 
@@ -364,10 +384,17 @@ def parse_json(payload: dict | str | bytes) -> list[GSTR2BRecord]:
 
     for section in _INVOICE_SECTIONS + _NOTE_SECTIONS:
         is_note = section in _NOTE_SECTIONS
-        for supplier in docdata.get(section) or []:
+        # A section, and a supplier's document list inside it, are lists in
+        # every 2B the portal produces. Iterating whatever else turned up threw
+        # ``TypeError: 'int' object is not iterable`` from inside the parse, and
+        # an upload the caller could plainly see was malformed came back as a
+        # 500 with a correlation id instead of the 400 that names the problem.
+        # Anything that is not a list of objects carries no invoice to read, so
+        # it is skipped and the rest of the file is still imported.
+        for supplier in _as_list(docdata.get(section)):
             if not isinstance(supplier, dict):
                 continue
-            documents = supplier.get("inv") or supplier.get("nt") or []
+            documents = _as_list(supplier.get("inv") or supplier.get("nt"))
             for document in documents:
                 if not isinstance(document, dict):
                     continue

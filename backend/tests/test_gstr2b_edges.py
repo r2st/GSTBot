@@ -14,6 +14,7 @@ failed to file and is the finding an accountant acts on.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 
 import pytest
 
@@ -431,3 +432,107 @@ class TestListingRunsByPeriod:
         empty = auth_client.get("/api/v1/reconciliation", params={"period": "2019-01"})
         assert empty.json()["total"] == 0
         assert empty.json()["items"] == []
+
+
+# --------------------------------------------------------------------------
+# Shapes the portal never produces
+# --------------------------------------------------------------------------
+
+class TestASectionThatIsNotAList:
+    """`b2b`, `cdnr` and a supplier's `inv` are lists, or they hold nothing.
+
+    A hand-edited export, a truncated download, or a middleware that
+    helpfully replaced an empty list with `0` puts something else there. The
+    parser iterated it regardless, so `'int' object is not iterable` came out
+    of the middle of the read and the upload — which the endpoint can see is
+    malformed, and has a 400 ready to say so — was answered with a 500 and a
+    correlation id instead. Nothing in that response tells the user their file
+    is the problem, so the failure reads as an outage.
+    """
+
+    @pytest.mark.parametrize("section", ["b2b", "b2ba", "cdnr", "cdnra"])
+    @pytest.mark.parametrize("value", [5, "abc", {"ctin": "x"}, None, 1.5])
+    def test_a_section_holding_something_other_than_a_list_is_not_read(
+        self, section, value
+    ):
+        payload = {"gstin": BUSINESS_GSTIN, "docdata": {section: value, "b2b": []}}
+        payload["docdata"][section] = value
+        # No invoice can be read out of it, but it must not raise TypeError.
+        assert gstr2b.parse_json(payload) == []
+
+    @pytest.mark.parametrize("value", [3, "abc", 2.5])
+    def test_a_supplier_whose_documents_are_not_a_list_is_skipped(self, value):
+        payload = {
+            "gstin": BUSINESS_GSTIN,
+            "docdata": {"b2b": [{"ctin": SUPPLIER_GSTIN_SAME_STATE, "inv": value}]},
+        }
+        assert gstr2b.parse_json(payload) == []
+
+    def test_one_malformed_supplier_does_not_cost_the_others_their_invoices(self):
+        # The point of skipping rather than refusing: a file with one bad
+        # block still imports every invoice that is readable.
+        payload = {
+            "gstin": BUSINESS_GSTIN,
+            "docdata": {
+                "b2b": [
+                    {"ctin": SUPPLIER_GSTIN_SAME_STATE, "inv": 7},
+                    {
+                        "ctin": SUPPLIER_GSTIN_OTHER_STATE,
+                        "inv": [{"inum": "INV-9", "dt": "05-04-2026", "val": 1180}],
+                    },
+                ]
+            },
+        }
+        records = gstr2b.parse_json(payload)
+        assert [record.invoice_number for record in records] == ["INV-9"]
+
+    @pytest.mark.parametrize("value", [4, "x", [1, 2], 1.5])
+    def test_a_rate_line_whose_itm_det_is_not_an_object_still_reads(self, value):
+        # ``{**4}`` is a TypeError. The rest of the line is readable, so the
+        # bad nesting is dropped rather than the invoice.
+        payload = {
+            "gstin": BUSINESS_GSTIN,
+            "docdata": {
+                "b2b": [
+                    {
+                        "ctin": SUPPLIER_GSTIN_SAME_STATE,
+                        "inv": [
+                            {
+                                "inum": "INV-1",
+                                "dt": "05-04-2026",
+                                "itms": [{"itm_det": value, "txval": 1000}],
+                            }
+                        ],
+                    }
+                ]
+            },
+        }
+        records = gstr2b.parse_json(payload)
+        assert len(records) == 1
+        assert records[0].invoice_number == "INV-1"
+        assert records[0].taxable_value == Decimal("1000.00")
+
+    @pytest.mark.parametrize(
+        "docdata",
+        [
+            {"b2b": 5},
+            {"cdnr": 7},
+            {"b2b": [{"ctin": SUPPLIER_GSTIN_SAME_STATE, "inv": 3}]},
+            {
+                "b2b": [
+                    {
+                        "ctin": SUPPLIER_GSTIN_SAME_STATE,
+                        "inv": [{"inum": "1", "itms": [{"itm_det": 4}]}],
+                    }
+                ]
+            },
+        ],
+        ids=["b2b-int", "cdnr-int", "inv-int", "itmdet-int"],
+    )
+    def test_the_endpoint_answers_a_malformed_file_without_a_server_error(
+        self, auth_client, docdata
+    ):
+        payload = {"gstin": BUSINESS_GSTIN, "rtnprd": "042026", "docdata": docdata}
+        response = upload_2b(auth_client, content=json.dumps(payload).encode())
+        assert response.status_code < 500, response.text
+
