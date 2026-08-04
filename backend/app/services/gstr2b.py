@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal
 
+from app.models.mixins import MONEY_MAX
 from app.services import gst_calendar
 from app.services import gstin as gstin_service
 from app.services.invoice_parser import to_date, to_decimal, to_money
@@ -573,11 +574,71 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
     return records
 
 
+# The figures every reader accumulates, and every one of them ends up in a
+# ``Numeric(16, 2)`` — on the record it is summed onto, and again in the
+# statement totals :func:`~app.services.reconciliation.summarise_records`
+# writes to ``gstr_returns``.
+_MONEY_FIELDS = ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value")
+
+
+def _refuse_money_no_column_could_hold(records: list[GSTR2BRecord]) -> None:
+    """Refuse a statement whose figures will not fit the columns that store them.
+
+    :func:`_money` bounds each cell it reads and stops there, which leaves the
+    *addition* unbounded — and every figure in a 2B is an addition. A rate line
+    is summed onto its invoice, and every invoice is summed into the period
+    totals, so a hundred cells each just inside ``MONEY_MAX`` store a figure a
+    hundred times wider than the column holds. Five rate items at the ceiling
+    on one invoice was enough to reach it.
+
+    The failure is the split this product keeps meeting from the other side:
+    Postgres refuses the INSERT with ``numeric field overflow`` and SQLite
+    keeps whatever it was handed, so the deployment answers 500 on an import
+    that the suite watches succeed. The import is also the wrong end to notice
+    it at — the row is written and committed before any response model looks at
+    the number.
+
+    So it is checked here, before anything is stored, and the whole file is
+    refused rather than the offending line dropped. A statement is a single
+    document that has to add up: silently discarding one rate line would leave
+    a stored 2B whose totals disagree with the portal's, which is worse than
+    saying the file cannot be read — and no real statement is anywhere near
+    ninety-nine thousand crore, so anything that gets here is corrupt or
+    hand-edited rather than large.
+
+    Magnitudes are summed, not signed amounts, so a credit note cannot net a
+    pair of impossible figures back into range on the way past.
+    """
+    for record in records:
+        for name in _MONEY_FIELDS:
+            if abs(getattr(record, name)) > MONEY_MAX:
+                raise GSTR2BParseError(
+                    f"Invoice {record.invoice_number or '(unnumbered)'} totals "
+                    f"{getattr(record, name)} in {name.replace('_', ' ')}, which is "
+                    "larger than any invoice carries. Check the file — its rate "
+                    "lines do not add up to a real document."
+                )
+
+    for name in _MONEY_FIELDS:
+        total = sum((abs(getattr(record, name)) for record in records), ZERO)
+        if total > MONEY_MAX:
+            raise GSTR2BParseError(
+                f"The {name.replace('_', ' ')} in this file totals {total}, which is "
+                "larger than any GSTR-2B carries. Check that this is an unedited "
+                "download from the GST portal."
+            )
+
+
 def parse(content: bytes, filename: str | None = None) -> list[GSTR2BRecord]:
     """Parse a GSTR-2B upload, choosing the reader by content rather than name.
 
     The extension is only a tiebreaker: businesses rename these files freely,
     and a ``.txt`` holding portal JSON is common enough to be worth handling.
+
+    Both readers hand their records through
+    :func:`_refuse_money_no_column_could_hold` on the way out, because the
+    ceiling that matters is on the sums they build rather than on the cells
+    they read, and this is the door every caller comes through.
     """
     if not content:
         raise GSTR2BParseError("The uploaded file is empty")
@@ -587,10 +648,14 @@ def parse(content: bytes, filename: str | None = None) -> list[GSTR2BRecord]:
     lowered = (filename or "").lower()
 
     if stripped.startswith(("{", "[")) or lowered.endswith(".json"):
-        return parse_json(text)
-    if lowered.endswith((".xlsx", ".xls", ".xlsm")):
+        records = parse_json(text)
+    elif lowered.endswith((".xlsx", ".xls", ".xlsm")):
         raise GSTR2BParseError(
             "Excel GSTR-2B files are not supported yet. Save the sheet as CSV, "
             "or upload the JSON download from the GST portal."
         )
-    return parse_csv(text)
+    else:
+        records = parse_csv(text)
+
+    _refuse_money_no_column_could_hold(records)
+    return records

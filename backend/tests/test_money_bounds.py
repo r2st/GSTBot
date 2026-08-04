@@ -34,6 +34,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.models.gstr_return import GSTRReturn
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.models.mixins import MONEY_MAX
 from app.services import invoice_parser
@@ -399,6 +400,213 @@ class TestAnUploadedStatement:
         response = self._import(raw_client, auth_client, build_2b(str(at_ceiling)))
         assert response.status_code == 201
         assert Decimal(response.json()["total_taxable_value"]) == at_ceiling
+
+
+# --------------------------------------------------------------------------
+# What the cell-by-cell ceiling left open: the addition
+# --------------------------------------------------------------------------
+
+def build_statement(invoices: list[dict]) -> bytes:
+    """A valid GSTR-2B holding *invoices*, each ``{"num": ..., "items": [...]}``.
+
+    ``build_2b`` carries one line on one invoice, which is the shape the
+    per-cell ceiling is about. This one is for the sums built on top of it.
+    """
+    payload = {
+        "gstin": BUSINESS_GSTIN,
+        "rtnprd": "042026",
+        "docdata": {
+            "b2b": [
+                {
+                    "ctin": SUPPLIER_GSTIN_SAME_STATE,
+                    "inv": [
+                        {
+                            "inum": invoice["num"],
+                            "dt": "05-04-2026",
+                            "itms": [
+                                {"txval": str(amount), "iamt": 0, "camt": 0, "samt": 0}
+                                for amount in invoice["items"]
+                            ],
+                        }
+                        for invoice in invoices
+                    ],
+                }
+            ]
+        },
+    }
+    return json.dumps(payload).encode()
+
+
+def build_note_statement(invoice_amount: object, note_amount: object) -> bytes:
+    """A 2B with one invoice and one credit note against it."""
+    payload = {
+        "gstin": BUSINESS_GSTIN,
+        "rtnprd": "042026",
+        "docdata": {
+            "b2b": [
+                {
+                    "ctin": SUPPLIER_GSTIN_SAME_STATE,
+                    "inv": [
+                        {
+                            "inum": "INV-BIG",
+                            "dt": "05-04-2026",
+                            "itms": [{"txval": str(invoice_amount)}],
+                        }
+                    ],
+                }
+            ],
+            "cdnr": [
+                {
+                    "ctin": SUPPLIER_GSTIN_SAME_STATE,
+                    "nt": [
+                        {
+                            "nt_num": "CN-BIG",
+                            "nt_dt": "06-04-2026",
+                            "typ": "C",
+                            "itms": [{"txval": str(note_amount)}],
+                        }
+                    ],
+                }
+            ],
+        },
+    }
+    return json.dumps(payload).encode()
+
+
+# A figure a statement could plausibly carry, small enough that two of them
+# still fit the column — so "several lines add up" can be asserted against
+# the same ceiling the refusals are.
+BIG_BUT_FINE = Decimal("40000000000000.00")
+
+
+class TestTheSumOfAStatement:
+    """The ceiling was on the cell, and every figure in a 2B is a sum.
+
+    ``to_money`` checks each value it reads and stops there. A rate line is
+    then summed onto its invoice, and every invoice into the period totals
+    ``gstr_returns`` stores — so a handful of cells each just inside
+    ``MONEY_MAX`` produce a stored figure several times wider than the column.
+    Five rate items at the ceiling on one invoice was enough, and so were three
+    ordinary invoices.
+
+    Which is the same 500 as the rest of this file, arrived at by addition
+    rather than by a single absurd cell: Postgres refuses the INSERT with
+    ``numeric field overflow``, SQLite keeps the number, and the import that
+    answers 201 in this suite answers 500 on the deployment. It is also
+    committed before any response model looks at it, so there is no later
+    refusal to catch it either.
+    """
+
+    def _import(self, client, auth_client, content: bytes):
+        return client.post(
+            "/api/v1/reconciliation/gstr2b/import",
+            files={"file": ("2b.json", io.BytesIO(content), "application/json")},
+            headers=auth_client.headers,
+        )
+
+    def test_rate_lines_that_add_past_the_ceiling_are_refused(
+        self, raw_client, auth_client
+    ):
+        content = build_statement([{"num": "INV-1", "items": [MONEY_MAX] * 5}])
+        assert self._import(raw_client, auth_client, content).status_code == 422
+
+    def test_invoices_that_add_past_the_ceiling_are_refused(self, raw_client, auth_client):
+        content = build_statement(
+            [{"num": f"INV-{i}", "items": [MONEY_MAX]} for i in range(3)]
+        )
+        assert self._import(raw_client, auth_client, content).status_code == 422
+
+    def test_the_refusal_says_which_figure_it_is_about(self, raw_client, auth_client):
+        # "the file is too big" is not actionable; "the taxable value totals
+        # this" tells the sender which column of their export to look at.
+        content = build_statement([{"num": "INV-1", "items": [MONEY_MAX] * 5}])
+        assert "taxable value" in self._import(raw_client, auth_client, content).text
+
+    def test_the_offending_invoice_is_named(self, raw_client, auth_client):
+        content = build_statement([{"num": "INV-ODD", "items": [MONEY_MAX] * 5}])
+        assert "INV-ODD" in self._import(raw_client, auth_client, content).text
+
+    def test_nothing_is_stored_for_the_period(self, raw_client, auth_client, db_session):
+        # The refusal happens in the reader, before the write — which is the
+        # whole difference between this and the failure it replaces, where the
+        # row was committed and only the response blew up.
+        content = build_statement([{"num": "INV-1", "items": [MONEY_MAX] * 5}])
+        self._import(raw_client, auth_client, content)
+
+        db_session.expire_all()
+        assert db_session.query(GSTRReturn).count() == 0
+
+    def test_every_screen_still_answers_after_the_refusal(self, raw_client, auth_client):
+        content = build_statement([{"num": "INV-1", "items": [MONEY_MAX] * 5}])
+        self._import(raw_client, auth_client, content)
+        assert_every_screen_answers(raw_client, auth_client)
+
+    def test_a_credit_note_cannot_net_two_impossible_figures_back_into_range(
+        self, raw_client, auth_client
+    ):
+        # Summed signed, an invoice and a note of the same absurd size cancel
+        # to zero and the statement looks importable — while the two records
+        # stored beside the totals each carry a figure the column cannot hold.
+        # Magnitudes are what the check adds, so neither hides the other.
+        content = build_note_statement(MONEY_MAX, MONEY_MAX)
+        assert self._import(raw_client, auth_client, content).status_code == 422
+
+    def test_a_statement_that_fits_is_still_imported(self, raw_client, auth_client):
+        content = build_statement([{"num": "INV-1", "items": [BIG_BUT_FINE]}])
+        response = self._import(raw_client, auth_client, content)
+        assert response.status_code == 201, response.text
+        assert Decimal(response.json()["total_taxable_value"]) == BIG_BUT_FINE
+
+    def test_several_lines_that_together_fit_are_still_summed(
+        self, raw_client, auth_client
+    ):
+        # The bound is on the total, not on the count: two lines adding to the
+        # ceiling are a statement, and refusing them would be a regression of
+        # its own.
+        content = build_statement([{"num": "INV-1", "items": [BIG_BUT_FINE] * 2}])
+        response = self._import(raw_client, auth_client, content)
+        assert response.status_code == 201, response.text
+        assert Decimal(response.json()["total_taxable_value"]) == BIG_BUT_FINE * 2
+
+    def test_an_ordinary_multi_line_statement_is_untouched(self, raw_client, auth_client):
+        content = build_statement(
+            [
+                {"num": "INV-1", "items": [Decimal("1000.00"), Decimal("2000.00")]},
+                {"num": "INV-2", "items": [Decimal("500.00")]},
+            ]
+        )
+        response = self._import(raw_client, auth_client, content)
+        assert response.status_code == 201, response.text
+        assert Decimal(response.json()["total_taxable_value"]) == Decimal("3500.00")
+
+    def test_the_csv_reader_is_bounded_too(self, raw_client, auth_client):
+        # Rate-wise rows of one invoice are merged and summed there as well, so
+        # the door the export comes through has the same hole in it.
+        rows = "\n".join(
+            f"{SUPPLIER_GSTIN_SAME_STATE},INV-1,05/04/2026,{MONEY_MAX}" for _ in range(5)
+        )
+        content = (
+            "GSTIN of supplier,Invoice number,Invoice date,Taxable Value\n" + rows
+        ).encode()
+        response = raw_client.post(
+            "/api/v1/reconciliation/gstr2b/import",
+            files={"file": ("2b.csv", io.BytesIO(content), "text/csv")},
+            headers=auth_client.headers,
+        )
+        assert response.status_code == 422, response.text
+
+    def test_an_ordinary_csv_still_imports(self, raw_client, auth_client):
+        content = (
+            "GSTIN of supplier,Invoice number,Invoice date,Taxable Value\n"
+            f"{SUPPLIER_GSTIN_SAME_STATE},INV-1,05/04/2026,1000.00\n"
+        ).encode()
+        response = raw_client.post(
+            "/api/v1/reconciliation/gstr2b/import",
+            files={"file": ("2b.csv", io.BytesIO(content), "text/csv")},
+            headers=auth_client.headers,
+        )
+        assert response.status_code == 201, response.text
+        assert Decimal(response.json()["total_taxable_value"]) == Decimal("1000.00")
 
 
 # --------------------------------------------------------------------------
