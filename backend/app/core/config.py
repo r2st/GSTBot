@@ -328,6 +328,31 @@ class Settings(BaseSettings):
     def max_upload_bytes(self) -> int:
         return self.max_upload_mb * 1024 * 1024
 
+    @property
+    def max_request_bytes(self) -> int:
+        """The largest body any route will accept, envelope included.
+
+        ``max_upload_bytes`` bounds the *file*, and it is checked after the
+        body has already been received and buffered — by then the cost the
+        limit exists to avoid has been paid. It also says nothing at all about
+        the routes that take JSON: a 20 MB body to ``/itc/set-off`` was read,
+        decoded and validated in full, because nothing in this application ever
+        looked at how big a request was.
+
+        The edge caps bodies at 32 MB (see ``deploy/caddy-gstbot.conf``), which
+        is what has been standing in for this. That is the wrong place for it
+        to be the only bound: it is above the application's own upload limit,
+        so a body twice the size of the largest file this product accepts is
+        still delivered whole; and the API listens on the Docker bridge, which
+        anything else on that host reaches without passing the edge at all.
+
+        The slack over ``max_upload_bytes`` is for the multipart envelope — the
+        part boundaries, the headers, and the ``invoice_type`` field beside the
+        file. A megabyte is far more than that costs and small enough that the
+        ceiling still means what it says.
+        """
+        return self.max_upload_bytes + 1024 * 1024
+
     def startup_report(self) -> dict[str, object]:
         """What gets logged at boot: every setting that matters, no secrets."""
         return {

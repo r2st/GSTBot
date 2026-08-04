@@ -19,6 +19,7 @@ from app.core.middleware import (
     AccessLogMiddleware,
     CorrelationIdMiddleware,
     RateLimitMiddleware,
+    RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
 from app.core.redis_client import close as redis_close
@@ -302,6 +303,10 @@ def create_app() -> FastAPI:
     application.add_middleware(GZipMiddleware, minimum_size=1024)
     application.add_middleware(AccessLogMiddleware)
     application.add_middleware(RateLimitMiddleware)
+    # Above the rate limiter, so a body too large to accept is refused without
+    # spending the caller's budget on it, and below the correlation id, so the
+    # 413 carries one like every other response.
+    application.add_middleware(RequestSizeLimitMiddleware)
     application.add_middleware(
         SecurityHeadersMiddleware,
         docs_paths=tuple(p for p in (docs_url, redoc_url, openapi_url) if p),

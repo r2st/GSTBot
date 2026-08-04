@@ -119,11 +119,26 @@ def get_rule_37(
     ),
     dependencies=[Depends(_setoff_limit)],
 )
-def compute_set_off(payload: SetOffRequest) -> SetOffOut:
+def compute_set_off(
+    payload: SetOffRequest,
+    _business: Business = Depends(get_current_business),
+) -> SetOffOut:
     """Apply a given credit against a given liability, in the statutory order.
 
     Pure arithmetic over what the caller sends — no database — so a CA can try
     a what-if against figures that are not in the books yet.
+
+    The tenant is resolved and then not used, which is the point: reading
+    nothing is what made this the one business route that never asked who was
+    calling. It was the only endpoint outside ``/health*`` and ``/meta/*``
+    answering 200 without a token — against a published contract that says
+    every other one needs a bearer token, and against its own limiter, which
+    is spelled ``by="identity"`` and therefore fell back to keying anonymous
+    callers by address. What that left open is not a data leak, because there
+    is no data here; it is an unauthenticated POST that decodes a body,
+    constructs eight ``Decimal`` s and runs the settlement, at 240 a minute per
+    address, on an endpoint whose own comment already described it as one
+    "anyone with a token can call".
     """
     credit = itc_service.TaxHeads(
         igst=payload.credit_igst,

@@ -34,6 +34,27 @@ _INBOUND_HEADERS = ("x-request-id", "x-correlation-id")
 # seconds and would otherwise be the bulk of the log volume.
 _QUIET_PATHS = frozenset({"/health", "/api/v1/health", "/api/v1/health/live", "/metrics"})
 
+# Paths the *global rate limit* skips. A strict subset of the quiet set, and
+# the two are separate decisions that had been sharing one list.
+#
+# "Do not log this" is about volume and is safe to say about any probe. "Do not
+# count this" is a hole, and only worth opening for a probe that costs nothing
+# to serve: an orchestrator polls liveness every few seconds from one address,
+# and rate-limiting it would eventually kill a pod for being healthy — but
+# liveness touches no dependency, so an unlimited flood of it costs one dict.
+#
+# ``/api/v1/health`` is a different endpoint wearing a similar name. It runs a
+# ``SELECT 1`` on a pooled connection and pings Redis on every call, and being
+# in the exempt set made it the one unauthenticated route in the product that
+# could be hammered without limit into the connection pool the API serves every
+# tenant from. ``/health/ready`` does the same work and was never exempt, which
+# is what gives away that the sharing was accidental rather than a decision.
+#
+# The global default is 300 a minute per address; a load balancer probing every
+# five seconds spends twelve of them, so the probes keep working and the flood
+# does not.
+_UNLIMITED_PATHS = frozenset({"/api/v1/health/live", "/metrics"})
+
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):
     """Bind an id to the request context and echo it on the response.
@@ -165,6 +186,68 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
+    """Refuse an oversized body on its declared length, before anything reads it.
+
+    The upload routes already check ``len(content)`` and answer 413, and that
+    check happens one step too late to be the bound it looks like: by the time
+    a route runs, Starlette has received the whole body and spooled it, and
+    ``await file.read()`` then copies all of it into memory to be measured. The
+    JSON routes had no check at all — a 20 MB body to ``/itc/set-off`` was
+    decoded and validated in full.
+
+    ``Content-Length`` is a claim the client makes and this trusts it in the
+    only direction that is safe: a body *declaring* more than the ceiling is
+    refused without being read, and one declaring less is still measured by the
+    route that receives it. Under-declaring therefore buys nothing.
+
+    A body with no declared length — chunked transfer encoding — is not bounded
+    here, and is the reason the edge's ``request_body max_size`` stays where it
+    is rather than being replaced by this. What this adds is the bound the
+    *application* is entitled to have of its own: one that matches its own
+    upload limit rather than sitting twice above it, and that holds for a
+    caller reaching the API on the Docker bridge without passing the edge.
+    """
+
+    # A body is only ever sent with these; the rest are refused for having one
+    # at all long before size could matter.
+    _BODIED_METHODS = frozenset({"POST", "PUT", "PATCH"})
+
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        from app.core.errors import error_body
+
+        if request.method not in self._BODIED_METHODS:
+            return await call_next(request)
+
+        declared = request.headers.get("content-length", "")
+        limit = settings.max_request_bytes
+        # Anything unparseable is left to the server that framed the request:
+        # guessing at a malformed length would refuse bodies over a number
+        # nobody sent.
+        if not declared.isdigit() or int(declared) <= limit:
+            return await call_next(request)
+
+        logger.warning(
+            "Request body over the ceiling refused",
+            extra={
+                "http_path": request.url.path,
+                "http_method": request.method,
+                "status_code": 413,
+                "client_ip": _client_ip(request),
+            },
+        )
+        megabytes = limit // (1024 * 1024)
+        return JSONResponse(
+            status_code=413,
+            content=error_body(
+                413,
+                f"Request body exceeds the {megabytes} MB limit.",
+                code="payload_too_large",
+            ),
+            headers={"X-Request-ID": get_correlation_id() or "-"},
+        )
+
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """The blanket per-caller ceiling, applied before routing.
 
@@ -177,7 +260,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         from app.core.errors import error_body
         from app.core.rate_limit import check_global
 
-        if request.method == "OPTIONS" or request.url.path in _QUIET_PATHS:
+        if request.method == "OPTIONS" or request.url.path in _UNLIMITED_PATHS:
             # A CORS preflight is not a request the caller chose to make, and
             # rejecting one turns a rate limit into an opaque browser error.
             return await call_next(request)
