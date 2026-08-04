@@ -26,6 +26,31 @@ IMAGE_CONTENT_TYPES = {"image/jpeg", "image/jpg", "image/png", "image/webp", "im
 # the document is really a scan. Measured in characters across the whole file.
 _MIN_PDF_TEXT_CHARS = 40
 
+# The most text any upload is allowed to become.
+#
+# ``MAX_UPLOAD_MB`` bounds the bytes on the wire and does not bound this. A
+# spreadsheet is a zip of shared strings, so one cell value repeated across a
+# sheet costs almost nothing on disk and a full copy per cell once read: a
+# 9 MB .xlsx — comfortably inside the default 15 MB limit — flattens to 149 MB
+# of text in 28 seconds and 375 MB of resident memory. A PDF concatenating
+# every page does the same more slowly.
+#
+# That string is not passed through and discarded. It is regex-scanned field by
+# field by the heuristic parser, and then written whole into ``invoices.raw_text``
+# — so one upload is a worker's memory, a long CPU-bound stretch of it, and a
+# row the database has to carry from then on. Uploads run inline in the request
+# when Celery is off, which makes it a request that holds all three.
+#
+# Two million characters is far past any real invoice or purchase register —
+# the extraction prompt itself only ever sends the first 12,000 — and short
+# enough that the worst case is bounded rather than open. Truncation happens
+# while the text is being built, not after, because building it is the cost.
+MAX_TEXT_CHARS = 2_000_000
+
+
+class _TextLimitReached(Exception):
+    """Internal: break out of a nested sheet/row walk once the cap is hit."""
+
 
 def is_image(content_type: str | None, filename: str | None = None) -> bool:
     """Whether this upload should go down the vision/OCR path."""
@@ -46,11 +71,22 @@ def from_pdf(content: bytes) -> str:
         return ""
     try:
         reader = PdfReader(io.BytesIO(content))
-        pages = [page.extract_text() or "" for page in reader.pages]
+        pages: list[str] = []
+        size = 0
+        for page in reader.pages:
+            pages.append(page.extract_text() or "")
+            size += len(pages[-1]) + 1
+            if size >= MAX_TEXT_CHARS:
+                logger.warning(
+                    "PDF text stopped at %s characters (%s pages read)",
+                    MAX_TEXT_CHARS,
+                    len(pages),
+                )
+                break
     except Exception as exc:  # noqa: BLE001 - a malformed PDF must not 500
         logger.warning("PDF text extraction failed: %s", exc)
         return ""
-    text = "\n".join(pages).strip()
+    text = "\n".join(pages)[:MAX_TEXT_CHARS].strip()
     return text if len(text) >= _MIN_PDF_TEXT_CHARS else ""
 
 
@@ -71,13 +107,27 @@ def from_excel(content: bytes) -> str:
         logger.warning("Spreadsheet read failed: %s", exc)
         return ""
     lines: list[str] = []
-    for sheet in workbook.worksheets:
-        for row in sheet.iter_rows(values_only=True):
-            cells = ["" if cell is None else str(cell) for cell in row]
-            if any(cell.strip() for cell in cells):
+    size = 0
+    try:
+        for sheet in workbook.worksheets:
+            for row in sheet.iter_rows(values_only=True):
+                cells = ["" if cell is None else str(cell) for cell in row]
+                if not any(cell.strip() for cell in cells):
+                    continue
                 lines.append("\t".join(cells))
-    workbook.close()
-    return "\n".join(lines).strip()
+                size += len(lines[-1]) + 1
+                if size >= MAX_TEXT_CHARS:
+                    logger.warning(
+                        "Spreadsheet text stopped at %s characters (%s rows read)",
+                        MAX_TEXT_CHARS,
+                        len(lines),
+                    )
+                    raise _TextLimitReached
+    except _TextLimitReached:
+        pass
+    finally:
+        workbook.close()
+    return "\n".join(lines)[:MAX_TEXT_CHARS].strip()
 
 
 def from_csv(content: bytes) -> str:
@@ -86,8 +136,14 @@ def from_csv(content: bytes) -> str:
         decoded = content.decode("utf-8-sig")
     except UnicodeDecodeError:
         decoded = content.decode("latin-1", errors="replace")
-    rows = list(csv.reader(io.StringIO(decoded)))
-    return "\n".join("\t".join(row) for row in rows if any(cell.strip() for cell in row)).strip()
+    # A CSV is already as big as it was on the wire, so the cap here is about
+    # the row the text ends up in rather than about memory. Applied before the
+    # join so the same ceiling holds however the file is shaped.
+    rows = list(csv.reader(io.StringIO(decoded[:MAX_TEXT_CHARS])))
+    joined = "\n".join(
+        "\t".join(row) for row in rows if any(cell.strip() for cell in row)
+    )
+    return joined[:MAX_TEXT_CHARS].strip()
 
 
 def ocr_image(content: bytes) -> str:
@@ -128,5 +184,5 @@ def extract(content: bytes, content_type: str | None, filename: str | None = Non
     if kind in {"text/csv", "application/csv"} or name.endswith(".csv"):
         return from_csv(content)
     if kind in TEXT_CONTENT_TYPES or name.endswith(".txt"):
-        return content.decode("utf-8", errors="replace").strip()
+        return content.decode("utf-8", errors="replace")[:MAX_TEXT_CHARS].strip()
     return ""

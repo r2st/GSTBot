@@ -424,3 +424,88 @@ class TestExtractDispatch:
     def test_empty_upload_of_every_type_returns_empty(self):
         for content_type in ("application/pdf", "text/csv", "text/plain", None):
             assert document_text.extract(b"", content_type, None) == ""
+
+
+# --------------------------------------------------------------------------
+# The ceiling on how much text an upload may become
+# --------------------------------------------------------------------------
+
+class TestTheTextCeiling:
+    """``MAX_UPLOAD_MB`` bounds the bytes on the wire and bounds nothing here.
+
+    A spreadsheet is a zip of shared strings: one cell value repeated across a
+    sheet costs almost nothing on disk and a full copy per cell once read, so a
+    file comfortably inside the upload limit flattens to hundreds of megabytes
+    of text. That string is not passed through and dropped — the heuristic
+    parser regex-scans it field by field and it is then written whole into
+    ``invoices.raw_text`` — so one upload is a worker's memory, a long
+    CPU-bound stretch of it, and a row the database carries from then on. With
+    Celery off the upload runs inline, which makes it one request holding all
+    three.
+
+    The cap is asserted with the constant patched down rather than by building
+    a two-million-character file, because the assertion is about the ceiling
+    being applied, and a test that spends the cost the cap exists to avoid is
+    the wrong shape.
+    """
+
+    LIMIT = 400
+
+    @pytest.fixture(autouse=True)
+    def _small_limit(self, monkeypatch):
+        monkeypatch.setattr(document_text, "MAX_TEXT_CHARS", self.LIMIT)
+
+    def test_a_spreadsheet_is_cut_off_at_the_ceiling(self):
+        content = make_xlsx([[f"INV-{i}", "9" * 200] for i in range(200)])
+        text = document_text.from_excel(content)
+        assert len(text) <= self.LIMIT
+
+    def test_the_rows_before_the_ceiling_are_still_read(self):
+        # Truncated, not discarded: whatever fitted is still an invoice the
+        # parser can read and a reviewer can correct.
+        content = make_xlsx([["INV-FIRST", "1000"], *[[f"INV-{i}", "9" * 200] for i in range(200)]])
+        assert document_text.from_excel(content).startswith("INV-FIRST")
+
+    def test_the_internal_break_never_reaches_the_caller(self):
+        # The sheet/row walk is broken out of with an exception. If it escaped
+        # from_excel it would be a 500 on an upload, which is the one thing
+        # this module promises never to do.
+        content = make_xlsx(
+            [["9" * 200] for _ in range(200)],
+            sheets={"May": [["9" * 200] for _ in range(200)]},
+        )
+        assert isinstance(document_text.extract(content, None, "register.xlsx"), str)
+
+    def test_a_spreadsheet_under_the_ceiling_is_untouched(self):
+        text = document_text.from_excel(make_xlsx([["INV-1", "531000"], ["INV-2", "1180"]]))
+        assert text == "INV-1\t531000\nINV-2\t1180"
+
+    def test_a_pdf_is_cut_off_at_the_ceiling(self):
+        pages = ["INV-2026-001 " + "9" * 300 for _ in range(20)]
+        assert len(document_text.from_pdf(make_pdf(*pages))) <= self.LIMIT
+
+    def test_a_pdf_under_the_ceiling_keeps_every_page(self):
+        text = document_text.from_pdf(make_pdf(INVOICE_LINE, "Page two line items here"))
+        assert "INV-2026-001" in text and "Page two" in text
+
+    def test_a_csv_is_cut_off_at_the_ceiling(self):
+        content = b"".join(f"INV-{i},{'9' * 200}\n".encode() for i in range(200))
+        assert len(document_text.from_csv(content)) <= self.LIMIT
+
+    def test_plain_text_is_cut_off_at_the_ceiling(self):
+        content = ("TAX INVOICE " + "9" * 200).encode() * 50
+        assert len(document_text.extract(content, "text/plain", "bill.txt")) <= self.LIMIT
+
+    def test_a_truncated_pdf_still_has_to_clear_the_scan_threshold(self):
+        # The two limits are independent and both still apply: a document cut
+        # short must still carry enough text to be a document rather than a
+        # scan's page furniture.
+        assert document_text.from_pdf(make_pdf("Page 1 of 9")) == ""
+
+
+def test_the_real_text_ceiling_is_far_past_any_real_register():
+    # Outside the class above, so the patched-down limit cannot be what this
+    # reads. A ceiling lowered to something a genuine purchase register would
+    # hit belongs in a failure here, not in a truncated invoice — the
+    # extraction prompt itself only ever sends the first 12,000 characters.
+    assert document_text.MAX_TEXT_CHARS >= 1_000_000
