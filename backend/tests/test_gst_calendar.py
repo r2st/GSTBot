@@ -326,3 +326,92 @@ class TestTheSpanAnInvoiceDateCanFallIn:
         assert not gst_calendar.is_filable_invoice_date(
             gst_calendar.today_ist() + timedelta(days=1)
         )
+
+
+class TestTheSpanAPeriodCanFallIn:
+    """The month check left both ends of the year wide open.
+
+    ``\\d{4}`` reaches every year ``date()`` will construct and two it will not,
+    because every question this module answers about a period is really about
+    the month *next* to it. A due date is next month, so ``9999-12`` raised
+    ``year must be in 1..9999, not 10000``; the previous period of ``0000-01``
+    raised on the year before. Both arrived through a query string, and the
+    dashboard asks for a GSTR-3B due date on every request — so the product's
+    front page answered 500 to a seven-character URL parameter.
+
+    The routes that did *not* raise are the worse half, exactly as they were
+    when the month was unvalidated. ``9999-12`` built and exported a GSTR-1
+    stamped ``fp=129999`` and the filing-validation screen called a return for
+    the year 9999 ``ok: true`` — a document about a month that cannot exist,
+    reported as safe to file.
+
+    So the bound is the one an invoice date already had: a period is a month a
+    return is filed for, and there is no return for a month before GST.
+    """
+
+    def test_the_span_starts_when_gst_commenced(self):
+        assert gst_calendar.FIRST_PERIOD == gst_calendar.period_of(
+            gst_calendar.GST_COMMENCEMENT
+        )
+
+    @pytest.mark.parametrize(
+        "period", ["2017-07", "2017-12", "2018-01", "2026-04", "2099-12"]
+    )
+    def test_a_month_a_return_covers_is_a_period(self, period):
+        assert gst_calendar.is_period(period)
+
+    @pytest.mark.parametrize(
+        "period",
+        [
+            "2017-06",  # the month before GST commenced
+            "2017-01",
+            "2016-12",
+            "1999-04",
+            "0000-01",
+            "0001-01",
+            "2100-01",  # past the far end
+            "9999-12",
+        ],
+    )
+    def test_a_month_no_return_covers_is_not(self, period):
+        assert not gst_calendar.is_period(period)
+
+    def test_the_two_ends_are_the_ones_the_constants_name(self):
+        # The constants exist to be quoted in an error message. If they drifted
+        # from the pattern, the message would name a range that is not enforced.
+        assert gst_calendar.is_period(gst_calendar.FIRST_PERIOD)
+        assert gst_calendar.is_period(gst_calendar.LAST_PERIOD)
+        assert not gst_calendar.is_period(
+            gst_calendar.previous_period(gst_calendar.FIRST_PERIOD)
+        )
+        assert not gst_calendar.is_period(
+            gst_calendar.next_period(gst_calendar.LAST_PERIOD)
+        )
+
+    @pytest.mark.parametrize("period", ["0000-01", "0001-01", "9999-12", "2100-01"])
+    def test_the_years_the_old_pattern_let_through_break_the_arithmetic(self, period):
+        # Why this is validated at the edge rather than defended against
+        # downstream: there is no sensible due date for the month after
+        # December 9999, so the only place to say no is before it is asked for.
+        assert not gst_calendar.is_period(period)
+
+    def test_every_period_the_pattern_accepts_has_a_due_date(self):
+        """The invariant the 500 was a breach of.
+
+        Nothing downstream re-checks a period, so ``is_period`` returning True
+        is a promise that every function in this module will answer rather than
+        raise. Walked over both ends of the span and both ends of the year,
+        because the failures were all one month either side of a boundary.
+        """
+        for year in (2017, 2018, 2098, 2099):
+            for month in range(1, 13):
+                period = f"{year:04d}-{month:02d}"
+                if not gst_calendar.is_period(period):
+                    continue
+                assert gst_calendar.gstr1_due_date(period)
+                assert gst_calendar.gstr3b_due_date(period)
+                assert gst_calendar.period_start(period)
+                assert gst_calendar.period_end(period)
+                assert gst_calendar.next_period(period)
+                assert gst_calendar.previous_period(period)
+                assert gst_calendar.months_before(period, 60)

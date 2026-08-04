@@ -23,7 +23,8 @@ from datetime import date, datetime, timedelta, timezone
 
 from app.models.gstr_return import ReturnType
 
-# The only shape a filing period may take: ``YYYY-MM`` with a month that exists.
+# The only shape a filing period may take: ``YYYY-MM`` naming a month that
+# exists *and* that a GST return could cover.
 #
 # ``\d{4}-\d{2}`` is the obvious pattern and it is not a period validator — it
 # admits ``2026-00`` and ``2026-13``, and every route that took one handed it
@@ -34,12 +35,36 @@ from app.models.gstr_return import ReturnType
 # and ``2026-00`` quietly aliased onto January, both of them documents about a
 # month that does not exist.
 #
+# Checking the month alone leaves the same defect at the other end of the
+# field. ``\d{4}`` reaches both edges of ``date()``'s 1..9999: the dashboard
+# asks for the *following* month's due date, so ``9999-12`` raised
+# ``year must be in 1..9999, not 10000`` and ``0000-01`` raised on the year
+# before — a 500 on the product's front page from a query string. And the
+# routes that survived it are the worse half again, because ``9999-12`` built
+# and exported a GSTR-1 stamped ``fp=129999`` and the validation screen called
+# a return for the year 9999 ``ok: true``.
+#
+# So the bound is the same one :func:`is_filable_invoice_date` puts on an
+# invoice date, for the same reason: a period is a month a return is filed
+# for, and there is no return for a month before GST existed. July 2017 is
+# where GST commenced — see :data:`GST_COMMENCEMENT` — and 2099 is a century of
+# headroom, chosen because it keeps every derived date (a due date is next
+# month, Rule 43 looks back sixty) inside the range ``date()`` will construct.
+# Anything outside it is a typo or a probe, and both want the same 422.
+#
 # Anchored, so it validates the same whether a caller matches or searches with
 # it. Exported as the single definition every route, schema and importer spells
 # the period with.
-PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+PERIOD_PATTERN = r"^(?:2017-(?:0[7-9]|1[0-2])|20(?:1[89]|[2-9]\d)-(?:0[1-9]|1[0-2]))$"
 
 _PERIOD_RE = re.compile(PERIOD_PATTERN)
+
+# The two ends of that span, spelled out. A caller refusing a period should be
+# able to say what the range is without a reader having to run the regex in
+# their head, and the suite pins these against the pattern so the prose in an
+# error message cannot drift away from what is actually enforced.
+FIRST_PERIOD = "2017-07"
+LAST_PERIOD = "2099-12"
 
 # Every date in this module is an Indian one. A due date falls at the end of
 # the 20th *in India*, so a server running on UTC is already a day behind by
