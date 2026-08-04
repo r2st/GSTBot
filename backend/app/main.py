@@ -273,9 +273,43 @@ def create_app() -> FastAPI:
     register_exception_handlers(application)
 
     # Middleware runs in the reverse of the order it is added, so this block
-    # reads bottom-up: CorrelationId runs first (everything below it logs with
-    # an id bound), then the security headers, then the global rate limit, then
-    # the access log, then compression, with CORS closest to the route.
+    # reads bottom-up: CORS runs first, then CorrelationId (everything below it
+    # logs with an id bound), then the security headers, then the body size
+    # ceiling, then the global rate limit, then the access log, then
+    # compression, with the route last.
+    #
+    # A GSTR-2B report or a period's invoice list is repetitive JSON that
+    # compresses roughly 10:1; below 1 KB the header costs more than it saves.
+    application.add_middleware(GZipMiddleware, minimum_size=1024)
+    application.add_middleware(AccessLogMiddleware)
+    application.add_middleware(RateLimitMiddleware)
+    # Above the rate limiter, so a body too large to accept is refused without
+    # spending the caller's budget on it, and below the correlation id, so the
+    # 413 carries one like every other response.
+    application.add_middleware(RequestSizeLimitMiddleware)
+    application.add_middleware(
+        SecurityHeadersMiddleware,
+        docs_paths=tuple(p for p in (docs_url, redoc_url, openapi_url) if p),
+    )
+    application.add_middleware(CorrelationIdMiddleware)
+    # Outermost, so that it decorates *every* response and not only the ones a
+    # route produced. It used to sit closest to the route, which meant any
+    # middleware that answered on its own — the rate limiter's 429, the size
+    # ceiling's 413 — returned without ``Access-Control-Allow-Origin``, and a
+    # browser refused to hand that response to the caller at all.
+    #
+    # The 429 is the one that mattered. ``expose_headers`` below names
+    # ``Retry-After`` and the ``X-RateLimit-*`` pair precisely so a browser
+    # client can back off, and those headers are set on exactly the response
+    # the browser was throwing away: the SPA saw an indistinguishable network
+    # error instead of "you are over your limit, wait 29 seconds". A 401 or a
+    # 500 was never affected, because those come from below this line, which is
+    # what kept the gap narrow enough to go unnoticed.
+    #
+    # Being outermost also means a CORS preflight is answered here and never
+    # reaches the limiter, which is what ``RateLimitMiddleware`` was skipping
+    # OPTIONS by hand to achieve. That check stays: an OPTIONS without an
+    # ``Origin`` is not a preflight and still arrives.
     application.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
@@ -298,20 +332,6 @@ def create_app() -> FastAPI:
         ],
         max_age=600,
     )
-    # A GSTR-2B report or a period's invoice list is repetitive JSON that
-    # compresses roughly 10:1; below 1 KB the header costs more than it saves.
-    application.add_middleware(GZipMiddleware, minimum_size=1024)
-    application.add_middleware(AccessLogMiddleware)
-    application.add_middleware(RateLimitMiddleware)
-    # Above the rate limiter, so a body too large to accept is refused without
-    # spending the caller's budget on it, and below the correlation id, so the
-    # 413 carries one like every other response.
-    application.add_middleware(RequestSizeLimitMiddleware)
-    application.add_middleware(
-        SecurityHeadersMiddleware,
-        docs_paths=tuple(p for p in (docs_url, redoc_url, openapi_url) if p),
-    )
-    application.add_middleware(CorrelationIdMiddleware)
 
     prefix = settings.api_v1_prefix
     application.include_router(misc.router, prefix=prefix)

@@ -345,3 +345,105 @@ class TestGlobalRateLimit:
         monkeypatch.setattr(settings, "rate_limit_default", "1/minute")
 
         assert [client.get("/admin.php").status_code for _ in range(4)] == [404] * 4
+
+
+class TestCorsReachesTheResponsesMiddlewareProduces:
+    """Every response carries the CORS headers, not only the ones a route made.
+
+    ``CORSMiddleware`` used to be added first, which put it closest to the
+    route and therefore *innermost*. Anything that answered above it returned
+    without ``Access-Control-Allow-Origin``, and a browser discards such a
+    response rather than handing it to the caller — so the SPA saw an
+    indistinguishable network error.
+
+    The 429 is the case that mattered. ``expose_headers`` names ``Retry-After``
+    and the ``X-RateLimit-*`` pair precisely so a client can back off, and
+    those headers were only ever set on the one response a browser refused to
+    read. A 401 and a 500 come from below the CORS layer and were always fine,
+    which is what kept the gap narrow enough to go unnoticed.
+    """
+
+    ORIGIN = "http://localhost:5173"
+
+    @pytest.fixture()
+    def tight_limit(self, rate_limited, monkeypatch):
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "rate_limit_default", "3/minute")
+        return rate_limited
+
+    def _allow_origin(self, response) -> str | None:
+        return response.headers.get("access-control-allow-origin")
+
+    def test_an_ordinary_response_still_carries_it(self, client):
+        response = client.get("/api/v1/meta/states", headers={"Origin": self.ORIGIN})
+        assert self._allow_origin(response) == self.ORIGIN
+
+    def test_the_rate_limiters_429_carries_it(self, client, tight_limit):
+        for _ in range(6):
+            response = client.get("/api/v1/meta/states", headers={"Origin": self.ORIGIN})
+        assert response.status_code == 429
+        assert self._allow_origin(response) == self.ORIGIN
+
+    def test_the_backoff_headers_are_readable_by_the_browser_that_needs_them(
+        self, client, tight_limit
+    ):
+        """A 429 a client cannot read is a 429 it cannot obey."""
+        for _ in range(6):
+            response = client.get("/api/v1/meta/states", headers={"Origin": self.ORIGIN})
+        assert response.status_code == 429
+        exposed = response.headers.get("access-control-expose-headers", "").lower()
+        assert "retry-after" in exposed
+        assert "x-ratelimit-remaining" in exposed
+        # The headers themselves are still set; the fix is about reachability.
+        assert response.headers["retry-after"]
+
+    def test_the_size_ceilings_413_carries_it(self, raw_client):
+        from app.core.config import settings
+
+        response = raw_client.post(
+            "/api/v1/itc/set-off",
+            content=b'{"pad": "' + b"x" * (settings.max_request_bytes + 1024) + b'"}',
+            headers={"Origin": self.ORIGIN, "content-type": "application/json"},
+        )
+        assert response.status_code == 413
+        assert self._allow_origin(response) == self.ORIGIN
+
+    def test_a_401_from_below_the_layer_was_never_affected(self, raw_client):
+        response = raw_client.post(
+            "/api/v1/itc/set-off", json={}, headers={"Origin": self.ORIGIN}
+        )
+        assert response.status_code == 401
+        assert self._allow_origin(response) == self.ORIGIN
+
+    def test_a_response_no_route_produced_carries_it_too(self, raw_client):
+        """A 404 comes from the exception handler, with no route involved."""
+        response = raw_client.get("/no/such/path", headers={"Origin": self.ORIGIN})
+        assert response.status_code == 404
+        assert self._allow_origin(response) == self.ORIGIN
+
+    def test_an_origin_that_is_not_allowed_gets_nothing(self, client):
+        """Outermost must not mean permissive: the allowlist still decides."""
+        response = client.get(
+            "/api/v1/meta/states", headers={"Origin": "https://not-our-frontend.example"}
+        )
+        assert self._allow_origin(response) is None
+
+    def test_a_preflight_is_answered_above_the_limiter(self, client, tight_limit):
+        """CORS being outermost is now what keeps a preflight off the limiter.
+
+        ``RateLimitMiddleware`` skips OPTIONS by hand as well, and that check
+        stays for an OPTIONS with no ``Origin``, which is not a preflight.
+        """
+        for _ in range(6):
+            client.get("/api/v1/meta/states", headers={"Origin": self.ORIGIN})
+
+        preflight = client.options(
+            "/api/v1/auth/login",
+            headers={
+                "Origin": self.ORIGIN,
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+        assert preflight.status_code == 200
+        assert self._allow_origin(preflight) == self.ORIGIN
