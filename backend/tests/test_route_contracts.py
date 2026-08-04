@@ -30,6 +30,7 @@ from fastapi.dependencies.utils import get_dependant, get_typed_signature
 from fastapi.routing import APIRoute
 from starlette.status import HTTP_204_NO_CONTENT, HTTP_304_NOT_MODIFIED
 
+from app.core import params
 from app.core.rate_limit import RateLimit
 from app.main import app
 from app.services import gst_calendar
@@ -333,7 +334,9 @@ class TestEveryPeriodParameterNamesARealMonth:
             f"{offenders}"
         )
 
-    @pytest.mark.parametrize("period", ["2026-00", "2026-13", "2026-99"])
+    @pytest.mark.parametrize(
+        "period", ["2026-00", "2026-13", "2026-99", "0000-01", "9999-12", "2017-06"]
+    )
     @pytest.mark.parametrize(
         "url",
         [
@@ -372,4 +375,179 @@ class TestEveryPeriodParameterNamesARealMonth:
         # The guard against over-correcting into refusing everything.
         assert auth_client.get(
             "/api/v1/dashboard", params={"period": "2026-04"}
+        ).status_code == 200
+
+
+class TestEveryBareIntegerInAUrlIsBounded:
+    """``invoice_id: int`` and ``offset: int`` look validated and are not.
+
+    Python's ``int`` has no width. FastAPI coerces the digits and hands them
+    on, so the request finally fails at the database — differently on each
+    backend, and neither answer is the one the caller has earned:
+
+    *   ``OFFSET 10000000000000000000000000`` is ``bigint out of range`` on
+        Postgres and ``OverflowError: Python int too large to convert to SQLite
+        INTEGER`` here. A 500 either way, from a query string, on four list
+        endpoints — the cheapest denial of service in the product.
+    *   ``WHERE id = <the same>`` raises that ``OverflowError`` on SQLite and
+        quietly matches nothing on Postgres. So the id case is a 500 in the
+        suite and a 404 on the deployment: the split that hides a defect
+        rather than showing it, in the direction that makes the *tests* look
+        like the broken thing.
+
+    Bounded once in ``app.core.params`` rather than at each of the twelve call
+    sites, which is what makes it sweepable: a route added later inherits the
+    bound by spelling its parameter with those names, and the sweep below is
+    what notices when it doesn't.
+    """
+
+    # Names a bound is required on. ``limit`` is deliberately absent: every
+    # list already caps it with an explicit ``le``, and the sweep asserts that
+    # separately rather than assuming it.
+    ID_SUFFIX = "_id"
+    PAGING_NAMES = frozenset({"offset", "limit"})
+
+    def _int_params(self, route):
+        """Every path or query parameter this route reads as a bare int."""
+        found = []
+        for param in (*route.dependant.query_params, *route.dependant.path_params):
+            annotation = param.field_info.annotation
+            if annotation is not int:
+                continue
+            found.append((param.name, param.field_info))
+        return found
+
+    def _ceiling(self, field_info):
+        for meta in getattr(field_info, "metadata", []) or []:
+            if (value := getattr(meta, "le", None)) is not None:
+                return value
+            if (value := getattr(meta, "lt", None)) is not None:
+                return value - 1
+        return None
+
+    def test_the_sweep_finds_the_parameters_it_is_checking(self):
+        # A collector that finds nothing passes everything below.
+        names = {
+            name
+            for route in _collect_api_routes(app)
+            if hasattr(route, "dependant")
+            for name, _ in self._int_params(route)
+        }
+        assert "offset" in names and any(n.endswith("_id") for n in names), names
+
+    def test_every_row_id_in_a_path_is_bounded(self):
+        offenders = []
+        for route in _collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for param in route.dependant.path_params:
+                if not param.name.endswith(self.ID_SUFFIX):
+                    continue
+                if param.field_info.annotation is not int:
+                    continue
+                if self._ceiling(param.field_info) is None:
+                    offenders.append(f"{route.path}:{param.name}")
+        assert not offenders, (
+            "these path ids take an integer of any width — spell them "
+            f"``app.core.params.RowId``: {offenders}"
+        )
+
+    def test_every_pagination_parameter_is_bounded(self):
+        offenders = []
+        for route in _collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for name, field_info in self._int_params(route):
+                if name not in self.PAGING_NAMES:
+                    continue
+                if self._ceiling(field_info) is None:
+                    offenders.append(f"{route.path}:{name}")
+        assert not offenders, (
+            "these paging parameters take an integer of any width — spell an "
+            f"offset ``app.core.params.Offset``: {offenders}"
+        )
+
+    def test_the_ceiling_is_one_a_row_id_could_actually_reach(self):
+        # A bound that is merely *some* number would still hand the database a
+        # value it cannot hold. Every id in this schema is an ``Integer``, so
+        # 2**31-1 is both the largest id that can exist and comfortably inside
+        # what an OFFSET clause accepts.
+        assert params.MAX_ID == 2**31 - 1
+        for route in _collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for name, field_info in self._int_params(route):
+                if not (name.endswith(self.ID_SUFFIX) or name == "offset"):
+                    continue
+                ceiling = self._ceiling(field_info)
+                assert ceiling is not None and ceiling <= params.MAX_ID, (
+                    f"{route.path}:{name} allows {ceiling}"
+                )
+
+    # ---- and what a caller actually gets ----------------------------------
+
+    HUGE = 10**25
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/api/v1/invoices",
+            "/api/v1/suppliers",
+            "/api/v1/alerts",
+            "/api/v1/reconciliation",
+        ],
+    )
+    def test_an_offset_no_table_could_reach_is_refused_not_a_500(
+        self, auth_client, url
+    ):
+        response = auth_client.get(url, params={"offset": self.HUGE})
+        assert response.status_code == 422, f"{url} answered {response.status_code}"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/api/v1/invoices/{id}",
+            "/api/v1/suppliers/{id}",
+            "/api/v1/reconciliation/{id}",
+        ],
+    )
+    def test_a_row_id_wider_than_the_column_is_refused_not_a_500(
+        self, auth_client, url
+    ):
+        response = auth_client.get(url.format(id=self.HUGE))
+        assert response.status_code == 422, f"{url} answered {response.status_code}"
+
+    @pytest.mark.parametrize(
+        "method, url",
+        [
+            ("patch", "/api/v1/invoices/{id}"),
+            ("delete", "/api/v1/invoices/{id}"),
+            ("post", "/api/v1/invoices/{id}/reparse"),
+            ("post", "/api/v1/alerts/{id}/read"),
+            ("post", "/api/v1/alerts/{id}/dismiss"),
+        ],
+    )
+    def test_a_write_route_refuses_it_too(self, auth_client, method, url):
+        # The read routes are the ones a scanner finds. These are the ones
+        # that would have taken the value all the way to a lookup.
+        response = auth_client.request(method, url.format(id=self.HUGE), json={})
+        assert response.status_code == 422, f"{url} answered {response.status_code}"
+
+    def test_the_largest_id_a_row_could_have_is_still_a_lookup(self, auth_client):
+        # The guard against over-correcting into refusing legal ids: this is
+        # an id that could exist, so the honest answer is "no such row".
+        response = auth_client.get(f"/api/v1/invoices/{params.MAX_ID}")
+        assert response.status_code == 404
+
+    def test_an_offset_past_the_end_still_pages_rather_than_refusing(
+        self, auth_client
+    ):
+        response = auth_client.get("/api/v1/invoices", params={"offset": params.MAX_ID})
+        assert response.status_code == 200
+        assert response.json()["items"] == []
+
+    def test_ordinary_paging_is_unaffected(self, auth_client):
+        _upload(auth_client, "TAX INVOICE INV-1 Grand Total 1180.00")
+        assert auth_client.get(
+            "/api/v1/invoices", params={"offset": 0, "limit": 10}
         ).status_code == 200

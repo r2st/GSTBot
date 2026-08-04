@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.models.alert import (
     OPEN_STATUSES,
@@ -114,7 +115,7 @@ def list_alerts(
         examples=["2026-04"],
     ),
     limit: int = Query(default=50, ge=1, le=200, description="Page size, 1-200."),
-    offset: int = Query(default=0, ge=0, description="Rows to skip."),
+    offset: Offset = 0,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> AlertListOut:
@@ -181,7 +182,7 @@ def list_alerts(
     dependencies=[Depends(_write_limit)],
 )
 def mark_read(
-    alert_id: int,
+    alert_id: RowId,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> AlertOut:
@@ -216,7 +217,7 @@ def mark_read(
     dependencies=[Depends(_write_limit)],
 )
 def dismiss(
-    alert_id: int,
+    alert_id: RowId,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> AlertOut:

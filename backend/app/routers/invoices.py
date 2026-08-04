@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import safe_filename, search_pattern
 from app.models.business import Business
@@ -224,7 +225,7 @@ def list_invoices(
         description="Substring of the invoice number or the counterparty name.",
     ),
     limit: int = Query(default=50, ge=1, le=200, description="Page size, 1-200."),
-    offset: int = Query(default=0, ge=0, description="Rows to skip."),
+    offset: Offset = 0,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> InvoiceListOut:
@@ -276,7 +277,7 @@ def list_invoices(
     dependencies=[Depends(_read_limit)],
 )
 def get_invoice(
-    invoice_id: int,
+    invoice_id: RowId,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> InvoiceDetailOut:
@@ -317,7 +318,7 @@ def get_invoice(
     dependencies=[Depends(_write_limit)],
 )
 def update_invoice(
-    invoice_id: int,
+    invoice_id: RowId,
     payload: InvoiceUpdate,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
@@ -407,7 +408,7 @@ def update_invoice(
     dependencies=[Depends(_reparse_limit)],
 )
 def reparse_invoice(
-    invoice_id: int,
+    invoice_id: RowId,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> InvoiceDetailOut:
@@ -440,7 +441,7 @@ def reparse_invoice(
     dependencies=[Depends(_write_limit)],
 )
 def delete_invoice(
-    invoice_id: int,
+    invoice_id: RowId,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> None:

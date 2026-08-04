@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import search_pattern
 from app.models.business import Business
@@ -50,7 +51,7 @@ def list_suppliers(
         default=None, max_length=100, description="Substring of the GSTIN or either name."
     ),
     limit: int = Query(default=50, ge=1, le=200, description="Page size, 1-200."),
-    offset: int = Query(default=0, ge=0, description="Rows to skip."),
+    offset: Offset = 0,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> SupplierListOut:
@@ -156,7 +157,7 @@ def rescore(
     dependencies=[Depends(_read_limit)],
 )
 def get_supplier(
-    supplier_id: int,
+    supplier_id: RowId,
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),

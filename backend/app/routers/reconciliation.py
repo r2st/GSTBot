@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import safe_filename
 from app.models.business import Business
@@ -292,7 +293,7 @@ def run(
 def list_runs(
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     limit: int = Query(default=20, ge=1, le=100),
-    offset: int = Query(default=0, ge=0),
+    offset: Offset = 0,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> ReconciliationListOut:
@@ -361,7 +362,7 @@ def latest_run(
     dependencies=[Depends(_read_limit)],
 )
 def get_run(
-    run_id: int,
+    run_id: RowId,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
 ) -> ReconciliationDetailOut:
