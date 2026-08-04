@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import and_, case, func, select
+from sqlalchemy import and_, case, func, insert, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -182,13 +182,60 @@ def find_duplicate(
 
 
 def _find_supplier(db: Session, business_id: int, gstin: str) -> Supplier | None:
-    return db.scalar(
-        select(Supplier).where(
-            Supplier.business_id == business_id,
-            Supplier.gstin == gstin,
-            Supplier.deleted_at.is_(None),
+    """The live supplier row for *gstin*, without writing anything to get it.
+
+    Autoflush is off for the same reason the caller flushes one row at a time:
+    a plain query writes out everything the session has pending first, so a
+    caller part-way through an edit of its own had that edit hit the database
+    from inside a *lookup*. The supplier this reads is always already committed
+    or already flushed by the insert below, so there is nothing pending this
+    query needs to see.
+    """
+    with db.no_autoflush:
+        return db.scalar(
+            select(Supplier).where(
+                Supplier.business_id == business_id,
+                Supplier.gstin == gstin,
+                Supplier.deleted_at.is_(None),
+            )
         )
-    )
+
+
+def _insert_supplier(db: Session, business_id: int, gstin: str, name: str | None) -> None:
+    """INSERT one supplier row inside a SAVEPOINT of its own.
+
+    Deliberately a Core INSERT on a connection-level SAVEPOINT rather than
+    ``Session.begin_nested()`` around ``Session.add``. Releasing an *ORM*
+    nested transaction flushes the whole session on the way out, so a caller
+    part-way through an edit of its own — the invoice PATCH route sets its
+    fields and then reaches this function to link the supplier — had that edit
+    written from inside this SAVEPOINT. When the caller's change was the one
+    the database refused, the handler below read a conflict that had nothing to
+    do with any supplier as a lost race, re-queried a session whose transaction
+    was already dead, and turned what should have been a 409 about the invoice
+    into a ``PendingRollbackError`` and a 500.
+
+    Narrowing the ORM flush was not enough: the flush that broke it came from
+    releasing the savepoint, not from the ``add``. Going through the connection
+    keeps the SAVEPOINT holding what it claims to hold — one INSERT, whose
+    failure means exactly one thing — and leaves the caller's pending edits
+    where they belong, unwritten and the caller's to commit or discard.
+    """
+    connection = db.connection()
+    savepoint = connection.begin_nested()
+    try:
+        connection.execute(
+            insert(Supplier).values(
+                business_id=business_id,
+                gstin=gstin,
+                legal_name=name,
+                state_code=gstin_service.state_code_of(gstin),
+            )
+        )
+    except IntegrityError:
+        savepoint.rollback()
+        raise
+    savepoint.commit()
 
 
 def get_or_create_supplier(
@@ -214,19 +261,15 @@ def get_or_create_supplier(
     The insert is wrapped in a SAVEPOINT so a conflict rolls back that statement
     alone and leaves the session usable, and the winner's row is then read back.
     Whoever inserts, both callers end up with the same supplier.
+
+    Neither the lookup nor the insert writes anything else the session happens
+    to have pending; see :func:`_find_supplier` and :func:`_insert_supplier` for
+    why that matters to callers who are part-way through an edit of their own.
     """
     supplier = _find_supplier(db, business_id, gstin)
     if supplier is None:
         try:
-            with db.begin_nested():
-                supplier = Supplier(
-                    business_id=business_id,
-                    gstin=gstin,
-                    legal_name=name,
-                    state_code=gstin_service.state_code_of(gstin),
-                )
-                db.add(supplier)
-                db.flush()
+            _insert_supplier(db, business_id, gstin, name)
         except IntegrityError:
             # Somebody else got there first. Their row is the one that exists.
             supplier = _find_supplier(db, business_id, gstin)
@@ -234,6 +277,12 @@ def get_or_create_supplier(
                 # The conflict was not the one this handles — a soft-deleted row
                 # holding the GSTIN, say. Let it surface rather than pretending.
                 raise
+        else:
+            # Read back rather than trusting the INSERT: the ORM object is what
+            # callers hold, and this is the one place it enters the session.
+            supplier = _find_supplier(db, business_id, gstin)
+            if supplier is None:  # pragma: no cover - the row was just written
+                raise RuntimeError(f"Supplier {gstin} vanished after insert")
     if name and not supplier.legal_name:
         supplier.legal_name = name
     return supplier

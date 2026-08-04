@@ -306,6 +306,13 @@ def get_invoice(
     ),
     responses={
         404: {"description": "No such invoice in this tenant."},
+        409: {
+            "description": (
+                "The correction would leave two invoices sharing one "
+                "counterparty's document number. The conflicting invoice's id "
+                "is on the response."
+            )
+        },
         422: {
             "description": (
                 "A payment date in the future, or a pair of dates leaving the "
@@ -357,6 +364,37 @@ def update_invoice(
                 "was issued."
             ),
         )
+
+    # A correction can walk this invoice onto another one's natural key —
+    # retyping the document number, or fixing the counterparty GSTIN onto a
+    # supplier who already has an invoice by that number. The database refuses
+    # it either way, but the refusal arrived as an unhandled flush deep inside
+    # ``get_or_create_supplier`` below, which left the session unusable and the
+    # reviewer looking at a 500 and a correlation id. The upload path already
+    # answers 409 and names the invoice in the way; a correction is the same
+    # conflict and deserves the same answer, checked before anything is
+    # written so a refused edit touches nothing.
+    if "invoice_number" in changes or "counterparty_gstin" in changes:
+        number = changes.get("invoice_number", invoice.invoice_number)
+        counterparty = changes.get("counterparty_gstin", invoice.counterparty_gstin)
+        clash = invoice_service.find_duplicate(
+            db,
+            business.id,
+            invoice_type=invoice.invoice_type,
+            counterparty_gstin=counterparty,
+            invoice_number=number,
+        )
+        if clash is not None and clash.id != invoice.id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": (
+                        f"Invoice {number} from {counterparty} is already on file "
+                        f"as invoice {clash.id}."
+                    ),
+                    "invoice_id": clash.id,
+                },
+            )
 
     for attr, value in changes.items():
         setattr(invoice, attr, value)

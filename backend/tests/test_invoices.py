@@ -1092,3 +1092,238 @@ class TestTheDateThatDecidesWhichReturnAnInvoiceIsIn:
             f"/api/v1/invoices/{sale_id}", json={"invoice_date": None}
         ).json()
         assert body["invoice_date"] is None
+
+
+# --------------------------------------------------------------------------
+# Corrections that would collide with an invoice already on file
+# --------------------------------------------------------------------------
+
+class TestACorrectionOntoAnotherInvoicesKey:
+    """A PATCH can walk an invoice onto another one's natural key.
+
+    `(business, type, counterparty, number)` is unique, and two ordinary
+    corrections reach it: retyping the document number, and fixing a
+    counterparty GSTIN onto a supplier who already has an invoice by that
+    number. Both are what a reviewer is *for*.
+
+    The database refused them, but nothing caught the refusal. It surfaced from
+    a flush inside `get_or_create_supplier` — which is looking for a *supplier*
+    conflict and had no idea the pending invoice edit had been swept into its
+    SAVEPOINT — whose handler then re-queried a session whose transaction was
+    already dead. The reviewer got a 500 and a correlation id for a conflict
+    the upload path has always reported as a 409 naming the other invoice.
+    """
+
+    @staticmethod
+    def _invoice(db, business, *, number: str, gstin: str) -> Invoice:
+        row = Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.PURCHASE,
+            status=InvoiceStatus.PARSED,
+            period="2026-04",
+            invoice_number=number,
+            counterparty_gstin=gstin,
+            taxable_value=Decimal("1000.00"),
+            total_value=Decimal("1180.00"),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    def test_renumbering_onto_an_existing_invoice_is_a_conflict(
+        self, auth_client, db_session, business
+    ):
+        self._invoice(db_session, business, number="INV-A", gstin=SUPPLIER_GSTIN_SAME_STATE)
+        target = self._invoice(
+            db_session, business, number="INV-B", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{target.id}", json={"invoice_number": "INV-A"}
+        )
+        assert response.status_code == 409, response.text
+
+    def test_the_conflict_names_the_invoice_already_holding_the_number(
+        self, auth_client, db_session, business
+    ):
+        # Without the id there is nothing for the reviewer to go and look at,
+        # which is the whole difference between this and the 500 it replaced.
+        existing = self._invoice(
+            db_session, business, number="INV-A", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+        target = self._invoice(
+            db_session, business, number="INV-B", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{target.id}", json={"invoice_number": "INV-A"}
+        )
+        assert response.json()["detail"]["invoice_id"] == existing.id
+
+    def test_correcting_the_counterparty_onto_a_collision_is_a_conflict(
+        self, auth_client, db_session, business
+    ):
+        self._invoice(db_session, business, number="INV-SAME", gstin=SUPPLIER_GSTIN_SAME_STATE)
+        target = self._invoice(
+            db_session, business, number="INV-SAME", gstin=SUPPLIER_GSTIN_OTHER_STATE
+        )
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{target.id}",
+            json={"counterparty_gstin": SUPPLIER_GSTIN_SAME_STATE},
+        )
+        assert response.status_code == 409, response.text
+
+    def test_the_refused_correction_leaves_both_invoices_alone(
+        self, auth_client, db_session, business
+    ):
+        # A refusal that had already written half of itself would be worse than
+        # the 500: the check runs before anything is set.
+        self._invoice(db_session, business, number="INV-A", gstin=SUPPLIER_GSTIN_SAME_STATE)
+        target = self._invoice(
+            db_session, business, number="INV-B", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+
+        auth_client.patch(f"/api/v1/invoices/{target.id}", json={"invoice_number": "INV-A"})
+
+        db_session.expire_all()
+        assert db_session.get(Invoice, target.id).invoice_number == "INV-B"
+
+    def test_the_session_survives_the_refusal(self, auth_client, db_session, business):
+        # The old failure poisoned the request's transaction, so this is the
+        # assertion that the 409 is a real refusal and not a dressed-up crash:
+        # the API still works afterwards.
+        self._invoice(db_session, business, number="INV-A", gstin=SUPPLIER_GSTIN_SAME_STATE)
+        target = self._invoice(
+            db_session, business, number="INV-B", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+
+        auth_client.patch(f"/api/v1/invoices/{target.id}", json={"invoice_number": "INV-A"})
+
+        assert auth_client.get("/api/v1/invoices").status_code == 200
+
+    def test_renumbering_to_a_free_number_still_works(
+        self, auth_client, db_session, business
+    ):
+        target = self._invoice(
+            db_session, business, number="INV-B", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{target.id}", json={"invoice_number": "INV-C"}
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["invoice_number"] == "INV-C"
+
+    def test_patching_an_invoice_to_the_number_it_already_has_is_not_a_conflict(
+        self, auth_client, db_session, business
+    ):
+        # The row it collides with is itself. A no-op correction is a no-op.
+        target = self._invoice(
+            db_session, business, number="INV-B", gstin=SUPPLIER_GSTIN_SAME_STATE
+        )
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{target.id}", json={"invoice_number": "INV-B"}
+        )
+        assert response.status_code == 200, response.text
+
+    def test_a_sale_may_reuse_a_purchases_number(self, auth_client, db_session, business):
+        # The key includes the type, so a sales invoice numbered like a
+        # purchase from the same GSTIN is not a collision.
+        self._invoice(db_session, business, number="INV-A", gstin=SUPPLIER_GSTIN_SAME_STATE)
+        sale = Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.SALES,
+            status=InvoiceStatus.PARSED,
+            period="2026-04",
+            invoice_number="INV-Z",
+            counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+            taxable_value=Decimal("1000.00"),
+            total_value=Decimal("1180.00"),
+        )
+        db_session.add(sale)
+        db_session.commit()
+        db_session.refresh(sale)
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{sale.id}", json={"invoice_number": "INV-A"}
+        )
+        assert response.status_code == 200, response.text
+
+
+class TestTheSupplierSavepointHoldsOnlyTheSupplier:
+    """`get_or_create_supplier` inserts inside a SAVEPOINT so a lost race costs
+    that statement alone. A bare `db.flush()` broke that promise: it writes out
+    *everything* the session has pending, so a caller part-way through an edit
+    of its own had that edit dragged into the SAVEPOINT and judged by a handler
+    written for supplier conflicts.
+
+    The invoice PATCH route is exactly such a caller — it sets its fields, then
+    reaches this function to link the supplier — and when the database refused
+    the caller's change, `except IntegrityError` read it as a lost race,
+    re-queried a session whose transaction was already dead, and raised
+    `PendingRollbackError` from a function whose whole purpose is to leave the
+    session usable.
+    """
+
+    @staticmethod
+    def _invoice(db, business, *, number: str) -> Invoice:
+        row = Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.PURCHASE,
+            status=InvoiceStatus.PARSED,
+            period="2026-04",
+            invoice_number=number,
+            counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+            taxable_value=Decimal("1000.00"),
+            total_value=Decimal("1180.00"),
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row
+
+    @pytest.fixture()
+    def pending_conflict(self, db_session, business):
+        """A dirty invoice whose pending change the database will refuse."""
+        self._invoice(db_session, business, number="INV-A")
+        target = self._invoice(db_session, business, number="INV-B")
+        target.invoice_number = "INV-A"
+        return target
+
+    def test_a_new_supplier_is_still_created(self, db_session, business, pending_conflict):
+        supplier = invoice_service.get_or_create_supplier(
+            db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+        )
+        assert supplier.gstin == SUPPLIER_GSTIN_OTHER_STATE
+
+    def test_the_caller_s_pending_change_is_not_written_by_this_function(
+        self, db_session, business, pending_conflict
+    ):
+        # It is the caller's to commit or discard. Writing it here is what put
+        # it inside the SAVEPOINT in the first place.
+        invoice_service.get_or_create_supplier(
+            db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+        )
+        assert pending_conflict in db_session.dirty
+
+    def test_the_session_is_left_usable(self, db_session, business, pending_conflict):
+        # The failure mode this replaces: PendingRollbackError on the next
+        # statement, whatever it was.
+        invoice_service.get_or_create_supplier(
+            db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+        )
+        assert db_session.query(Supplier).count() >= 1
+
+    def test_an_existing_supplier_is_returned_without_touching_the_flush(
+        self, db_session, business, pending_conflict
+    ):
+        first = invoice_service.get_or_create_supplier(
+            db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+        )
+        again = invoice_service.get_or_create_supplier(
+            db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+        )
+        assert again.id == first.id
