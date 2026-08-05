@@ -252,6 +252,62 @@ describe("InvoiceDetailPage", () => {
       const [url, options] = global.fetch.mock.calls.at(-1);
       expect(String(url)).toContain("/invoices/42/reparse");
       expect(options.method).toBe("POST");
+      // The assertion the comment above has always described. The form is a
+      // working copy of the invoice, and only the initial load used to refresh
+      // it — so the panel showed the re-extracted GSTIN while the input the
+      // user types into still held the one extraction had just replaced.
+      expect(screen.getByLabelText("Counterparty GSTIN")).toHaveValue("29AAGCB7383J1Z4");
+    });
+
+    it("does not write the pre-extraction values back over the new ones", async () => {
+      // The destructive half of the same gap, and only two clicks away:
+      // re-extract, then save. Saving diffs the form against the invoice, so a
+      // form still holding the old values sends every one of them as a
+      // correction and undoes the extraction the user just asked for.
+      const user = userEvent.setup();
+      await renderPage();
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse(
+          invoice({
+            counterparty_gstin: "29AAGCB7383J1Z4",
+            counterparty_name: "Northwind Supplies",
+            taxable_value: "2000.00",
+          }),
+        ),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Re-extract" }));
+      await waitFor(() =>
+        expect(screen.getByText("Re-extracted from the stored file.")).toBeInTheDocument(),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      // Nothing was edited after the re-extraction, so there is nothing to
+      // send — and certainly not the values it replaced.
+      await screen.findByText("Nothing changed.");
+      expect(global.fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("leaves the form agreeing with what the save actually stored", async () => {
+      // The server settles the figure — money lands on the column's two
+      // decimal places — so a draft left as typed disagrees with the invoice
+      // beside it and is re-sent as a change on the next save.
+      const user = userEvent.setup();
+      await renderPage();
+
+      await retype(user, "Taxable value", "2000");
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse(invoice({ taxable_value: "2000.00" })),
+      );
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+      await screen.findByText("Corrections saved.");
+
+      expect(screen.getByLabelText("Taxable value")).toHaveValue(2000);
+
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+      await screen.findByText("Nothing changed.");
+      expect(global.fetch).toHaveBeenCalledTimes(2);
     });
 
     it("surfaces a failure instead of leaving the button spinning", async () => {

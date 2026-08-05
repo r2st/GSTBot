@@ -43,18 +43,33 @@ export default function InvoiceDetailPage() {
   // never seen — the row id in the URL is not one they would recognise.
   usePageTitle(invoice?.invoice_number ? `Invoice ${invoice.invoice_number}` : "Invoice");
 
+  // The form is a working copy of the invoice, so every path that replaces the
+  // invoice has to replace the copy with it. Only `load` used to, which made
+  // re-extraction destructive: the panel showed the newly parsed fields while
+  // the inputs still held the ones extraction had just replaced, and saving
+  // from there wrote the stale copy back over them. Two ordinary clicks —
+  // re-extract, then save — and the re-extraction was undone.
+  //
+  // Saving has a milder version of the same gap. The server settles what it
+  // stores (money lands on the column's two decimal places, a date comes back
+  // in the API's format), so a draft left as typed disagrees with the invoice
+  // beside it, is re-sent as a change on the next save, and reports
+  // "Corrections saved" for an edit nobody made.
+  const adopt = useCallback((data) => {
+    setInvoice(data);
+    setDraft(
+      Object.fromEntries(EDITABLE.map(({ field }) => [field, data[field] ?? ""])),
+    );
+  }, []);
+
   const load = useCallback(async () => {
     setError("");
     try {
-      const data = await api.getInvoice(id);
-      setInvoice(data);
-      setDraft(
-        Object.fromEntries(EDITABLE.map(({ field }) => [field, data[field] ?? ""])),
-      );
+      adopt(await api.getInvoice(id));
     } catch (err) {
       setError(err.message);
     }
-  }, [id]);
+  }, [id, adopt]);
 
   useEffect(() => {
     load();
@@ -87,7 +102,7 @@ export default function InvoiceDetailPage() {
         setNotice("Nothing changed.");
         return;
       }
-      setInvoice(await api.updateInvoice(id, changes));
+      adopt(await api.updateInvoice(id, changes));
       setNotice("Corrections saved.");
     } catch (err) {
       setError(err.message);
@@ -100,7 +115,7 @@ export default function InvoiceDetailPage() {
     setBusy(true);
     setError("");
     try {
-      setInvoice(await api.reparseInvoice(id));
+      adopt(await api.reparseInvoice(id));
       setNotice("Re-extracted from the stored file.");
     } catch (err) {
       setError(err.message);
