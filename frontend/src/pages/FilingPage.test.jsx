@@ -309,4 +309,109 @@ describe("FilingPage", () => {
       expect(global.fetch.mock.calls.at(-1)[0]).toContain(`period=${previous}`),
     );
   });
+
+  describe("when answers come back out of order", () => {
+    /**
+     * A fetch that hands back the levers instead of resolving on its own.
+     *
+     * The bug here is an ordering one, so the test has to be able to answer the
+     * second request before the first. A mock that resolves by itself can only
+     * ever answer them in order, which is the one case that was never broken.
+     */
+    function deferredFetch() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url, options = {}) =>
+          new Promise((resolve, reject) => {
+            pending.push({
+              url: String(url),
+              signal: options.signal,
+              answer: (body) =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  statusText: "OK",
+                  text: async () => JSON.stringify(body),
+                }),
+            });
+            // An aborted fetch does not resolve with a partial answer; it
+            // rejects with an AbortError, so the mock has to as well.
+            options.signal?.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+      return pending;
+    }
+
+    it("abandons the preview the other return type supersedes", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(gstr1());
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      expect(pending[0].url).toContain("/filing/gstr1");
+      expect(pending[0].signal.aborted).toBe(true);
+      expect(pending[1].url).toContain("/filing/gstr3b");
+      expect(pending[1].signal.aborted).toBe(false);
+    });
+
+    it("does not preview one return while offering to file the other", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      // GSTR-3B answers first, which is the whole point: responses do not come
+      // back in the order they were sent.
+      pending[1].answer(gstr3b());
+      await loaded();
+      expect(
+        screen.getByRole("heading", { name: "What this leaves to pay" }),
+      ).toBeInTheDocument();
+
+      // Now the abandoned GSTR-1 lands. The heading, the export buttons and the
+      // validation verdict all follow the toggle rather than the response, so
+      // before this the page offered to file GSTR-3B over a GSTR-1 preview.
+      pending[0].answer(gstr1({ validation: validation({ invoice_count: 99 }) }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("heading", { name: "What this leaves to pay" }),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        screen.getByRole("button", { name: /Download GSTR-3B JSON/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("99")).not.toBeInTheDocument();
+    });
+
+    it("does not raise an error banner for a request it cancelled itself", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+      pending[1].answer(gstr3b());
+
+      await loaded();
+      // "signal is aborted without reason" in front of someone who simply
+      // switched return would be worse than the stale preview the abort exists
+      // to prevent.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
 });

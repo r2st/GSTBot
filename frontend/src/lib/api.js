@@ -199,8 +199,10 @@ export const api = {
   deleteInvoice: (id) => request(`/invoices/${id}`, { method: "DELETE" }),
 
   // ---- Dashboard ----
-  dashboard: (period) =>
-    request(`/dashboard${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+  dashboard: (period, { signal } = {}) =>
+    request(`/dashboard${period ? `?period=${encodeURIComponent(period)}` : ""}`, {
+      signal,
+    }),
 
   // ---- GSTR-2B and reconciliation ----
   importGstr2b(file, period) {
@@ -235,8 +237,8 @@ export const api = {
     request(`/reconciliation/latest?period=${encodeURIComponent(period)}`),
 
   // ---- ITC ----
-  itc: (period, params = {}) =>
-    request(`/itc${query({ period, ...params })}`),
+  itc: (period, params = {}, { signal } = {}) =>
+    request(`/itc${query({ period, ...params })}`, { signal }),
 
   rule37: (asOf) => request(`/itc/rule37${query({ as_of: asOf })}`),
 
@@ -246,8 +248,8 @@ export const api = {
   validateFiling: (period, invoiceType) =>
     request(`/filing/validate${query({ period, invoice_type: invoiceType })}`),
 
-  gstr1: (period) => request(`/filing/gstr1${query({ period })}`),
-  gstr3b: (period) => request(`/filing/gstr3b${query({ period })}`),
+  gstr1: (period, { signal } = {}) => request(`/filing/gstr1${query({ period })}`, { signal }),
+  gstr3b: (period, { signal } = {}) => request(`/filing/gstr3b${query({ period })}`, { signal }),
 
   /** The download URL for an export. Used as an href, not fetched. */
   exportUrl: (returnType, extension, period) =>

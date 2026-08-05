@@ -7,7 +7,7 @@ import { SkeletonPanel, SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import {
   currentPeriod,
   daysUntil,
@@ -110,20 +110,29 @@ export default function DashboardPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (target) => {
+  const load = useCallback(async (target, { signal } = {}) => {
     setLoading(true);
     setError("");
     try {
-      setData(await api.dashboard(target));
+      setData(await api.dashboard(target, { signal }));
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // Stepping back through months is how this screen is read, and responses do
+  // not come back in the order they were sent. Because a period change keeps
+  // the previous figures on screen rather than blanking them (see below), a
+  // late answer for April landing after June's simply replaced the numbers —
+  // leaving one month's money under another month's label, on a screen that
+  // gives no per-figure clue which month it is showing.
   useEffect(() => {
-    load(period);
+    const controller = new AbortController();
+    load(period, { signal: controller.signal });
+    return () => controller.abort();
   }, [load, period]);
 
   // Only on the first load. A period change keeps the previous figures on

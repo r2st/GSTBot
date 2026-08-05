@@ -5,7 +5,7 @@ import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
 
 /** The last 12 filing periods, newest first. */
@@ -79,21 +79,28 @@ export default function ITCPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (target) => {
+  const load = useCallback(async (target, { signal } = {}) => {
     setLoading(true);
     setError("");
     try {
-      setSummary(await api.itc(target));
+      setSummary(await api.itc(target, {}, { signal }));
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err.message);
       setSummary(null);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // Responses do not come back in the order they were sent, and stepping
+  // through months is how this screen is read. A late answer for one period
+  // landing after another's puts that month's claimable credit, reversals and
+  // cash payable under the wrong month's heading.
   useEffect(() => {
-    load(period);
+    const controller = new AbortController();
+    load(period, { signal: controller.signal });
+    return () => controller.abort();
   }, [load, period]);
 
   const rule37 = summary?.rule_37;

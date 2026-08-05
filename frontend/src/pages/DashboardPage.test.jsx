@@ -305,6 +305,147 @@ describe("DashboardPage", () => {
       release();
       vi.useRealTimers();
     });
+
+    describe("when answers come back out of order", () => {
+      /**
+       * A fetch that hands back the levers instead of resolving on its own.
+       *
+       * The bug here is an ordering one, so the test has to be able to answer
+       * the second request before the first. A mock that resolves by itself can
+       * only ever answer them in order, which is the one case that was never
+       * broken.
+       */
+      function deferredFetch() {
+        const pending = [];
+        global.fetch = vi.fn(
+          (url, options = {}) =>
+            new Promise((resolve, reject) => {
+              pending.push({
+                url: String(url),
+                signal: options.signal,
+                answer: (body) =>
+                  resolve({
+                    ok: true,
+                    status: 200,
+                    statusText: "",
+                    text: async () => JSON.stringify(body),
+                  }),
+              });
+              // An aborted fetch does not resolve with a partial answer; it
+              // rejects with an AbortError, so the mock has to as well.
+              options.signal?.addEventListener("abort", () => {
+                const err = new Error("The operation was aborted.");
+                err.name = "AbortError";
+                reject(err);
+              });
+            }),
+        );
+        return pending;
+      }
+
+      it("abandons the request the newer period supersedes", async () => {
+        vi.setSystemTime(new Date(2026, 4, 1));
+        const pending = deferredFetch();
+        renderPage();
+
+        await waitFor(() => expect(pending).toHaveLength(1));
+        pending[0].answer(dashboard());
+        await screen.findByText(/Umang Traders/);
+
+        await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-03");
+        await waitFor(() => expect(pending).toHaveLength(2));
+        await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-02");
+        await waitFor(() => expect(pending).toHaveLength(3));
+
+        // March was called off the moment February was asked for. Only the
+        // request describing the period actually selected is still in flight.
+        expect(pending[1].url).toContain("period=2026-03");
+        expect(pending[1].signal.aborted).toBe(true);
+        expect(pending[2].url).toContain("period=2026-02");
+        expect(pending[2].signal.aborted).toBe(false);
+        vi.useRealTimers();
+      });
+
+      it("does not let one month's figures land under another month's label", async () => {
+        vi.setSystemTime(new Date(2026, 4, 1));
+        const pending = deferredFetch();
+        renderPage();
+
+        await waitFor(() => expect(pending).toHaveLength(1));
+        pending[0].answer(dashboard());
+        await screen.findByText(/Umang Traders/);
+
+        await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-03");
+        await waitFor(() => expect(pending).toHaveLength(2));
+        await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-02");
+        await waitFor(() => expect(pending).toHaveLength(3));
+
+        // February answers first, which is the whole point: responses do not
+        // come back in the order they were sent.
+        pending[2].answer(
+          dashboard({
+            period: "2026-02",
+            net_liability: {
+              cgst: "0.00",
+              sgst: "0.00",
+              igst: "2100.00",
+              cess: "0.00",
+              total: "2100.00",
+            },
+          }),
+        );
+        // The figure shows in the stat tile and again in the tax breakdown.
+        await screen.findAllByText("₹2,100.00");
+
+        // Now March finally lands. It was called off, so its answer never
+        // reaches the page — before this it repainted every figure, leaving
+        // March's money sitting under a heading that reads February.
+        pending[1].answer(
+          dashboard({
+            period: "2026-03",
+            net_liability: {
+              cgst: "0.00",
+              sgst: "0.00",
+              igst: "77000.00",
+              cess: "0.00",
+              total: "77000.00",
+            },
+          }),
+        );
+
+        await waitFor(() =>
+          expect(
+            screen.getByRole("region", { name: "Tax breakdown for February 2026" }),
+          ).toBeInTheDocument(),
+        );
+        expect(screen.getAllByText("₹2,100.00").length).toBeGreaterThan(0);
+        expect(screen.queryByText("₹77,000.00")).not.toBeInTheDocument();
+        vi.useRealTimers();
+      });
+
+      it("does not raise an error banner for a request it cancelled itself", async () => {
+        vi.setSystemTime(new Date(2026, 4, 1));
+        const pending = deferredFetch();
+        renderPage();
+
+        await waitFor(() => expect(pending).toHaveLength(1));
+        pending[0].answer(dashboard());
+        await screen.findByText(/Umang Traders/);
+
+        await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-03");
+        await waitFor(() => expect(pending).toHaveLength(2));
+        await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-02");
+        await waitFor(() => expect(pending).toHaveLength(3));
+        pending[2].answer(dashboard({ period: "2026-02" }));
+
+        await screen.findByRole("region", { name: "Tax breakdown for February 2026" });
+        // "signal is aborted without reason" in front of someone who simply
+        // changed month would be worse than the stale figures the abort exists
+        // to prevent.
+        expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+        vi.useRealTimers();
+      });
+    });
   });
   describe("the plan usage meter", () => {
     it("reports usage as a progress bar rather than a bare width", async () => {

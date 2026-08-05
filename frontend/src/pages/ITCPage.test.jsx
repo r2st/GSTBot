@@ -302,4 +302,131 @@ describe("ITCPage", () => {
       expect(global.fetch.mock.calls.at(-1)[0]).toContain(`/itc?period=${previous}`),
     );
   });
+
+  describe("when answers come back out of order", () => {
+    /**
+     * A fetch that hands back the levers instead of resolving on its own.
+     *
+     * The bug here is an ordering one, so the test has to be able to answer the
+     * second request before the first. A mock that resolves by itself can only
+     * ever answer them in order, which is the one case that was never broken.
+     */
+    function deferredFetch() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url, options = {}) =>
+          new Promise((resolve, reject) => {
+            pending.push({
+              url: String(url),
+              signal: options.signal,
+              answer: (body) =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  statusText: "OK",
+                  text: async () => JSON.stringify(body),
+                }),
+            });
+            // An aborted fetch does not resolve with a partial answer; it
+            // rejects with an AbortError, so the mock has to as well.
+            options.signal?.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+      return pending;
+    }
+
+    /** Steps the picker back `count` months, one selection at a time. */
+    async function stepBack(user, pending, count) {
+      const select = screen.getByLabelText("Period");
+      for (let step = 1; step <= count; step += 1) {
+        await user.selectOptions(select, select.options[step].value);
+        await waitFor(() => expect(pending).toHaveLength(step + 1));
+      }
+    }
+
+    it("abandons the request the newer period supersedes", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(summary());
+      await loaded();
+
+      await stepBack(user, pending, 2);
+
+      // The month in the middle was called off the moment the next one was
+      // asked for. Only the request describing the selected period is live.
+      expect(pending[1].signal.aborted).toBe(true);
+      expect(pending[2].signal.aborted).toBe(false);
+    });
+
+    it("does not put one month's credit under another month's heading", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      const { container } = renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(summary());
+      await loaded();
+
+      await stepBack(user, pending, 2);
+
+      // The newest request answers first, which is the whole point: responses
+      // do not come back in the order they were sent.
+      pending[2].answer(
+        summary({
+          set_off: {
+            ...summary().set_off,
+            cash_payable: heads({ igst: "500.00" }),
+            total_cash: "500.00",
+          },
+        }),
+      );
+      await waitFor(() =>
+        expect(statCard(container, "Cash to pay")).toHaveTextContent("₹500.00"),
+      );
+
+      // Now the abandoned month finally lands. Before this it repainted the
+      // claimable credit, the reversals and the cash payable, leaving one
+      // month's position on screen under the period picker showing another.
+      pending[1].answer(
+        summary({
+          set_off: {
+            ...summary().set_off,
+            cash_payable: heads({ igst: "64000.00" }),
+            total_cash: "64000.00",
+          },
+        }),
+      );
+
+      await waitFor(() =>
+        expect(statCard(container, "Cash to pay")).toHaveTextContent("₹500.00"),
+      );
+      expect(screen.queryByText("₹64,000.00")).not.toBeInTheDocument();
+    });
+
+    it("does not raise an error banner for a request it cancelled itself", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(summary());
+      await loaded();
+
+      await stepBack(user, pending, 2);
+      pending[2].answer(summary());
+
+      await loaded();
+      // "signal is aborted without reason" in front of someone who simply
+      // changed month would be worse than the stale figures the abort exists
+      // to prevent.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
 });

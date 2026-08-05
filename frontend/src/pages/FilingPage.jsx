@@ -5,7 +5,7 @@ import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import { currentPeriod, periodLabel, rupees } from "../lib/format";
 
 /** The last 12 filing periods, newest first. */
@@ -75,21 +75,33 @@ export default function FilingPage() {
   const [loading, setLoading] = useState(true);
   const [showJson, setShowJson] = useState(false);
 
-  const load = useCallback(async (target, kind) => {
+  const load = useCallback(async (target, kind, { signal } = {}) => {
     setLoading(true);
     setError("");
     try {
-      setPreview(kind === "gstr3b" ? await api.gstr3b(target) : await api.gstr1(target));
+      setPreview(
+        kind === "gstr3b"
+          ? await api.gstr3b(target, { signal })
+          : await api.gstr1(target, { signal }),
+      );
     } catch (err) {
+      if (isAbortError(err)) return;
       setError(err.message);
       setPreview(null);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // Two controls drive this, and responses do not come back in the order they
+  // were sent. A late GSTR-1 landing after a GSTR-3B was asked for is the worse
+  // half: the heading, the export buttons and the validation verdict all follow
+  // `returnType`, so the page would offer to file one return while previewing
+  // the other.
   useEffect(() => {
-    load(period, returnType);
+    const controller = new AbortController();
+    load(period, returnType, { signal: controller.signal });
+    return () => controller.abort();
   }, [load, period, returnType]);
 
   async function handleDownload(extension) {
