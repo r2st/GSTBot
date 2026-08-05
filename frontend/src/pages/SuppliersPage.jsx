@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
@@ -169,6 +169,14 @@ export default function SuppliersPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Bumped to refetch under the filters already selected. A rescore changes no
+  // state the load effect depends on, so without this there is nothing for it
+  // to react to.
+  const [reloadToken, setReloadToken] = useState(0);
+  // Which breakdown the panel is waiting for. The panel is one slot and the
+  // Details buttons stay live while it loads, so an answer has to prove it is
+  // still the one that was asked for.
+  const detailRequest = useRef(0);
 
   const load = useCallback(async (params, { signal } = {}) => {
     setLoading(true);
@@ -203,13 +211,30 @@ export default function SuppliersPage() {
     const controller = new AbortController();
     load({ risk_level: risk, search }, { signal: controller.signal });
     return () => controller.abort();
-  }, [load, risk, search]);
+  }, [load, risk, search, reloadToken]);
+
+  /** Stop whatever the panel is waiting for from arriving in it. */
+  function closeDetail() {
+    detailRequest.current += 1;
+    setSelected(null);
+  }
 
   async function handleSelect(id) {
+    // Answers do not come back in the order they were sent, and the panel is
+    // captioned by the supplier in it rather than by the row that was clicked
+    // — so a slow first answer landing after a second one did not look stale.
+    // It read as the breakdown, the provision and the exposure of a supplier
+    // the user had already clicked past.
+    const ticket = (detailRequest.current += 1);
     setError("");
     try {
-      setSelected(await api.getSupplier(id));
+      const supplier = await api.getSupplier(id);
+      if (detailRequest.current !== ticket) return;
+      setSelected(supplier);
     } catch (err) {
+      // A superseded request's failure belongs to a panel that is no longer
+      // open, so its banner would sit over a breakdown that loaded fine.
+      if (detailRequest.current !== ticket) return;
       setError(err.message);
     }
   }
@@ -221,8 +246,14 @@ export default function SuppliersPage() {
     try {
       const result = await api.rescoreSuppliers();
       setNotice(`Rescored ${result.rescored} supplier(s)`);
-      await load({ risk_level: risk, search });
-      setSelected(null);
+      // Asked for rather than called directly, so the refresh describes the
+      // chip and the search box as they are *now*. Rescoring walks every
+      // supplier's whole history, and reloading under the filters captured
+      // when the button was clicked put the unfiltered register back on
+      // screen with a risk chip still selected — a load started by hand
+      // carries no signal, so the effect could not cancel it either.
+      setReloadToken((token) => token + 1);
+      closeDetail();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -287,7 +318,7 @@ export default function SuppliersPage() {
         </div>
       </div>
 
-      {selected && <SupplierDetail supplier={selected} onClose={() => setSelected(null)} />}
+      {selected && <SupplierDetail supplier={selected} onClose={closeDetail} />}
 
       <section className="panel">
         <h2>{total} supplier{total === 1 ? "" : "s"}</h2>

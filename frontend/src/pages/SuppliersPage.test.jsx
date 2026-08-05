@@ -98,6 +98,39 @@ function mockApi({ items = [supplier()], detail: one = detail(), rescored = 3, f
 
 const renderPage = () => render(<SuppliersPage />);
 
+/**
+ * A fetch that hands back the levers instead of resolving on its own.
+ *
+ * Ordering bugs need the second answer to arrive before the first, which a
+ * mock that resolves by itself can never produce.
+ */
+function deferredFetch() {
+  const pending = [];
+  global.fetch = vi.fn(
+    (url, options = {}) =>
+      new Promise((resolve, reject) => {
+        pending.push({
+          url: String(url),
+          method: options.method ?? "GET",
+          signal: options.signal,
+          answer: (body, { status = 200 } = {}) =>
+            resolve({
+              ok: status < 400,
+              status,
+              statusText: "",
+              text: async () => JSON.stringify(body),
+            }),
+        });
+        options.signal?.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.");
+          err.name = "AbortError";
+          reject(err);
+        });
+      }),
+  );
+  return pending;
+}
+
 /** Resolves once the list has replaced the loading placeholder. */
 const loaded = (total = 1) =>
   screen.findByRole("heading", { name: `${total} supplier${total === 1 ? "" : "s"}` });
@@ -545,6 +578,118 @@ describe("SuppliersPage", () => {
       await loaded();
       const row = screen.getByText("29AAGCB7383J1Z4").closest("tr");
       expect(within(row).getByText("—")).toBeInTheDocument();
+    });
+  });
+
+  // The list load is aborted when the filters move. Neither of these is that
+  // load: they are started by a button rather than by the filters, and the
+  // filters stay live while they run.
+  describe("when the filters change while a request is in flight", () => {
+    it("reloads under the filters on screen, not the ones the rescore began with", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer({ items: [supplier()], total: 1 });
+      await loaded();
+
+      // Rescoring walks every supplier's whole reconciliation history, so it
+      // is slow enough that narrowing the list while it runs is ordinary.
+      await user.click(screen.getByRole("button", { name: "Rescore all" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+      expect(pending[1].method).toBe("POST");
+
+      await user.click(screen.getByRole("button", { name: "High risk" }));
+      await waitFor(() => expect(pending).toHaveLength(3));
+      expect(pending[2].url).toContain("risk_level=high");
+      pending[2].answer({ items: [], total: 0 });
+
+      pending[1].answer({ rescored: 3, items: [] });
+
+      // The refresh the rescore asks for has to describe the chip that is
+      // pressed. Reloading under the filters captured when the button was
+      // clicked put the whole register back on screen with "High risk" still
+      // selected — and, being started by hand rather than by the effect, that
+      // load carried no signal, so nothing could cancel it either.
+      await waitFor(() => expect(pending).toHaveLength(4));
+      expect(pending[3].url).toContain("risk_level=high");
+    });
+
+    it("keeps the breakdown of the supplier asked for last", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer({
+        items: [
+          supplier(),
+          supplier({ id: 2, gstin: "27AACCM6094J1Z3", legal_name: "Deccan Hardware" }),
+        ],
+        total: 2,
+      });
+      await loaded(2);
+
+      const [first, second] = screen.getAllByRole("button", { name: "Details" });
+      await user.click(first);
+      await waitFor(() => expect(pending).toHaveLength(2));
+      await user.click(second);
+      await waitFor(() => expect(pending).toHaveLength(3));
+
+      // The second click answers first, which is the whole point.
+      pending[2].answer(
+        detail({ id: 2, gstin: "27AACCM6094J1Z3", legal_name: "Deccan Hardware" }),
+      );
+      await screen.findByRole("heading", { name: "Deccan Hardware" });
+
+      pending[1].answer(detail());
+
+      // The panel is one slot, so a late first answer simply replaced the
+      // second — the breakdown, the provision and the exposure all swapped to
+      // a supplier the user had already clicked past.
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Deccan Hardware" })).toBeInTheDocument(),
+      );
+      expect(
+        screen.queryByRole("heading", { name: "Northwind Supplies Pvt Ltd" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("does not banner a superseded breakdown's failure over the one that loaded", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer({
+        items: [
+          supplier(),
+          supplier({ id: 2, gstin: "27AACCM6094J1Z3", legal_name: "Deccan Hardware" }),
+        ],
+        total: 2,
+      });
+      await loaded(2);
+
+      const [first, second] = screen.getAllByRole("button", { name: "Details" });
+      await user.click(first);
+      await waitFor(() => expect(pending).toHaveLength(2));
+      await user.click(second);
+      await waitFor(() => expect(pending).toHaveLength(3));
+
+      pending[2].answer(
+        detail({ id: 2, gstin: "27AACCM6094J1Z3", legal_name: "Deccan Hardware" }),
+      );
+      await screen.findByRole("heading", { name: "Deccan Hardware" });
+
+      // The refusal is about a supplier the user has already clicked past, so
+      // its banner would sit over a breakdown that loaded perfectly well.
+      pending[1].answer({ detail: "Supplier 1 could not be scored." }, { status: 500 });
+
+      await waitFor(() =>
+        expect(screen.getByRole("heading", { name: "Deccan Hardware" })).toBeInTheDocument(),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 });
