@@ -150,6 +150,63 @@ describe("SuppliersPage", () => {
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
   });
 
+  describe("when a filter matches nothing", () => {
+    /** Rows for the whole register, nothing once a filter narrows it. */
+    function mockFilterable() {
+      global.fetch = vi.fn(async (url) => {
+        const params = new URL(String(url), "http://localhost").searchParams;
+        const narrowed = params.has("risk_level") || params.has("search");
+        const items = narrowed ? [] : [supplier()];
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => JSON.stringify({ items, total: items.length }),
+        };
+      });
+    }
+
+    it("does not tell a populated register that it is empty", async () => {
+      const user = userEvent.setup();
+      mockFilterable();
+      renderPage();
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "High risk" }));
+
+      expect(await screen.findByText("No suppliers match these filters.")).toBeInTheDocument();
+      // "No suppliers yet" also explains why — none parsed, none reconciled —
+      // and both halves are false when a risk chip is the reason.
+      expect(screen.queryByText(/No suppliers yet/i)).not.toBeInTheDocument();
+    });
+
+    it("offers a way back to the whole register", async () => {
+      const user = userEvent.setup();
+      mockFilterable();
+      renderPage();
+      await loaded();
+
+      await user.type(screen.getByRole("searchbox"), "zzz");
+      await screen.findByText("No suppliers match these filters.");
+
+      await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+      expect(await screen.findByText("Northwind Supplies Pvt Ltd")).toBeInTheDocument();
+      expect(screen.getByRole("searchbox")).toHaveValue("");
+    });
+
+    it("still explains an empty register when nothing is filtered", async () => {
+      // The first-run screen has to survive the fix: a register with no
+      // suppliers and no filters is the one case that sentence is for.
+      mockApi({ items: [] });
+      renderPage();
+
+      await loaded(0);
+      expect(screen.getByText(/No suppliers yet/i)).toBeInTheDocument();
+      expect(screen.queryByText("No suppliers match these filters.")).not.toBeInTheDocument();
+    });
+  });
+
   it("opens the breakdown behind a supplier's score", async () => {
     const user = userEvent.setup();
     mockApi();

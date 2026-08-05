@@ -293,6 +293,24 @@ export default function SuppliersPage() {
         <h2>{total} supplier{total === 1 ? "" : "s"}</h2>
         {loading ? (
           <SkeletonTable rows={6} columns={5} label="Loading suppliers" />
+        ) : items.length === 0 && (risk || search) ? (
+          // Not "no suppliers yet". That sentence also explains why the list is
+          // empty — none parsed, none reconciled — and both halves are false
+          // when the reason is a risk chip or a search term. On a book with a
+          // hundred suppliers it reads as the scoring having been lost.
+          <div className="empty">
+            <p>No suppliers match these filters.</p>
+            <button
+              type="button"
+              className="btn btn-ghost"
+              onClick={() => {
+                setRisk("");
+                setSearch("");
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
         ) : items.length === 0 ? (
           <p className="muted">
             No suppliers yet. They are created as purchase invoices are parsed, and scored

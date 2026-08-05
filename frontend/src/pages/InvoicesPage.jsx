@@ -57,6 +57,10 @@ export default function InvoicesPage() {
 
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
+  // Whether the list on screen is a filtered view of the books rather than the
+  // books. An empty filtered view means the filters matched nothing; only an
+  // empty unfiltered one means there is nothing here.
+  const filtered = Object.values(filters).some((value) => value !== "");
 
   // A filter change refetches over a table that is already populated. Dimming
   // it says the rows on screen are the previous answer; swapping them for
@@ -115,6 +119,26 @@ export default function InvoicesPage() {
 
       {loading && !data ? (
         <SkeletonTable rows={8} columns={7} label="Loading invoices" />
+      ) : items.length === 0 && filtered ? (
+        // Not "no invoices yet". A search for a supplier who has not been
+        // booked, or a status nothing currently holds, is the ordinary way to
+        // land here, and telling someone with five hundred invoices that they
+        // have none — under a button offering to upload their first — reads as
+        // the books having been lost. The filters are the reason and the way
+        // out, so the message names them and clearing them is one click.
+        <div className="empty">
+          <p>No invoices match these filters.</p>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => {
+              setOffset(0);
+              setFilters({ invoice_type: "", status: "", search: "" });
+            }}
+          >
+            Clear filters
+          </button>
+        </div>
       ) : items.length === 0 ? (
         <div className="empty">
           <p>No invoices yet.</p>

@@ -136,6 +136,69 @@ describe("InvoicesPage", () => {
     );
   });
 
+  describe("when a filter matches nothing", () => {
+    /** Rows for the unfiltered list, nothing once a query string narrows it. */
+    function mockFilterable() {
+      const urls = [];
+      global.fetch = vi.fn(async (url) => {
+        const text = String(url);
+        urls.push(text);
+        const params = new URL(text, "http://localhost").searchParams;
+        const narrowed = params.has("search") || params.has("status") || params.has("invoice_type");
+        const items = narrowed ? [] : [invoice()];
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => JSON.stringify({ items, total: items.length, limit: PAGE_SIZE, offset: 0 }),
+        };
+      });
+      return urls;
+    }
+
+    it("does not tell a stocked book that it is empty", async () => {
+      const user = userEvent.setup();
+      mockFilterable();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      await user.type(screen.getByRole("searchbox"), "zzz");
+
+      expect(await screen.findByText("No invoices match these filters.")).toBeInTheDocument();
+      // The books are not empty, so neither the claim nor the first-upload
+      // invitation belongs on screen.
+      expect(screen.queryByText("No invoices yet.")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("link", { name: /upload your first invoice/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("offers a way back to the full list", async () => {
+      const user = userEvent.setup();
+      mockFilterable();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      await user.selectOptions(screen.getByLabelText("Status"), "failed");
+      await screen.findByText("No invoices match these filters.");
+
+      await user.click(screen.getByRole("button", { name: "Clear filters" }));
+
+      expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+      expect(screen.getByLabelText("Status")).toHaveValue("");
+    });
+
+    it("still invites a first upload when nothing is filtered", async () => {
+      // The first-run screen has to survive the fix: an account with no
+      // invoices and no filters is the one case the invitation is for.
+      mockApi({ items: [], total: 0 });
+      renderPage();
+
+      expect(await screen.findByText("No invoices yet.")).toBeInTheDocument();
+      expect(screen.queryByText("No invoices match these filters.")).not.toBeInTheDocument();
+    });
+  });
+
   it("surfaces a failed load and lets it be dismissed", async () => {
     mockApi({ fail: { status: 500, message: "Database unreachable" } });
     renderPage();
