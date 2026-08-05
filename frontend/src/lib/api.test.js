@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, errorMessage, getToken, setToken } from "./api";
+import { api, errorMessage, getToken, isAbortError, setToken } from "./api";
 
 function jsonResponse(body, { status = 200 } = {}) {
   return {
@@ -48,6 +48,33 @@ describe("errorMessage", () => {
   });
 });
 
+describe("isAbortError", () => {
+  it("recognises what a browser rejects an aborted fetch with", () => {
+    // Constructed rather than taken from a real `fetch`: this suite runs on
+    // jsdom, whose `AbortController` is from a different realm than the fetch
+    // implementation under it, so an abort here fails with a TypeError about
+    // the signal instead of ever reaching the abort path. A browser rejects
+    // with a DOMException named "AbortError", and the name is the only part of
+    // it the specification pins down — so the name is what is matched on, and
+    // what is asserted here.
+    expect(isAbortError(new DOMException("The operation was aborted.", "AbortError"))).toBe(
+      true,
+    );
+    // Some runtimes reject with a plain Error carrying the same name.
+    const plain = new Error("The operation was aborted.");
+    plain.name = "AbortError";
+    expect(isAbortError(plain)).toBe(true);
+  });
+
+  it("does not swallow an ordinary failure", () => {
+    // The banner exists for these. Treating one as a cancelled request would
+    // leave a genuinely broken page looking merely busy.
+    expect(isAbortError(new Error("Database unreachable"))).toBe(false);
+    expect(isAbortError(null)).toBe(false);
+    expect(isAbortError(undefined)).toBe(false);
+  });
+});
+
 describe("api", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -56,6 +83,41 @@ describe("api", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe("cancellation", () => {
+    // The two list endpoints are the ones a search box refetches per keystroke,
+    // so they are the two that have to be cancellable. Without the signal
+    // reaching `fetch` the page can abort nothing, and a superseded response
+    // still lands on the table it no longer describes.
+    it("passes a signal through to fetch on the invoice list", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+      const controller = new AbortController();
+
+      await api.listInvoices({ search: "north" }, { signal: controller.signal });
+
+      const [, options] = global.fetch.mock.calls[0];
+      expect(options.signal).toBe(controller.signal);
+    });
+
+    it("passes a signal through to fetch on the supplier list", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+      const controller = new AbortController();
+
+      await api.listSuppliers({ search: "north" }, { signal: controller.signal });
+
+      const [, options] = global.fetch.mock.calls[0];
+      expect(options.signal).toBe(controller.signal);
+    });
+
+    it("still works for a caller that does not want to cancel", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+
+      await api.listSuppliers({ search: "north" });
+
+      const [, options] = global.fetch.mock.calls[0];
+      expect(options.signal).toBeUndefined();
+    });
   });
 
   it("stores the token on login and sends it afterwards", async () => {

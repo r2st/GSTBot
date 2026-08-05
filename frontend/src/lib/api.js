@@ -13,7 +13,7 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
-async function request(path, { method = "GET", body, form, auth = true } = {}) {
+async function request(path, { method = "GET", body, form, auth = true, signal } = {}) {
   const headers = {};
   const token = getToken();
   if (auth && token) headers["Authorization"] = `Bearer ${token}`;
@@ -26,7 +26,7 @@ async function request(path, { method = "GET", body, form, auth = true } = {}) {
     payload = JSON.stringify(body);
   }
 
-  const res = await fetch(`${BASE}${path}`, { method, headers, body: payload });
+  const res = await fetch(`${BASE}${path}`, { method, headers, body: payload, signal });
 
   // A rejected token is a dead token; drop it so the app falls back to login
   // rather than retrying with a credential the server has already refused.
@@ -94,6 +94,20 @@ function unreadableMessage(res) {
   return `The server sent a response this app could not read (${code}).`;
 }
 
+/**
+ * Whether a rejection is this app cancelling its own request.
+ *
+ * A superseded search is aborted rather than left to land, so its rejection is
+ * an expected part of the flow and not something to put in an error banner —
+ * "signal is aborted without reason" in front of a user who simply kept typing
+ * would be worse than the stale rows the abort exists to prevent. `fetch`
+ * rejects with a `DOMException` named `AbortError`; the name is the only part
+ * of it specified, so it is the only part matched on.
+ */
+export function isAbortError(err) {
+  return err?.name === "AbortError";
+}
+
 /** Flatten whatever FastAPI put in `detail` into one readable line. */
 export function errorMessage(data, fallback = "Request failed") {
   const detail = data?.detail ?? fallback;
@@ -151,12 +165,12 @@ export const api = {
     return request("/invoices/upload", { method: "POST", form });
   },
 
-  listInvoices(params = {}) {
+  listInvoices(params = {}, { signal } = {}) {
     const query = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""),
     );
     const suffix = query.toString();
-    return request(`/invoices${suffix ? `?${suffix}` : ""}`);
+    return request(`/invoices${suffix ? `?${suffix}` : ""}`, { signal });
   },
 
   getInvoice: (id) => request(`/invoices/${id}`),
@@ -248,7 +262,8 @@ export const api = {
   },
 
   // ---- Suppliers ----
-  listSuppliers: (params = {}) => request(`/suppliers${query(params)}`),
+  listSuppliers: (params = {}, { signal } = {}) =>
+    request(`/suppliers${query(params)}`, { signal }),
   getSupplier: (id, period) => request(`/suppliers/${id}${query({ period })}`),
   rescoreSuppliers: (period) =>
     request(`/suppliers/rescore${query({ period })}`, { method: "POST" }),

@@ -3,7 +3,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import { dateLabel, periodLabel } from "../lib/format";
 
 const RISK = {
@@ -170,22 +170,39 @@ export default function SuppliersPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (params) => {
+  const load = useCallback(async (params, { signal } = {}) => {
     setLoading(true);
     setError("");
     try {
-      const data = await api.listSuppliers(params);
+      const data = await api.listSuppliers(params, { signal });
       setItems(data.items);
       setTotal(data.total);
     } catch (err) {
+      // A superseded request has already been replaced by a newer one, which
+      // owns the list, the banner and the spinner from here on. Returning
+      // before `finally` would skip the reset, so the check is repeated there.
+      if (isAbortError(err)) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
+  // Every keystroke in the search box is a new request, and responses do not
+  // come back in the order they were sent. Left unguarded, the answer for
+  // "ACM" landing after the answer for "ACME" left the table showing rows the
+  // search box no longer described — and, because each request cleared the
+  // banner and the spinner on its own, an error from a superseded request
+  // could sit over results that had since succeeded.
+  //
+  // Aborting the previous request on the way out of the effect fixes both: the
+  // superseded response never arrives, so it cannot be applied out of order,
+  // and the connection is released rather than spending a slot in the read
+  // limit that a fast typist would otherwise exhaust mid-word.
   useEffect(() => {
-    load({ risk_level: risk, search });
+    const controller = new AbortController();
+    load({ risk_level: risk, search }, { signal: controller.signal });
+    return () => controller.abort();
   }, [load, risk, search]);
 
   async function handleSelect(id) {

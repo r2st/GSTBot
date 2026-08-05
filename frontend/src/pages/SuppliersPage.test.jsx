@@ -274,6 +274,115 @@ describe("SuppliersPage", () => {
     );
   });
 
+  describe("a search the user is still typing into", () => {
+    /**
+     * A fetch that hands each request back to the test instead of answering it.
+     *
+     * The bug this covers is an ordering one, so the test has to be able to
+     * answer the *second* request before the first. A mock that resolves on its
+     * own can only ever answer them in order, which is the one case that was
+     * never broken.
+     */
+    function deferredFetch() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url, options = {}) =>
+          new Promise((resolve, reject) => {
+            const entry = {
+              url: String(url),
+              signal: options.signal,
+              answer: (body) =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  statusText: "OK",
+                  text: async () => JSON.stringify(body),
+                }),
+            };
+            // Rejecting the way the real thing does: an aborted fetch does not
+            // resolve with a partial answer, it rejects with an AbortError.
+            options.signal?.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+            pending.push(entry);
+          }),
+      );
+      return pending;
+    }
+
+    const named = (name) => supplier({ id: name.length, legal_name: name });
+
+    it("abandons the request the next keystroke supersedes", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer({ items: [named("Northwind Supplies Pvt Ltd")], total: 1 });
+      await loaded();
+
+      await user.type(screen.getByRole("searchbox"), "no");
+      await waitFor(() => expect(pending.length).toBeGreaterThan(2));
+
+      // Everything before the newest request has been called off. Each of them
+      // describes a search term the box no longer holds.
+      const superseded = pending.slice(1, -1);
+      expect(superseded.length).toBeGreaterThan(0);
+      superseded.forEach((request) => expect(request.signal.aborted).toBe(true));
+      expect(pending.at(-1).signal.aborted).toBe(false);
+    });
+
+    it("does not let a slow earlier answer overwrite a newer one", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer({ items: [named("Northwind Supplies Pvt Ltd")], total: 1 });
+      await loaded();
+
+      await user.type(screen.getByRole("searchbox"), "no");
+      await waitFor(() => expect(pending.length).toBeGreaterThan(2));
+
+      // The newest request answers first, which is the whole point: responses
+      // do not come back in the order they were sent.
+      const newest = pending.at(-1);
+      expect(newest.url).toContain("search=no");
+      newest.answer({ items: [named("Nordic Tooling")], total: 1 });
+      await screen.findByText("Nordic Tooling");
+
+      // Now the request for "n" finally lands. It was aborted, so its answer
+      // never reaches the page — before this, it repainted the table with rows
+      // for a term the search box had already moved past.
+      pending[1].answer({ items: [named("Ansel Metals"), named("Bharat Cables")], total: 2 });
+
+      await waitFor(() => expect(screen.getByText("Nordic Tooling")).toBeInTheDocument());
+      expect(screen.queryByText("Ansel Metals")).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "1 supplier" })).toBeInTheDocument();
+    });
+
+    it("does not raise an error banner for a request it cancelled itself", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer({ items: [named("Northwind Supplies Pvt Ltd")], total: 1 });
+      await loaded();
+
+      await user.type(screen.getByRole("searchbox"), "no");
+      await waitFor(() => expect(pending.length).toBeGreaterThan(2));
+      pending.at(-1).answer({ items: [named("Nordic Tooling")], total: 1 });
+
+      await screen.findByText("Nordic Tooling");
+      // "signal is aborted without reason" in front of someone who simply kept
+      // typing would be worse than the stale rows the abort exists to prevent.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
   it("rescores every supplier and reloads the list", async () => {
     const user = userEvent.setup();
     mockApi({ rescored: 3 });

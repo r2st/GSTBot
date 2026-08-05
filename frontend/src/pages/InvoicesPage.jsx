@@ -4,7 +4,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 
 const PAGE_SIZE = 25;
@@ -17,20 +17,37 @@ export default function InvoicesPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ signal } = {}) => {
     setLoading(true);
     setError("");
     try {
-      setData(await api.listInvoices({ ...filters, limit: PAGE_SIZE, offset }));
+      setData(await api.listInvoices({ ...filters, limit: PAGE_SIZE, offset }, { signal }));
     } catch (err) {
+      // A superseded request has already been replaced by a newer one, which
+      // owns the table, the banner and the spinner from here on. Returning
+      // before `finally` would skip the reset, so the check is repeated there.
+      if (isAbortError(err)) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, [filters, offset]);
 
+  // Every keystroke in the search box is a new request, and responses do not
+  // come back in the order they were sent. Left unguarded, the answer for
+  // "ACM" landing after the answer for "ACME" left the table showing rows the
+  // search box no longer described — and, because each request cleared the
+  // banner and the spinner on its own, an error from a superseded request
+  // could sit over results that had since succeeded.
+  //
+  // Aborting the previous request on the way out of the effect fixes both: the
+  // superseded response never arrives, so it cannot be applied out of order,
+  // and the connection is released rather than spending a slot in the read
+  // limit that a fast typist would otherwise exhaust mid-word.
   useEffect(() => {
-    load();
+    const controller = new AbortController();
+    load({ signal: controller.signal });
+    return () => controller.abort();
   }, [load]);
 
   function updateFilter(field, value) {
