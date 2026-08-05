@@ -98,6 +98,82 @@ describe("LoginPage", () => {
     expect(await screen.findByText(/check digit does not match/)).toBeInTheDocument();
   });
 
+  describe("a GSTIN the user is still correcting", () => {
+    /**
+     * A validate call the test answers by hand, so the check for the *first*
+     * GSTIN can be made to land after the check for the second. A mock that
+     * resolves on its own answers them in order, which is the case that was
+     * never broken.
+     */
+    function deferredChecks() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url) =>
+          new Promise((resolve) => {
+            pending.push({
+              url: String(url),
+              answer: (body) => resolve(jsonResponse(body)),
+            });
+          }),
+      );
+      return pending;
+    }
+
+    const VALID = { valid: true, state_name: "Maharashtra", pan: "AAPFU0939F" };
+    const BAD = { valid: false, error: "GSTIN check digit does not match" };
+
+    it("ignores a verdict about a GSTIN that has since been retyped", async () => {
+      const user = userEvent.setup();
+      const pending = deferredChecks();
+
+      renderPage();
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+      const field = screen.getByLabelText("GSTIN");
+
+      // Fifteen characters ending in the wrong check digit fires one check.
+      await user.type(field, "27AAPFU0939F1ZW");
+      await waitFor(() => expect(pending).toHaveLength(1));
+
+      // Corrected: back to fourteen, then a new fifteenth. The ordinary way
+      // someone fixes a mistyped check digit.
+      await user.type(field, "{backspace}V");
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      expect(pending[1].url).toContain("27AAPFU0939F1ZV");
+      pending[1].answer(VALID);
+      expect(await screen.findByText(/Valid — Maharashtra/)).toBeInTheDocument();
+
+      // The first check finally answers, about the GSTIN that was corrected
+      // away. It must not overwrite the verdict for the one on screen.
+      pending[0].answer(BAD);
+
+      await waitFor(() =>
+        expect(screen.getByText(/Valid — Maharashtra/)).toBeInTheDocument(),
+      );
+      expect(screen.queryByText(/check digit does not match/)).not.toBeInTheDocument();
+    });
+
+    it("does not put a verdict back under an incomplete GSTIN", async () => {
+      const user = userEvent.setup();
+      const pending = deferredChecks();
+
+      renderPage();
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+      const field = screen.getByLabelText("GSTIN");
+
+      await user.type(field, "27AAPFU0939F1ZV");
+      await waitFor(() => expect(pending).toHaveLength(1));
+
+      // Deleted a character while the check was still outstanding. The field
+      // is no longer a whole GSTIN, so nothing should be claimed about it.
+      await user.type(field, "{backspace}");
+      pending[0].answer(VALID);
+
+      await waitFor(() => expect(field).toHaveValue("27AAPFU0939F1Z"));
+      expect(screen.queryByText(/Valid — Maharashtra/)).not.toBeInTheDocument();
+    });
+  });
+
   it("registers with the normalized GSTIN", async () => {
     const user = userEvent.setup();
     global.fetch

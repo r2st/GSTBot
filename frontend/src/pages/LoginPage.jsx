@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { useAuth } from "../hooks/useAuth";
@@ -25,6 +25,9 @@ export default function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState({});
   // What the server said about the typed GSTIN: {valid, state_name} or null.
   const [gstinCheck, setGstinCheck] = useState(null);
+  // The GSTIN the newest check was asked about. A verdict is only shown while
+  // it still describes what is in the field; see `checkGstin`.
+  const asked = useRef("");
 
   const { login, register } = useAuth();
   const navigate = useNavigate();
@@ -40,8 +43,19 @@ export default function LoginPage() {
   // is checked locally first, so an obviously wrong string gets an answer
   // without a round trip — and so a 15-character string of the wrong shape is
   // not sent at all.
+  // A verdict is only applied while it still describes what is in the field.
+  // Correcting a mistyped check digit is the ordinary way this box is used, and
+  // it is exactly the sequence that goes wrong: fifteen characters fire a
+  // check, a backspace and a retype fire another, and if the first answer lands
+  // second the field reads "Valid — Karnataka" about a GSTIN nobody typed.
+  // Deleting a character had the same effect from the other direction — the
+  // field cleared the hint on its way down to fourteen characters, then the
+  // outstanding request arrived and put a verdict back under an incomplete
+  // GSTIN. Both are wrong in the direction that matters, because this hint is
+  // what tells someone their registration will be accepted.
   async function checkGstin(value) {
     const cleaned = normalizeGstin(value);
+    asked.current = cleaned;
     if (cleaned.length !== 15) {
       setGstinCheck(null);
       return;
@@ -52,9 +66,12 @@ export default function LoginPage() {
       return;
     }
     try {
-      setGstinCheck(await api.validateGstin(cleaned));
+      const verdict = await api.validateGstin(cleaned);
+      if (asked.current !== cleaned) return;
+      setGstinCheck(verdict);
     } catch {
       // A failed check is not a verdict — the server decides again on submit.
+      if (asked.current !== cleaned) return;
       setGstinCheck(null);
     }
   }
