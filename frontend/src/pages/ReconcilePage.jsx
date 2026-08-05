@@ -111,7 +111,16 @@ export default function ReconcilePage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Bumped to refetch the period already selected. An import that lands on the
+  // month on screen changes no state the load effect depends on, so without
+  // this there is nothing for it to react to.
+  const [reloadToken, setReloadToken] = useState(0);
   const inputRef = useRef(null);
+  // The month the picker is showing, readable from a callback that has been
+  // waiting on the network. `period` closed over at click time is the month the
+  // action was *started* from, which is the one thing an in-flight action must
+  // not assume is still selected.
+  const shownPeriod = useRef(period);
 
   // The 2B and the last run are independent: a period can have an import and
   // no run, or a run from before the latest import.
@@ -154,9 +163,10 @@ export default function ReconcilePage() {
   // the month in the picker and the month in the findings the same month.
   useEffect(() => {
     const controller = new AbortController();
+    shownPeriod.current = period;
     load(period, { signal: controller.signal });
     return () => controller.abort();
-  }, [load, period]);
+  }, [load, period, reloadToken]);
 
   async function handleImport(files) {
     const file = Array.from(files ?? [])[0];
@@ -179,9 +189,16 @@ export default function ReconcilePage() {
       const result = await api.importGstr2b(file, period);
       setNotice(result.message);
       // The server decides the period from the file, which may not be the one
-      // on screen. Follow it rather than showing a stale month.
-      if (result.period !== period) setPeriod(result.period);
-      else await load(period);
+      // on screen. Follow it rather than showing a stale month — and follow it
+      // to whatever the picker says *now*, not to the month the upload was
+      // started from. A 2B is a few megabytes over a phone connection and the
+      // picker stays live throughout, so stepping to another month mid-upload
+      // used to reload the month left behind and caption it with the month in
+      // the picker.
+      setPeriod(result.period);
+      // A no-op `setPeriod` schedules no work, so the refetch is asked for
+      // separately. Both land in one render, so the effect still runs once.
+      setReloadToken((token) => token + 1);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -191,12 +208,26 @@ export default function ReconcilePage() {
   }
 
   async function handleReconcile() {
+    const target = period;
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      setRun(await api.reconcile(period));
-      setNotice(`Reconciled ${periodLabel(period)}`);
+      const result = await api.reconcile(target);
+      // Reconciling is the slowest thing this page does — it walks the whole
+      // purchase register against the statement — so it is the request most
+      // likely to still be running when someone moves on to another month.
+      // The findings, the matched count and both ITC figures are captioned by
+      // the picker alone, so a run for a month that is no longer selected has
+      // nowhere honest to go: showing it would report one month's credit at
+      // risk under another month's name, on the screen whose whole job is
+      // deciding which credit is safe to claim.
+      //
+      // Dropped rather than aborted. The run is already stored by the time it
+      // answers, so it is waiting on the period when the user returns to it —
+      // the confirmation below names its own month for that reason.
+      if (shownPeriod.current === target) setRun(result);
+      setNotice(`Reconciled ${periodLabel(target)}`);
     } catch (err) {
       setError(err.message);
     } finally {

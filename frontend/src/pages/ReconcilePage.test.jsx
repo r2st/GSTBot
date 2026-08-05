@@ -134,6 +134,58 @@ function renderPage() {
   );
 }
 
+/**
+ * A fetch that hands back the levers instead of resolving on its own.
+ *
+ * The bugs here are ordering ones, so the test has to be able to answer the
+ * second period before the first. A mock that resolves by itself can only
+ * ever answer them in order, which is the one case that was never broken.
+ *
+ * This page sends two requests per period rather than one, so `pending`
+ * fills two at a time and the URL is what says which of the pair is which.
+ */
+function deferredFetch() {
+  const pending = [];
+  global.fetch = vi.fn(
+    (url, options = {}) =>
+      new Promise((resolve, reject) => {
+        pending.push({
+          url: String(url),
+          method: options.method ?? "GET",
+          signal: options.signal,
+          answer: (body) =>
+            resolve({
+              ok: true,
+              status: 200,
+              statusText: "OK",
+              text: async () => JSON.stringify(body),
+            }),
+          refuse: (status) =>
+            resolve({
+              ok: false,
+              status,
+              statusText: "",
+              text: async () => JSON.stringify({ detail: "Not found" }),
+            }),
+        });
+        // An aborted fetch does not resolve with a partial answer; it
+        // rejects with an AbortError, so the mock has to as well.
+        options.signal?.addEventListener("abort", () => {
+          const err = new Error("The operation was aborted.");
+          err.name = "AbortError";
+          reject(err);
+        });
+      }),
+  );
+  return pending;
+}
+
+/** Switch to the month before the default, whenever the suite happens to run. */
+async function selectPreviousPeriod(user) {
+  const select = screen.getByLabelText("Period");
+  await user.selectOptions(select, select.options[1].value);
+}
+
 describe("ReconcilePage", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
@@ -470,57 +522,6 @@ describe("ReconcilePage", () => {
   });
 
   describe("when answers come back out of order", () => {
-    /**
-     * A fetch that hands back the levers instead of resolving on its own.
-     *
-     * The bug here is an ordering one, so the test has to be able to answer the
-     * second period before the first. A mock that resolves by itself can only
-     * ever answer them in order, which is the one case that was never broken.
-     *
-     * This page sends two requests per period rather than one, so `pending`
-     * fills two at a time and the URL is what says which of the pair is which.
-     */
-    function deferredFetch() {
-      const pending = [];
-      global.fetch = vi.fn(
-        (url, options = {}) =>
-          new Promise((resolve, reject) => {
-            pending.push({
-              url: String(url),
-              signal: options.signal,
-              answer: (body) =>
-                resolve({
-                  ok: true,
-                  status: 200,
-                  statusText: "OK",
-                  text: async () => JSON.stringify(body),
-                }),
-              refuse: (status) =>
-                resolve({
-                  ok: false,
-                  status,
-                  statusText: "",
-                  text: async () => JSON.stringify({ detail: "Not found" }),
-                }),
-            });
-            // An aborted fetch does not resolve with a partial answer; it
-            // rejects with an AbortError, so the mock has to as well.
-            options.signal?.addEventListener("abort", () => {
-              const err = new Error("The operation was aborted.");
-              err.name = "AbortError";
-              reject(err);
-            });
-          }),
-      );
-      return pending;
-    }
-
-    /** Switch to the month before the default, whenever the suite happens to run. */
-    async function selectPreviousPeriod(user) {
-      const select = screen.getByLabelText("Period");
-      await user.selectOptions(select, select.options[1].value);
-    }
-
     it("abandons the pair of requests the previous period supersedes", async () => {
       const user = userEvent.setup();
       const pending = deferredFetch();
@@ -587,6 +588,80 @@ describe("ReconcilePage", () => {
       // does not exempt it: left unguarded, "The operation was aborted."
       // reaches the banner of someone who simply changed month.
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  // The loads above are aborted when the period moves. These two are not
+  // loads: they are the actions the page exists for, they are the slowest
+  // requests it makes, and the period picker stays live throughout both.
+  describe("when the period changes while an action is in flight", () => {
+    it("does not put a superseded run's findings under the month now on screen", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      pending[0].answer(imported());
+      pending[1].refuse(404);
+      await screen.findByText(/invoices imported/);
+
+      // Reconciling is the slowest thing this page does — it walks the whole
+      // purchase register against the statement — so it is the request most
+      // likely to still be running when someone moves on to another month.
+      await user.click(screen.getByRole("button", { name: /Run reconciliation/ }));
+      await waitFor(() => expect(pending).toHaveLength(3));
+      expect(pending[2].method).toBe("POST");
+
+      await selectPreviousPeriod(user);
+      await waitFor(() => expect(pending).toHaveLength(5));
+      pending[3].answer(imported({ invoice_count: 7 }));
+      pending[4].refuse(404);
+      await screen.findByText(/7\b/);
+
+      // Now the run for the month that is no longer selected comes back.
+      pending[2].answer(run());
+
+      // Nothing below the picker carries its own month, so applying it would
+      // report the previous month's ₹90,000 at risk, its findings and its
+      // matched count as belonging to the period in the picker.
+      await waitFor(() => expect(screen.getByText(/7\b/)).toBeInTheDocument());
+      expect(screen.queryByText("₹90,000.00")).not.toBeInTheDocument();
+      expect(screen.queryByText("GHOST-1")).not.toBeInTheDocument();
+    });
+
+    it("reloads the period the imported file was for, not the one it was started from", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      const startedOn = screen.getByLabelText("Period").value;
+      pending[0].refuse(404);
+      pending[1].refuse(404);
+      await screen.findByText(/No GSTR-2B imported yet/);
+
+      const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
+      await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      expect(pending[2].method).toBe("POST");
+
+      // A 2B is a few megabytes over a phone connection, and the picker is
+      // live while it uploads.
+      await selectPreviousPeriod(user);
+      await waitFor(() => expect(pending).toHaveLength(5));
+      pending[3].refuse(404);
+      pending[4].refuse(404);
+
+      pending[2].answer(imported({ period: startedOn, invoice_count: 42 }));
+
+      // The statement was for the month the upload was started from, so that
+      // is the month whose figures it may be shown under — the page follows
+      // the file rather than refetching the month it left behind and
+      // captioning it with the month in the picker.
+      await waitFor(() => expect(screen.getByLabelText("Period")).toHaveValue(startedOn));
+      const reload = pending.slice(5).filter((p) => p.url.includes("/gstr2b/"));
+      expect(reload).toHaveLength(1);
+      expect(reload[0].url).toContain(startedOn);
     });
   });
 });
