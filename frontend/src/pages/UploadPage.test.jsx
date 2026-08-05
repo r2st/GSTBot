@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -280,6 +280,80 @@ describe("UploadPage", () => {
       fireEvent.drop(dropzone(container), { dataTransfer: { files: [file("dropped.txt")] } });
 
       await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
+    });
+
+    describe("a second batch dropped while the first is still going", () => {
+      /**
+       * An upload the test releases by hand, so a second drop can be made to
+       * land while the first batch is genuinely mid-flight.
+       */
+      function heldUpload() {
+        const pending = [];
+        global.fetch = vi.fn(
+          () =>
+            new Promise((resolve) => {
+              pending.push(() => resolve(jsonResponse(invoiceResponse())));
+            }),
+        );
+        return pending;
+      }
+
+      it("does not start a second run alongside the first", async () => {
+        // The picker is `disabled` while a batch runs, so the design already
+        // says one at a time. The dropzone had no such guard, and two loops at
+        // once defeat the thing the upload loop is sequential for: each file
+        // costs a model call, and a burst is what the free tier rate-limits.
+        const pending = heldUpload();
+        const { container } = renderPage();
+
+        fireEvent.drop(dropzone(container), {
+          dataTransfer: { files: [file("first.txt")] },
+        });
+        await waitFor(() => expect(pending).toHaveLength(1));
+
+        fireEvent.drop(dropzone(container), {
+          dataTransfer: { files: [file("second.txt")] },
+        });
+
+        expect(await screen.findByText(/Still extracting the last batch/)).toBeInTheDocument();
+        // The second drop must not have put another upload on the wire.
+        expect(pending).toHaveLength(1);
+      });
+
+      it("takes the batch once the first one has finished", async () => {
+        const pending = heldUpload();
+        const { container } = renderPage();
+
+        fireEvent.drop(dropzone(container), {
+          dataTransfer: { files: [file("first.txt")] },
+        });
+        await waitFor(() => expect(pending).toHaveLength(1));
+        // Released inside `act` because resolving it is what drives the state
+        // updates that end the batch.
+        await act(async () => pending[0]());
+        await screen.findByText("INV-2026-0042");
+
+        // Busy is over, so the zone accepts again — the refusal is about
+        // overlap, not a door that stays shut.
+        fireEvent.drop(dropzone(container), {
+          dataTransfer: { files: [file("second.txt")] },
+        });
+
+        await waitFor(() => expect(pending).toHaveLength(2));
+      });
+
+      it("does not invite a drop it is about to refuse", async () => {
+        const pending = heldUpload();
+        const { container } = renderPage();
+        fireEvent.drop(dropzone(container), {
+          dataTransfer: { files: [file("first.txt")] },
+        });
+        await waitFor(() => expect(pending).toHaveLength(1));
+
+        fireEvent.dragOver(dropzone(container));
+
+        expect(dropzone(container)).not.toHaveClass("is-dragging");
+      });
     });
 
     it("ignores a drop that carries no files", async () => {

@@ -61,6 +61,25 @@ export default function UploadPage() {
     const list = Array.from(files ?? []);
     if (list.length === 0) return;
 
+    // One batch at a time. The file picker says so by being `disabled` while a
+    // batch runs; the dropzone had no such guard, so a second drop started a
+    // second loop alongside the first.
+    //
+    // That breaks the thing the loop below is deliberately sequential for:
+    // each upload costs a model call and the free tier rate-limits a burst, so
+    // two batches running at once is how forty invoices become forty
+    // heuristic-only extractions — the exact outcome the sequencing exists to
+    // avoid. It also left the page lying about itself, because whichever loop
+    // finished first cleared `busy` and took the spinner down while the other
+    // was still uploading.
+    //
+    // Refused out loud rather than ignored: a dropped batch that simply does
+    // nothing is indistinguishable from a broken dropzone.
+    if (busy) {
+      setError("Still extracting the last batch. Wait for it to finish, then drop these.");
+      return;
+    }
+
     // Checked here rather than left to the server so an oversized scan is
     // refused before it is read off disk and pushed over a phone connection.
     // A rejected file is reported in the same result list as a failed one:
@@ -151,7 +170,9 @@ export default function UploadPage() {
         className={dragging ? "dropzone is-dragging" : "dropzone"}
         onDragOver={(e) => {
           e.preventDefault();
-          setDragging(true);
+          // Not while a batch is running: highlighting invites a drop that is
+          // about to be refused.
+          if (!busy) setDragging(true);
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
