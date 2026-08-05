@@ -210,6 +210,29 @@ def test_rule_37_ignores_invoices_that_never_claimed_credit():
     assert result.overdue == []
 
 
+def test_rule_37_skips_a_purchase_carrying_no_tax():
+    """A nil-rated or exempt purchase has no credit for 180 days to reverse.
+
+    `itc_eligible` is about whether the law allows the credit; this is about
+    whether there is any. An exempt supply is eligible and unpaid and can sit
+    past day 180 like any other, so it reaches the tax check — and reporting a
+    zero-rupee reversal on it sends a business chasing a payment for no tax
+    reason, on a list whose whole purpose is naming the suppliers worth paying
+    before the credit lapses.
+    """
+    exempt = purchase(
+        invoice_date=date(2026, 1, 1),
+        igst=Decimal("0.00"),
+        total_value=Decimal("100000.00"),
+    )
+
+    result = itc_service.rule_37([exempt], as_of=date(2026, 12, 1))
+
+    assert result.overdue == []
+    assert result.approaching == []
+    assert result.reversal.total == Decimal("0.00")
+
+
 def test_rule_37_skips_an_invoice_with_no_date():
     """A missing date means extraction failed, not that 180 days have passed."""
     result = itc_service.rule_37(

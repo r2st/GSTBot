@@ -58,6 +58,40 @@ def test_upload_records_the_counterparty_not_the_tenant(auth_client, sample_invo
     assert invoice["counterparty_gstin"] != BUSINESS_GSTIN
 
 
+def test_a_purchase_billing_our_own_gstin_as_the_vendor_takes_the_other_side(auth_client):
+    """A vendor who printed our GSTIN in the seller slot is not the seller.
+
+    It happens when a supplier reuses a customer's copy of a document as a
+    template and changes only the figures. Taken at face value the purchase is
+    booked against ourselves: a supplier row for our own registration, our own
+    GSTIN filed as the vendor in GSTR-1's counterpart, and a reconciliation
+    that can never match because no GSTR-2B will ever declare it. The other
+    GSTIN on the paper is the only one that can be theirs.
+    """
+    swapped = f"""\
+UMANG TRADERS
+GSTIN: {BUSINESS_GSTIN}
+
+TAX INVOICE
+
+Invoice No: SWAP-1
+Invoice Date: 15/04/2026
+Place of Supply: 27 Maharashtra
+
+Bill To:
+NORTHWIND SUPPLIES PRIVATE LIMITED
+GSTIN: {SUPPLIER_GSTIN_OTHER_STATE}
+
+Taxable Value:  450000.00
+IGST @ 18%:      81000.00
+Grand Total:    531000.00
+"""
+    invoice = upload(auth_client, swapped, name="swapped.txt").json()["invoice"]
+
+    assert invoice["counterparty_gstin"] == SUPPLIER_GSTIN_OTHER_STATE
+    assert invoice["counterparty_gstin"] != BUSINESS_GSTIN
+
+
 def test_upload_creates_a_supplier_for_a_purchase(auth_client, db_session, sample_invoice_text):
     upload(auth_client, sample_invoice_text)
     supplier = db_session.query(Supplier).filter_by(gstin=SUPPLIER_GSTIN_OTHER_STATE).one()

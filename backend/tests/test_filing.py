@@ -322,6 +322,25 @@ class TestTaxOnATaxableValueOfZero:
         invoice = self.broken(invoice_type=InvoiceType.PURCHASE)
         assert issues_for(invoice)["taxable_value"] is Severity.ERROR
 
+    def test_the_period_still_exports_instead_of_dividing_by_zero(self, db_session, business):
+        """A period with errors in it is still exportable, so the build sees this.
+
+        Errors block *filing*, not exporting — a CA checking the period before
+        anything is uploaded is exactly who asks for the export of a period
+        that does not validate. So the generator meets this invoice, and it
+        has no explicit rate, so it derives one from tax over taxable value.
+        Deriving it from a taxable value of zero raises `DivisionByZero`,
+        which turns the one export that would have shown the problem into a
+        500 that says nothing about it.
+        """
+        save(db_session, business.id, self.broken())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        item = document["b2b"][0]["inv"][0]["itms"][0]["itm_det"]
+        assert item["rt"] == 0.0
+        assert item["txval"] == 0.00
+
     def test_an_exempt_supply_is_still_not_an_error(self):
         # Value with no tax is the nil-rated and exempt case, which is a real
         # supply and files in its own block. Only the reverse is impossible.
