@@ -28,6 +28,7 @@ import re
 import secrets
 import stat
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -1086,6 +1087,135 @@ class TestTheDeployScript:
         assert f"http://{BRIDGE}:{api_port}/api/v1/health/ready" in commands
         assert f"http://{BRIDGE}:{web_port}/" in commands
         assert f"https://{SITE}/api/v1/health/live" in commands
+
+    # -- Surviving its own checkout -----------------------------------------
+    #
+    # The checkout rewrites deploy/deploy.sh, which is the file bash is running
+    # from, and bash reads a script lazily by byte offset rather than into
+    # memory. Rewritten underneath, the interpreter resumes at the offset it
+    # had reached — now pointing into different content — and runs whatever
+    # text sits there. Observed: the release that shipped the retrying health
+    # checks ran the previous revision's single-shot ones off a file already
+    # replaced on disk. Reproduced below with a shorter successor, where the
+    # offset lands past the end and the release exits silently mid-run,
+    # reporting success.
+
+    @pytest.fixture(scope="class")
+    def pin_block(self, script) -> str:
+        """The part of the script that re-runs it from a copy git cannot touch.
+
+        Extracted and run for real below rather than pattern-matched. What is
+        being asserted is which *content* ends up executing, and reading the
+        source is exactly how to get that wrong.
+        """
+        return matched(
+            r'if \[ -z "\$\{GSTBOT_DEPLOY_PINNED:-\}" \]; then\n.*?\nfi\n'
+            r"trap [^\n]*\n",
+            script,
+            flags=re.DOTALL,
+        ).group(0)
+
+    def run_release(
+        self,
+        tmp_path: Path,
+        *,
+        pin: str = "",
+        replaced: bool = True,
+        successor: str = 'echo REPLACEMENT "$@"\n',
+    ) -> subprocess.CompletedProcess:
+        """Run a stand-in release that rewrites itself where the checkout does.
+
+        `cp` stands in for `git checkout`: the same effect on this file,
+        without needing a remote. It copies from a file prepared here rather
+        than writing a heredoc, because a heredoc would be read back out of the
+        descriptor the copy has just truncated — which is the hazard itself.
+
+        Every stage prints, so a failure says how far the release got rather
+        than only that it failed.
+        """
+        release = tmp_path / "deploy.sh"
+        nxt = tmp_path / "next.sh"
+        nxt.write_text(successor)
+        release.write_text(
+            "set -euo pipefail\n"
+            'die() { echo "$*" >&2; exit 1; }\n'
+            f"{pin}"
+            'echo START "$@"\n'
+            # The path in the checkout, not `$0`: git rewrites the file in
+            # $ROOT, which is what bash is reading only when nothing pinned a
+            # copy first. Using `$0` would have the pinned run overwrite its
+            # own copy and test the opposite of the thing.
+            + (f'cp "{nxt}" "{release}"\n' if replaced else "")
+            + 'echo MIDDLE "$@"\n'
+            'echo END "$@"\n'
+        )
+        env = {k: v for k, v in os.environ.items() if k != "GSTBOT_DEPLOY_PINNED"}
+        return subprocess.run(
+            ["bash", str(release), "v1.2.0"],
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=tmp_path,
+        )
+
+    def test_a_script_rewritten_mid_release_does_not_run_to_the_end(self, tmp_path):
+        # The hazard, with no pinning: bash resumes at a byte offset into the
+        # replacement, which here is shorter than the offset, so the release
+        # stops where it stood. Exit 0 and a partial release — the shape that
+        # makes this worth a copy rather than a check.
+        result = self.run_release(tmp_path, pin="")
+        assert result.stdout.split() == ["START", "v1.2.0"], result.stdout
+        assert result.returncode == 0, "and it reported success"
+
+    def test_a_pinned_release_runs_to_the_end_through_its_own_rewrite(
+        self, pin_block, tmp_path
+    ):
+        # The fix. git rewrites the path in $ROOT, this process reads the copy,
+        # and the two never meet — so every stage after the checkout runs, and
+        # runs from the revision the operator invoked.
+        result = self.run_release(tmp_path, pin=pin_block)
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.split() == [
+            "START", "v1.2.0", "MIDDLE", "v1.2.0", "END", "v1.2.0",
+        ], result.stdout
+
+    def test_the_copy_carries_the_ref_it_was_asked_for(self, pin_block, tmp_path):
+        # `exec bash "$pinned"` alone would restart the release as a
+        # no-argument one, quietly turning `deploy.sh v1.2.0` into origin/main.
+        result = self.run_release(tmp_path, pin=pin_block, replaced=False)
+        assert result.stdout.split() == [
+            "START", "v1.2.0", "MIDDLE", "v1.2.0", "END", "v1.2.0",
+        ], result.stdout
+
+    def test_the_copy_cannot_re_copy_itself_forever(self, pin_block, tmp_path):
+        # The exec is guarded by the variable it exports. Unguarded it would
+        # fork a release per copy, each restarting services and migrating.
+        result = self.run_release(tmp_path, pin=pin_block, replaced=False)
+        assert result.stdout.split().count("START") == 1, result.stdout
+
+    def test_the_copy_is_cleaned_up(self, pin_block, tmp_path):
+        # It lands in a world-writable directory and holds the release
+        # procedure. Left behind, every deploy adds one.
+        self.run_release(tmp_path, pin=pin_block, replaced=False)
+        assert not list(Path(tempfile.gettempdir()).glob("gstbot-deploy.*")), (
+            "the pinned copy outlived the release"
+        )
+
+    def test_it_pins_before_it_reaches_the_checkout(self, commands):
+        # A copy taken after the rewrite is a copy of the wrong file, and one
+        # taken after any side effect leaves the earlier half of the release
+        # having run from the descriptor this exists to stop reading.
+        assert commands.index("exec bash") < commands.index(
+            "checkout --detach origin/main"
+        )
+
+    def test_it_says_when_the_release_changed_the_release_procedure(self, commands):
+        # This run finishes under the script the operator invoked, which is
+        # correct and is not what someone who has just edited deploy.sh
+        # expects. Unsaid, it becomes "I fixed the deploy and it did the old
+        # thing anyway".
+        assert "cmp -s" in commands
+        assert matched(r"cmp -s[^\n]*\n(?:[^\n]*\n){0,3}?[^\n]*warn ", commands)
 
     def test_no_health_check_is_a_single_shot(self, commands):
         # Every check here runs immediately after a restart, so every one of

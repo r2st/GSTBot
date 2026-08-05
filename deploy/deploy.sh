@@ -38,6 +38,36 @@ log() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33mwarning: %s\033[0m\n' "$*" >&2; }
 die() { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# Run from a copy, because the checkout further down replaces this file.
+#
+# Bash does not read a script into memory. It reads it lazily from the open
+# descriptor, seeking back after each command so the offset stays honest — so
+# a script that is rewritten while it runs does not carry on as it was and
+# does not restart. The interpreter resumes at the byte offset it had reached,
+# now pointing into different content, and runs whatever text happens to sit
+# there: the tail of a command, half a `systemctl` line, or nothing at all if
+# the new file is shorter and the offset is past its end.
+#
+# `git checkout` rewrites deploy/deploy.sh, and this is deploy/deploy.sh. The
+# release that shipped retrying health checks ran the previous revision's
+# single-shot ones off a file that had already been replaced on disk; a
+# harness reproducing the same shape with a shorter successor exits silently,
+# mid-release, reporting success.
+#
+# Copying first removes the problem rather than detecting it: git rewrites the
+# path in $ROOT, this process is reading /tmp, and the two never meet. The
+# consequence is that a release runs the script the operator invoked, whole,
+# and a change to deploy.sh takes effect on the next one — announced below so
+# that is a fact the operator is told rather than one they infer.
+if [ -z "${GSTBOT_DEPLOY_PINNED:-}" ]; then
+    pinned="$(mktemp "${TMPDIR:-/tmp}/gstbot-deploy.XXXXXX")" \
+        || die "cannot create a temporary copy of this script"
+    cat "$0" > "$pinned" || die "cannot copy $0"
+    export GSTBOT_DEPLOY_PINNED="$pinned"
+    exec bash "$pinned" "$@"
+fi
+trap 'rm -f "$GSTBOT_DEPLOY_PINNED"' EXIT
+
 # Is $ROOT a checkout this box can run git against at all? Separate from
 # "can it reach the remote", which is the question below and has a different
 # answer here.
@@ -103,6 +133,16 @@ else
     # The ordinary path on this box today. Nothing is fetched and nothing is
     # checked out; the tree is released exactly as rsync left it.
     echo "No reachable remote — releasing the tree already in $ROOT"
+fi
+
+# Whether the checkout just changed the release procedure itself. This run is
+# reading the copy taken at the top, so it is finishing under the script the
+# operator invoked — correct, and not what someone who has just edited
+# deploy.sh expects to see. Silence here is how that becomes "I fixed the
+# deploy and it still did the old thing".
+if ! cmp -s "$GSTBOT_DEPLOY_PINNED" "$ROOT/deploy/deploy.sh"; then
+    warn "this release changed deploy.sh; the run finishing now is the previous"
+    warn "version of it. Re-run the deploy to release under the new one."
 fi
 
 # What is about to be released, named as precisely as this box can name it.
