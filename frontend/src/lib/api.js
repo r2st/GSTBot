@@ -215,8 +215,8 @@ export const api = {
   },
 
   importedPeriods: () => request("/reconciliation/gstr2b/periods"),
-  getImported2b: (period) =>
-    request(`/reconciliation/gstr2b/${encodeURIComponent(period)}`),
+  getImported2b: (period, { signal } = {}) =>
+    request(`/reconciliation/gstr2b/${encodeURIComponent(period)}`, { signal }),
 
   reconcile: (period, tolerance) =>
     request("/reconciliation/run", {
@@ -233,8 +233,8 @@ export const api = {
   },
 
   getReconciliation: (id) => request(`/reconciliation/${id}`),
-  latestReconciliation: (period) =>
-    request(`/reconciliation/latest?period=${encodeURIComponent(period)}`),
+  latestReconciliation: (period, { signal } = {}) =>
+    request(`/reconciliation/latest?period=${encodeURIComponent(period)}`, { signal }),
 
   // ---- ITC ----
   itc: (period, params = {}, { signal } = {}) =>

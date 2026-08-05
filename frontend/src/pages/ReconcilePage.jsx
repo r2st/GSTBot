@@ -115,13 +115,20 @@ export default function ReconcilePage() {
 
   // The 2B and the last run are independent: a period can have an import and
   // no run, or a run from before the latest import.
-  const load = useCallback(async (target) => {
+  const load = useCallback(async (target, { signal } = {}) => {
     setLoading(true);
     setError("");
     const [importResult, runResult] = await Promise.allSettled([
-      api.getImported2b(target),
-      api.latestReconciliation(target),
+      api.getImported2b(target, { signal }),
+      api.latestReconciliation(target, { signal }),
     ]);
+
+    // A superseded load writes nothing. Both answers describe a period that is
+    // no longer the one on screen, and every figure below — ITC eligible, ITC
+    // at risk, the findings themselves — is captioned by the period picker
+    // rather than by anything in the payload, so applying them puts one
+    // month's exposure under another month's name.
+    if (signal?.aborted) return;
 
     setImported(importResult.status === "fulfilled" ? importResult.value : null);
     setRun(runResult.status === "fulfilled" ? runResult.value : null);
@@ -140,8 +147,15 @@ export default function ReconcilePage() {
     setLoading(false);
   }, []);
 
+  // Responses do not come back in the order they were sent, and stepping
+  // through months is how this screen is read. Two requests go out per period,
+  // so a single change puts four answers in flight with no guarantee of order.
+  // Aborting the superseded pair on the way out of the effect is what keeps
+  // the month in the picker and the month in the findings the same month.
   useEffect(() => {
-    load(period);
+    const controller = new AbortController();
+    load(period, { signal: controller.signal });
+    return () => controller.abort();
   }, [load, period]);
 
   async function handleImport(files) {

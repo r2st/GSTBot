@@ -468,4 +468,125 @@ describe("ReconcilePage", () => {
 
     expect(screen.getByText("Nothing in this category.")).toBeInTheDocument();
   });
+
+  describe("when answers come back out of order", () => {
+    /**
+     * A fetch that hands back the levers instead of resolving on its own.
+     *
+     * The bug here is an ordering one, so the test has to be able to answer the
+     * second period before the first. A mock that resolves by itself can only
+     * ever answer them in order, which is the one case that was never broken.
+     *
+     * This page sends two requests per period rather than one, so `pending`
+     * fills two at a time and the URL is what says which of the pair is which.
+     */
+    function deferredFetch() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url, options = {}) =>
+          new Promise((resolve, reject) => {
+            pending.push({
+              url: String(url),
+              signal: options.signal,
+              answer: (body) =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  statusText: "OK",
+                  text: async () => JSON.stringify(body),
+                }),
+              refuse: (status) =>
+                resolve({
+                  ok: false,
+                  status,
+                  statusText: "",
+                  text: async () => JSON.stringify({ detail: "Not found" }),
+                }),
+            });
+            // An aborted fetch does not resolve with a partial answer; it
+            // rejects with an AbortError, so the mock has to as well.
+            options.signal?.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+      return pending;
+    }
+
+    /** Switch to the month before the default, whenever the suite happens to run. */
+    async function selectPreviousPeriod(user) {
+      const select = screen.getByLabelText("Period");
+      await user.selectOptions(select, select.options[1].value);
+    }
+
+    it("abandons the pair of requests the previous period supersedes", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      pending[0].answer(imported());
+      pending[1].answer(run());
+      await screen.findByText("INV-2026-0042");
+
+      await selectPreviousPeriod(user);
+      await waitFor(() => expect(pending).toHaveLength(4));
+
+      // Both halves of the superseded load are cancelled, not just the one the
+      // page happened to be rendering.
+      expect(pending[0].signal.aborted).toBe(true);
+      expect(pending[1].signal.aborted).toBe(true);
+      expect(pending[2].signal.aborted).toBe(false);
+      expect(pending[3].signal.aborted).toBe(false);
+    });
+
+    it("does not put one month's exposure under another month's period", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      await selectPreviousPeriod(user);
+      await waitFor(() => expect(pending).toHaveLength(4));
+
+      // The second period answers first, which is the whole point: responses
+      // do not come back in the order they were sent.
+      pending[2].answer(imported({ invoice_count: 7 }));
+      pending[3].answer(run({ itc_at_risk: "1234.00", report: { findings: [] } }));
+      await screen.findByText("₹1,234.00");
+
+      // Now the abandoned first period lands. Nothing on this screen carries
+      // its own month, so before the abort its ₹90,000 at risk and its five
+      // findings simply replaced the ones belonging to the period in the
+      // picker.
+      pending[0].answer(imported());
+      pending[1].answer(run());
+
+      await waitFor(() => expect(screen.getByText("7")).toBeInTheDocument());
+      expect(screen.getByText("₹1,234.00")).toBeInTheDocument();
+      expect(screen.queryByText("₹90,000.00")).not.toBeInTheDocument();
+      expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
+    });
+
+    it("does not raise an error banner for a request it cancelled itself", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderPage();
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      await selectPreviousPeriod(user);
+      await waitFor(() => expect(pending).toHaveLength(4));
+
+      pending[2].refuse(404);
+      pending[3].refuse(404);
+      await screen.findByText(/No GSTR-2B imported yet/);
+
+      // An AbortError carries no status, so the 404-is-the-empty-state test
+      // does not exempt it: left unguarded, "The operation was aborted."
+      // reaches the banner of someone who simply changed month.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
 });
