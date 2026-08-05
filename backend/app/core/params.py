@@ -36,8 +36,24 @@ from fastapi import Path, Query
 # way, which is what the OFFSET clause is actually limited by.
 MAX_ID = 2**31 - 1
 
+# The smallest id a row can have. Every primary key here is an autoincrementing
+# ``Integer``, so the sequence starts at 1 and nothing below it names a row.
+#
+# A ceiling alone left this module's own bug open at the other end. ``le`` is
+# satisfied by every negative number, so ``/invoices/-10000000000000000000000000``
+# went straight through to the lookup — and a width the column cannot hold
+# fails on the way in whichever direction it overflows: ``OverflowError:
+# Python int too large to convert to SQLite INTEGER``, raised out of the
+# driver rather than out of SQLAlchemy, so it is not even one of the errors
+# ``app.core.errors`` turns into a considered response. A 500, from a URL.
+#
+# Postgres compares the same value as a numeric and quietly matches nothing, so
+# this is the split the module docstring warns about, in the same direction: a
+# 500 in the suite's backend and a 404 on the deployment.
+MIN_ID = 1
+
 # A row id out of a path segment.
-RowId = Annotated[int, Path(le=MAX_ID)]
+RowId = Annotated[int, Path(ge=MIN_ID, le=MAX_ID)]
 
 # ``offset: Offset = 0`` on every paginated list.
 Offset = Annotated[int, Query(ge=0, le=MAX_ID, description="Rows to skip.")]

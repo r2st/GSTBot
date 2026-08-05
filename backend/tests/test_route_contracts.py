@@ -425,6 +425,14 @@ class TestEveryBareIntegerInAUrlIsBounded:
                 return value - 1
         return None
 
+    def _floor(self, field_info):
+        for meta in getattr(field_info, "metadata", []) or []:
+            if (value := getattr(meta, "ge", None)) is not None:
+                return value
+            if (value := getattr(meta, "gt", None)) is not None:
+                return value + 1
+        return None
+
     def test_the_sweep_finds_the_parameters_it_is_checking(self):
         # A collector that finds nothing passes everything below.
         names = {
@@ -466,6 +474,43 @@ class TestEveryBareIntegerInAUrlIsBounded:
             "these paging parameters take an integer of any width — spell an "
             f"offset ``app.core.params.Offset``: {offenders}"
         )
+
+    def test_every_row_id_in_a_path_has_a_floor_too(self):
+        # A ceiling alone is only half a bound. ``le`` is satisfied by every
+        # negative number, so an id wide enough to overflow the column reached
+        # the lookup anyway as long as it was negative.
+        offenders = []
+        for route in _collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for param in route.dependant.path_params:
+                if not param.name.endswith(self.ID_SUFFIX):
+                    continue
+                if param.field_info.annotation is not int:
+                    continue
+                if self._floor(param.field_info) is None:
+                    offenders.append(f"{route.path}:{param.name}")
+        assert not offenders, (
+            "these path ids accept any negative integer — spell them "
+            f"``app.core.params.RowId``: {offenders}"
+        )
+
+    def test_the_floor_is_the_lowest_id_a_row_could_have(self):
+        # Every primary key here is an autoincrementing Integer, so the
+        # sequence starts at 1 and nothing at or below zero names a row.
+        assert params.MIN_ID == 1
+        for route in _collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for param in route.dependant.path_params:
+                if not param.name.endswith(self.ID_SUFFIX):
+                    continue
+                if param.field_info.annotation is not int:
+                    continue
+                floor = self._floor(param.field_info)
+                assert floor is not None and floor >= params.MIN_ID, (
+                    f"{route.path}:{param.name} allows {floor}"
+                )
 
     def test_the_ceiling_is_one_a_row_id_could_actually_reach(self):
         # A bound that is merely *some* number would still hand the database a
@@ -532,6 +577,54 @@ class TestEveryBareIntegerInAUrlIsBounded:
         # that would have taken the value all the way to a lookup.
         response = auth_client.request(method, url.format(id=self.HUGE), json={})
         assert response.status_code == 422, f"{url} answered {response.status_code}"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/api/v1/invoices/{id}",
+            "/api/v1/suppliers/{id}",
+            "/api/v1/reconciliation/{id}",
+        ],
+    )
+    def test_a_row_id_wider_than_the_column_is_refused_downwards_too(
+        self, auth_client, url
+    ):
+        # The same width, the other way round. ``le`` alone let this through:
+        # the driver then raised ``OverflowError`` — not a SQLAlchemy error, so
+        # not one of the failures ``app.core.errors`` turns into a considered
+        # response — and the caller got a 500 out of a URL.
+        response = auth_client.get(url.format(id=-self.HUGE))
+        assert response.status_code == 422, f"{url} answered {response.status_code}"
+
+    @pytest.mark.parametrize(
+        "method, url",
+        [
+            ("patch", "/api/v1/invoices/{id}"),
+            ("delete", "/api/v1/invoices/{id}"),
+            ("post", "/api/v1/invoices/{id}/reparse"),
+            ("post", "/api/v1/alerts/{id}/read"),
+            ("post", "/api/v1/alerts/{id}/dismiss"),
+        ],
+    )
+    def test_a_write_route_refuses_it_downwards_too(self, auth_client, method, url):
+        response = auth_client.request(method, url.format(id=-self.HUGE), json={})
+        assert response.status_code == 422, f"{url} answered {response.status_code}"
+
+    @pytest.mark.parametrize("row_id", [0, -1])
+    def test_an_id_no_row_can_have_is_refused_rather_than_looked_up(
+        self, auth_client, row_id
+    ):
+        # Narrow enough for the column and still not an id: the sequence starts
+        # at 1. Refusing costs nothing and says what is wrong with the request,
+        # where a 404 would say the row is merely absent.
+        response = auth_client.get(f"/api/v1/invoices/{row_id}")
+        assert response.status_code == 422
+
+    def test_the_smallest_id_a_row_could_have_is_still_a_lookup(self, auth_client):
+        # The guard against over-correcting: 1 is an id that can exist, so the
+        # honest answer is "no such row" rather than a refusal.
+        response = auth_client.get(f"/api/v1/invoices/{params.MIN_ID}")
+        assert response.status_code == 404
 
     def test_the_largest_id_a_row_could_have_is_still_a_lookup(self, auth_client):
         # The guard against over-correcting into refusing legal ids: this is
