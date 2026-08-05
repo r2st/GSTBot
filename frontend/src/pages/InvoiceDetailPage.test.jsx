@@ -77,6 +77,25 @@ describe("InvoiceDetailPage", () => {
     expect(screen.getByText("Loading invoice…")).toBeInTheDocument();
   });
 
+  it("says why the invoice never arrived instead of loading forever", async () => {
+    // With no invoice there is no form, so a failed load renders the same
+    // branch as a slow one. Reporting it is the only thing separating "the
+    // server is down" from a placeholder that never resolves.
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Invoice not found." }, { status: 404 }),
+    );
+    render(
+      <MemoryRouter initialEntries={["/invoices/42"]}>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Invoice not found.");
+    expect(screen.queryByText("Loading invoice…")).not.toBeInTheDocument();
+  });
+
   it("fills the form from the extracted fields", async () => {
     await renderPage();
     expect(screen.getByLabelText("Counterparty GSTIN")).toHaveValue("27AAPFU0939F1ZV");
@@ -495,6 +514,101 @@ describe("InvoiceDetailPage", () => {
 
       await screen.findByText("INV-2026-0043");
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    // Clearing the form on the way in stops one invoice's values being *sent*
+    // to another's id. These are the other direction: a write that was already
+    // in flight, answering onto the page of the invoice that replaced it.
+    it("does not land a save for the invoice that was left on the one opened after it", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+      await retype(user, "Counterparty name", "Acme Supplies Pvt Ltd");
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      expect(pending[1].method).toBe("PATCH");
+      expect(pending[1].url).toContain("/invoices/42");
+
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      pending[2].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+
+      // The PATCH answers with the invoice it wrote — invoice 42. Adopting it
+      // makes the form a working copy of 42 again while the URL, and every
+      // control on the page, still name 43. The next save then PATCHes 42's
+      // GSTIN, dates and figures onto 43: the same corruption clearing the
+      // form on the way in was added to prevent, arriving by the other door.
+      pending[1].answer(invoice({ counterparty_name: "Acme Supplies Pvt Ltd" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("INV-2026-0043")).toBeInTheDocument(),
+      );
+      expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue("Acme Supplies Pvt Ltd")).not.toBeInTheDocument();
+    });
+
+    it("does not banner a superseded save's failure over the invoice opened after it", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+      await retype(user, "Counterparty name", "Acme Supplies Pvt Ltd");
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      pending[2].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+
+      // The refusal is about invoice 42, which is not the invoice this page
+      // is showing any more. Left unguarded it sits over invoice 43, telling
+      // someone who has not touched it that their correction was rejected.
+      pending[1].answer({ detail: "Invoice 42 is locked." }, { status: 409 });
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Save corrections" })).not.toBeDisabled(),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("does not land a re-extraction for the invoice that was left on the one opened after it", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+      await user.click(screen.getByRole("button", { name: "Re-extract" }));
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      expect(pending[1].url).toContain("/invoices/42/reparse");
+
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      pending[2].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+
+      // Re-extraction is a second model pass over the stored file, so it is
+      // the slowest write on this page and the one most likely to still be
+      // running when the user moves on.
+      pending[1].answer(invoice({ counterparty_name: "Reparsed Name" }));
+
+      await waitFor(() =>
+        expect(screen.getByText("INV-2026-0043")).toBeInTheDocument(),
+      );
+      expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue("Reparsed Name")).not.toBeInTheDocument();
     });
   });
 });

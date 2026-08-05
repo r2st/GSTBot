@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonPanel } from "../components/Skeleton";
@@ -33,6 +33,11 @@ export default function InvoiceDetailPage() {
   // Which fields have been left, so a half-typed GSTIN is not marked wrong on
   // the third keystroke. A submit attempt marks everything touched.
   const [touched, setTouched] = useState({});
+  // The invoice the page is showing, readable from a callback that has been
+  // waiting on the network. `id` closed over when a write went out is the
+  // invoice it was *for*, which is the one thing an in-flight write must not
+  // assume the URL still names.
+  const shownId = useRef(id);
 
   const { errors, warnings } = invoiceDraftErrors(draft);
   const hasErrors = Object.keys(errors).length > 0;
@@ -90,16 +95,18 @@ export default function InvoiceDetailPage() {
   // a slow 42 landing after 43 would put 42 back on 43's page.
   useEffect(() => {
     const controller = new AbortController();
+    shownId.current = id;
     setInvoice(null);
     setDraft({});
     setTouched({});
     setNotice("");
     load({ signal: controller.signal });
     return () => controller.abort();
-  }, [load]);
+  }, [load, id]);
 
   async function handleSave(event) {
     event.preventDefault();
+    const target = id;
     // Everything becomes touched on submit, so a field the user never entered
     // still shows why the save did not go through.
     setTouched(Object.fromEntries(EDITABLE.map(({ field }) => [field, true])));
@@ -125,9 +132,20 @@ export default function InvoiceDetailPage() {
         setNotice("Nothing changed.");
         return;
       }
-      adopt(await api.updateInvoice(id, changes));
+      const saved = await api.updateInvoice(target, changes);
+      // Clearing the form on the way in stops one invoice's values being sent
+      // to another's id. This is the other direction: the PATCH answers with
+      // the invoice it wrote, and adopting it makes the form a working copy of
+      // that invoice again — while the URL, and every control on the page,
+      // name the one opened since. The next save would then PATCH the first
+      // invoice's GSTIN, dates and figures onto the second.
+      if (shownId.current !== target) return;
+      adopt(saved);
       setNotice("Corrections saved.");
     } catch (err) {
+      // A failure belongs to the invoice it was for. Left unguarded it banners
+      // the page of an invoice that is loading, or has loaded, perfectly well.
+      if (shownId.current !== target) return;
       setError(err.message);
     } finally {
       setBusy(false);
@@ -135,12 +153,19 @@ export default function InvoiceDetailPage() {
   }
 
   async function handleReparse() {
+    // Re-extraction is a second model pass over the stored file, so it is the
+    // slowest write this page makes and the one most likely to still be
+    // running when the user moves on to the next invoice.
+    const target = id;
     setBusy(true);
     setError("");
     try {
-      adopt(await api.reparseInvoice(id));
+      const reparsed = await api.reparseInvoice(target);
+      if (shownId.current !== target) return;
+      adopt(reparsed);
       setNotice("Re-extracted from the stored file.");
     } catch (err) {
+      if (shownId.current !== target) return;
       setError(err.message);
     } finally {
       setBusy(false);
