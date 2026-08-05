@@ -799,8 +799,3 @@ def summarise(
         unclaimed_count=unclaimed,
         rule_37_reversal=rule_37_reversal,
     )
-
-
-def rule_37_due_date(invoice_date: date) -> date:
-    """The day after which credit on an invoice dated *invoice_date* reverses."""
-    return invoice_date + timedelta(days=RULE_37_DAYS)
