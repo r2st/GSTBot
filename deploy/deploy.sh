@@ -183,18 +183,44 @@ systemctl restart gstbot-api.service gstbot-web.service gstbot-worker.service \
     gstbot-beat.service
 
 log "Checking health"
-for attempt in $(seq 1 30); do
-    if curl -fsS --max-time 5 http://172.18.0.1:3008/api/v1/health/ready >/dev/null 2>&1; then
-        echo "API is ready after ${attempt}s"
-        break
-    fi
-    [ "$attempt" -lt 30 ] || die "API did not become ready; journalctl -u gstbot-api -n 100"
-    sleep 1
-done
-curl -fsS --max-time 10 http://172.18.0.1:3009/ >/dev/null \
-    || die "the SPA is not being served; journalctl -u gstbot-web -n 100"
-curl -fsS --max-time 10 https://gstbot.aiknol.com/api/v1/health/live >/dev/null \
-    || die "the site is not answering through Caddy; docker logs knol-caddy --tail 100"
+
+# Poll a URL until it answers, and say how long that took. Every check here is
+# made immediately after a restart, so every one of them is asking a question
+# whose answer is "not yet" for a while — the difference between them is only
+# how long that while is.
+await() {
+    local what="$1" url="$2" seconds="$3" hint="$4" attempt
+    for attempt in $(seq 1 "$seconds"); do
+        if curl -fsS --max-time 5 "$url" >/dev/null 2>&1; then
+            echo "$what after ${attempt}s"
+            return 0
+        fi
+        sleep 1
+    done
+    die "$what did not happen within ${seconds}s; $hint"
+}
+
+await "API is ready" http://172.18.0.1:3008/api/v1/health/ready 30 \
+    "journalctl -u gstbot-api -n 100"
+await "the SPA is being served" http://172.18.0.1:3009/ 30 \
+    "journalctl -u gstbot-web -n 100"
+
+# 45s, not one shot. This is the only check that goes through the edge, and
+# the edge does not learn the API is back at the same time the API does.
+# Caddy runs an *active* health check against the upstream on a 30s interval
+# (see deploy/caddy-gstbot.conf), so a probe that happens to land during the
+# uvicorn restart marks the upstream down and holds that verdict until the
+# next one — up to 30 seconds after the API is answering perfectly well on the
+# bridge. The check above proves that and returns in about 4 seconds.
+#
+# So a single-shot curl here was a coin toss on where in Caddy's cycle the
+# restart fell, and losing it failed a release that had already succeeded:
+# services up, migrations applied, new code serving, and an error telling the
+# operator to go read the edge logs. Waiting past one full interval is what
+# makes this check report the edge's steady state rather than its blind spot.
+await "the site is answering through Caddy" \
+    https://gstbot.aiknol.com/api/v1/health/live 45 \
+    "docker logs knol-caddy --tail 100"
 
 log "Deployed $REVISION"
 systemctl --no-pager --lines=0 status gstbot.target || true

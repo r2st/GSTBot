@@ -1087,6 +1087,42 @@ class TestTheDeployScript:
         assert f"http://{BRIDGE}:{web_port}/" in commands
         assert f"https://{SITE}/api/v1/health/live" in commands
 
+    def test_no_health_check_is_a_single_shot(self, commands):
+        # Every check here runs immediately after a restart, so every one of
+        # them is asking a question whose answer is "not yet" for a while. A
+        # check with no retry does not report whether the release worked, it
+        # reports whether the release worked *by the time curl ran*.
+        for line in commands.splitlines():
+            if "curl" in line and "http" in line:
+                assert "$url" in line or "seq" in line, (
+                    f"a health check with no retry loop is a race: {line.strip()}"
+                )
+
+    def test_the_edge_check_outwaits_caddys_own_health_check(
+        self, commands, site_conf
+    ):
+        # The one check that goes through the edge, and the edge does not learn
+        # the API is back at the same moment the API does. Caddy actively
+        # probes the upstream on an interval; a probe landing during the
+        # uvicorn restart marks it down and holds that verdict until the next
+        # one. The API answers on the bridge in about four seconds, so a
+        # release that gave up before one full interval had passed failed a
+        # deployment that had already succeeded.
+        interval = int(
+            matched(r"health_interval (\d+)s", site_conf).group(1)
+        )
+        window = int(
+            matched(
+                r"await \"the site is answering through Caddy\" \\?\s*\n?\s*"
+                r"https://\S+ (\d+)",
+                commands,
+            ).group(1)
+        )
+        assert window > interval, (
+            f"the edge check gives up after {window}s but Caddy can hold a "
+            f"stale down verdict for {interval}s"
+        )
+
     def test_every_health_check_can_fail_the_release(self, commands):
         # `curl` without -f exits 0 on a 500, so a check written that way
         # reports a healthy release for a stack that is answering with
