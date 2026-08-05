@@ -122,9 +122,21 @@ export default function ReconcilePage() {
       api.getImported2b(target),
       api.latestReconciliation(target),
     ]);
-    // A 404 from either is the normal empty state, not an error worth showing.
+
     setImported(importResult.status === "fulfilled" ? importResult.value : null);
     setRun(runResult.status === "fulfilled" ? runResult.value : null);
+
+    // A 404 from either is the normal empty state — nothing imported yet, or
+    // nothing reconciled yet — and neither is worth a banner. Everything else
+    // is, and treating the whole rejected branch as the empty state meant a
+    // 500, a 503 or an edge that never reached the API rendered as a clean
+    // "no GSTR-2B imported for this period", inviting the user to import one
+    // they had already imported. The page said the period was empty on the
+    // strength of never having found out.
+    const failure = [importResult, runResult].find(
+      (result) => result.status === "rejected" && result.reason?.status !== 404,
+    );
+    if (failure) setError(failure.reason?.message || "Could not load this period.");
     setLoading(false);
   }, []);
 

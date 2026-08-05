@@ -85,6 +85,54 @@ describe("api", () => {
     vi.restoreAllMocks();
   });
 
+  describe("the status a refusal carries", () => {
+    // Some refusals are a normal state of the product — a period with nothing
+    // imported answers 404 — and some are a failure. A caller that wants to
+    // pass over the first quietly needs to be able to tell them apart.
+    it("puts the status on the error it throws", async () => {
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "Nothing imported for that period" }, { status: 404 }),
+      );
+
+      const err = await api.getImported2b("2026-04").catch((e) => e);
+      expect(err.status).toBe(404);
+      expect(err.message).toBe("Nothing imported for that period");
+    });
+
+    it("carries the status of a failure just the same", async () => {
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "Database unreachable" }, { status: 500 }),
+      );
+
+      const err = await api.getImported2b("2026-04").catch((e) => e);
+      expect(err.status).toBe(500);
+    });
+
+    it("carries a status even when the body was not readable", async () => {
+      // An HTML error page from the edge. The message falls back, the status
+      // does not — it is the only thing the caller can still branch on.
+      global.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        statusText: "",
+        text: async () => "<html><body>502 Bad Gateway</body></html>",
+      });
+
+      const err = await api.latestReconciliation("2026-04").catch((e) => e);
+      expect(err.status).toBe(502);
+      expect(err.message).toContain("502");
+    });
+
+    it("carries the status on a refused export too", async () => {
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "No invoices for that period" }, { status: 404 }),
+      );
+
+      const err = await api.downloadExport("gstr1", "csv", "2026-04").catch((e) => e);
+      expect(err.status).toBe(404);
+    });
+  });
+
   describe("cancellation", () => {
     // The two list endpoints are the ones a search box refetches per keystroke,
     // so they are the two that have to be cancellable. Without the signal

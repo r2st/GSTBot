@@ -38,10 +38,29 @@ async function request(path, { method = "GET", body, form, auth = true, signal }
   const { data, readable } = readBody(text);
 
   if (!res.ok) {
-    throw new Error(readable ? errorMessage(data, statusMessage(res)) : statusMessage(res));
+    throw refusal(readable ? errorMessage(data, statusMessage(res)) : statusMessage(res), res);
   }
   if (!readable) throw new Error(unreadableMessage(res));
   return data;
+}
+
+/**
+ * An error carrying the status that caused it.
+ *
+ * Some refusals are a normal state of the product rather than a problem: a
+ * period with no GSTR-2B imported answers 404, and that is the empty screen
+ * inviting an import, not a failure to report. Every other refusal — a 500, a
+ * 503, an edge that never reached the API — has to be told to the user.
+ *
+ * Without the status those two are the same rejection, and a caller wanting to
+ * pass over the first quietly has no way to do it except by passing over all of
+ * them, which turns a backend outage into a page that says there is nothing
+ * here yet.
+ */
+function refusal(message, res) {
+  const err = new Error(message);
+  err.status = res.status;
+  return err;
 }
 
 /**
@@ -253,7 +272,7 @@ export const api = {
       // not surface as a JSON parse error, and `statusText` is empty over
       // HTTP/2 so it cannot be the fallback on its own.
       const { data, readable } = readBody(await res.text());
-      throw new Error(readable ? errorMessage(data, statusMessage(res)) : statusMessage(res));
+      throw refusal(readable ? errorMessage(data, statusMessage(res)) : statusMessage(res), res);
     }
     return {
       blob: await res.blob(),

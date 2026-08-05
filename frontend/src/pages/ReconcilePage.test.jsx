@@ -100,7 +100,7 @@ function run(overrides = {}) {
 }
 
 /** Route fetches by URL so the page's two parallel loads resolve independently. */
-function mockApi({ imported2b, latest, onPost } = {}) {
+function mockApi({ imported2b, latest, onPost, fail } = {}) {
   global.fetch = vi.fn(async (url, options = {}) => {
     const ok = (body) => ({
       ok: true,
@@ -108,14 +108,18 @@ function mockApi({ imported2b, latest, onPost } = {}) {
       statusText: "OK",
       text: async () => JSON.stringify(body),
     });
-    const notFound = () => ({
+    const refused = (status, detail) => ({
       ok: false,
-      status: 404,
-      statusText: "Not Found",
-      text: async () => JSON.stringify({ detail: "Not found" }),
+      status,
+      statusText: "",
+      text: async () => JSON.stringify({ detail }),
     });
+    const notFound = () => refused(404, "Not found");
 
     if (options.method === "POST") return ok(await onPost(url, options));
+    // `fail` stands in for the server being unable to answer at all, which is
+    // the case a 404 must not be confused with.
+    if (fail) return refused(fail.status, fail.message);
     if (url.includes("/gstr2b/")) return imported2b ? ok(imported2b) : notFound();
     if (url.includes("/latest")) return latest ? ok(latest) : notFound();
     return notFound();
@@ -140,6 +144,47 @@ describe("ReconcilePage", () => {
 
     expect(await screen.findByText(/No GSTR-2B imported yet/)).toBeInTheDocument();
     expect(screen.getByText(/Returns → GSTR-2B → Download/)).toBeInTheDocument();
+  });
+
+  describe("a period the server could not answer for", () => {
+    // A 404 is this page's empty state and a 500 is not, but both arrive as a
+    // rejected promise. Treating the whole rejected branch as "nothing here
+    // yet" told a user their period was empty on the strength of never having
+    // found out — and then invited them to import a 2B they had already
+    // imported.
+    it("reports a server failure instead of calling the period empty", async () => {
+      mockApi({ fail: { status: 500, message: "Database unreachable" } });
+      renderPage();
+
+      expect(await screen.findByText("Database unreachable")).toBeInTheDocument();
+    });
+
+    it("says something even when the edge answers with no body it can read", async () => {
+      mockApi({ fail: { status: 503, message: null } });
+      renderPage();
+
+      // statusText is empty over HTTP/2, so the code has to carry the message.
+      expect(await screen.findByText(/temporarily unavailable|503/)).toBeInTheDocument();
+    });
+
+    it("keeps the empty state silent when the period really is empty", async () => {
+      mockApi({});
+      renderPage();
+
+      await screen.findByText(/No GSTR-2B imported yet/);
+      // A 404 from both endpoints is the ordinary first visit to a period.
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("does not raise a banner for the run alone being absent", async () => {
+      // The common case after an import: a 2B is there, nothing has been
+      // reconciled against it yet, and only the run endpoint answers 404.
+      mockApi({ imported2b: imported() });
+      renderPage();
+
+      await screen.findByText(/invoices imported/);
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
 
   it("cannot reconcile before a 2B exists", async () => {
