@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonPanel } from "../components/Skeleton";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 import { invoiceDraftErrors } from "../lib/validate";
 
@@ -62,17 +62,40 @@ export default function InvoiceDetailPage() {
     );
   }, []);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ signal } = {}) => {
     setError("");
     try {
-      adopt(await api.getInvoice(id));
+      adopt(await api.getInvoice(id, { signal }));
     } catch (err) {
+      // A superseded request describes an invoice this page has already moved
+      // off. Its answer must not be adopted, and its rejection is this app
+      // cancelling itself rather than anything to tell the user about.
+      if (isAbortError(err)) return;
       setError(err.message);
     }
   }, [id, adopt]);
 
+  // The id in the URL is the only thing naming which invoice this is, and
+  // React Router keeps one component instance across a change to it. So the
+  // next invoice does not arrive on a fresh page — it arrives on the previous
+  // invoice's, and until it lands every control on that page writes to the new
+  // id: `handleSave` diffs the form against the invoice beside it and PATCHes
+  // the difference to `id`. Two clicks in the invoice list, one slow response,
+  // and one invoice's GSTIN, dates and figures were saved onto another.
+  //
+  // Clearing first is what closes that: with no invoice there is no form and
+  // no save button, so the page shows its loading placeholder until the
+  // invoice the URL actually names has arrived. The abort handles the other
+  // half — answers do not come back in the order they were sent, so without it
+  // a slow 42 landing after 43 would put 42 back on 43's page.
   useEffect(() => {
-    load();
+    const controller = new AbortController();
+    setInvoice(null);
+    setDraft({});
+    setTouched({});
+    setNotice("");
+    load({ signal: controller.signal });
+    return () => controller.abort();
   }, [load]);
 
   async function handleSave(event) {

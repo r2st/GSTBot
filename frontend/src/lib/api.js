@@ -192,7 +192,7 @@ export const api = {
     return request(`/invoices${suffix ? `?${suffix}` : ""}`, { signal });
   },
 
-  getInvoice: (id) => request(`/invoices/${id}`),
+  getInvoice: (id, { signal } = {}) => request(`/invoices/${id}`, { signal }),
   updateInvoice: (id, changes) =>
     request(`/invoices/${id}`, { method: "PATCH", body: changes }),
   reparseInvoice: (id) => request(`/invoices/${id}/reparse`, { method: "POST" }),

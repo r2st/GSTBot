@@ -1,6 +1,6 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import InvoiceDetailPage from "./InvoiceDetailPage";
 
@@ -377,6 +377,124 @@ describe("InvoiceDetailPage", () => {
         expect(screen.getByRole("alert")).toHaveTextContent("Invoice is part of a filed return"),
       );
       expect(screen.getByLabelText("Counterparty GSTIN")).toBeInTheDocument();
+    });
+  });
+
+  describe("moving from one invoice to another", () => {
+    /**
+     * The route is `/invoices/:id`, and React Router keeps one component
+     * instance across a parameter change. So the second invoice does not arrive
+     * on a fresh page — it arrives on the previous invoice's page, and the test
+     * has to move between the two the way the browser does.
+     */
+    function renderAtFortyTwo() {
+      return render(
+        <MemoryRouter initialEntries={["/invoices/42"]}>
+          <Link to="/invoices/43">Open 43</Link>
+          <Routes>
+            <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+    }
+
+    /** Follow the link to invoice 43, the way the browser would. */
+    const openFortyThree = (user) =>
+      user.click(screen.getByRole("link", { name: "Open 43" }));
+
+    /** A fetch that hands back the levers instead of resolving on its own. */
+    function deferredFetch() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url, options = {}) =>
+          new Promise((resolve, reject) => {
+            pending.push({
+              url: String(url),
+              method: options.method ?? "GET",
+              body: options.body,
+              signal: options.signal,
+              answer: (body, init) => resolve(jsonResponse(body, init)),
+            });
+            options.signal?.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+      return pending;
+    }
+
+    it("does not leave one invoice in the form under another one's id", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+
+      // On to /invoices/43. Its request is still in flight.
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(2));
+      expect(pending[1].url).toContain("/invoices/43");
+
+      // Nothing from invoice 42 may still be on screen: the form is a working
+      // copy of one invoice, and every control on it now writes to 43. Saving
+      // from here PATCHed 42's GSTIN, dates and figures onto invoice 43.
+      expect(screen.queryByDisplayValue("27AAPFU0939F1ZV")).not.toBeInTheDocument();
+      expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
+      expect(screen.getByText("Loading invoice…")).toBeInTheDocument();
+    });
+
+    it("abandons the request the next invoice supersedes", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      expect(pending[0].url).toContain("/invoices/42");
+      expect(pending[0].signal.aborted).toBe(true);
+      expect(pending[1].signal.aborted).toBe(false);
+    });
+
+    it("does not let a slow earlier invoice overwrite the one asked for", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      // 43 answers first: responses do not come back in the order they were
+      // sent, and the id in the URL is the only thing naming which is which.
+      pending[1].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+
+      pending[0].answer(invoice());
+
+      await waitFor(() =>
+        expect(screen.getByText("INV-2026-0043")).toBeInTheDocument(),
+      );
+      expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
+    });
+
+    it("does not raise an error banner for a request it cancelled itself", async () => {
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(2));
+      pending[1].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+
+      await screen.findByText("INV-2026-0043");
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 });
