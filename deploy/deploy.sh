@@ -7,14 +7,19 @@
 # First-time server setup is in deploy/README.md; this script assumes it has
 # already been done and does nothing that is only correct once.
 #
-# **The tree, not the remote, is the default source.** This box holds no
-# credential for a private repository, so `git fetch` answers 401 — and an
-# earlier version of this script fetched unconditionally and therefore could
-# not release at all. What ships instead is whatever is in $ROOT, which the
-# runbook puts there by rsync from a workstation. If a remote does turn out to
-# be reachable (a deploy key was installed, or the repository went public) the
-# same command fetches origin/main first, so installing the key is the only
-# thing needed to get back to naming a revision rather than trusting an rsync.
+# **origin/main is the default source, and the tree is the fallback.** A
+# read-only deploy key now lives on the box and is pinned in the checkout's
+# core.sshCommand, so the no-argument release fetches and checks out
+# origin/main. Before that key existed `git fetch` answered 401, an earlier
+# version of this script fetched unconditionally and so could not release at
+# all, and the fallback below — ship whatever rsync left in $ROOT — was the
+# ordinary path. It is still the path on any box with no credential, which is
+# why it stays; it is no longer the expected one here.
+#
+# The fallback is quiet enough to be dangerous, so it announces itself: a
+# release that could not reach the remote says why, because a broken key and a
+# box that never had one look identical from the outside and the first one
+# ships stale code under a green release.
 #
 # Unlike a blue/green release, this builds in place: the checkout and the build
 # output are the live ones. The box is shared with three other products and has
@@ -38,12 +43,42 @@ die() { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 # answer here.
 have_checkout() { command -v git >/dev/null && [ -d "$ROOT/.git" ]; }
 
+# Fetch origin, reporting why if it does not work. The fallback further down is
+# legitimate on a box holding no credential, but from the outside that is
+# indistinguishable from a box whose credential has broken — and the second one
+# ships stale code while the release reports success. Whatever git said about
+# it belongs on the operator's terminal, not in /dev/null.
+fetch_origin() {
+    local err
+    if err="$(git -C "$ROOT" fetch --prune --tags origin 2>&1)"; then
+        return 0
+    fi
+    warn "cannot fetch origin, so $ROOT will be released as it stands:"
+    printf '%s\n' "$err" | sed 's/^/    /' >&2
+    return 1
+}
+
 # A fetch that cannot authenticate must fail, not ask. Without these, git
 # against a private HTTPS remote prompts for a username on the terminal and a
 # release run from cron or a detached session hangs there indefinitely — which
 # is the failure mode this script's fallback exists to avoid in the first place.
 export GIT_TERMINAL_PROMPT=0
-export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes}"
+
+# BatchMode must not cost the deploy key. GIT_SSH_COMMAND *overrides*
+# core.sshCommand rather than merging with it, and this checkout pins its
+# read-only deploy key there (deploy/README.md) — so exporting a bare `ssh`
+# here unauthenticates every fetch. The release then takes the "no reachable
+# remote" path and ships whatever tree the box already had — and until
+# fetch_origin above started reporting the reason, it did so in silence. The
+# box sat twelve commits stale that way, across five green releases. Extend
+# the pinned command rather than replacing it.
+if [ -z "${GIT_SSH_COMMAND:-}" ]; then
+    pinned_ssh=""
+    if have_checkout; then
+        pinned_ssh="$(git -C "$ROOT" config --get core.sshCommand || true)"
+    fi
+    export GIT_SSH_COMMAND="${pinned_ssh:-ssh} -o BatchMode=yes"
+fi
 
 [ "$(id -u)" -eq 0 ] || die "run as root (systemctl and $ROOT are root-owned)"
 [ -d "$ROOT/backend" ] || die "$ROOT does not hold the application — see deploy/README.md"
@@ -61,7 +96,7 @@ if [ -n "$REF" ]; then
         || die "cannot fetch origin, so '$REF' cannot be resolved; see deploy/README.md"
     git -C "$ROOT" checkout --detach "$REF"
     echo "Checked out $REF"
-elif have_checkout && git -C "$ROOT" fetch --prune --tags origin 2>/dev/null; then
+elif have_checkout && fetch_origin; then
     git -C "$ROOT" checkout --detach origin/main
     echo "Checked out origin/main"
 else

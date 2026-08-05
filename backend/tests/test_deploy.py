@@ -1096,6 +1096,108 @@ class TestTheDeployScript:
                 assert "-fsS" in line, f"curl without -f cannot fail: {line.strip()}"
                 assert "--max-time" in line, f"curl without a timeout can hang: {line.strip()}"
 
+    # -- Reaching the remote at all -----------------------------------------
+    #
+    # These four are about one bug, which cost twelve commits of stale
+    # production. The script exports GIT_SSH_COMMAND to force BatchMode so a
+    # release from cron cannot hang on a password prompt. But GIT_SSH_COMMAND
+    # *replaces* core.sshCommand rather than merging with it, and the checkout
+    # on the box pins its read-only deploy key there — so the export threw the
+    # key away, every fetch answered "Permission denied (publickey)", the
+    # failure went to /dev/null, and the release quietly took the "no
+    # reachable remote" branch and re-shipped the tree already on disk. It
+    # reported success every time.
+
+    @pytest.fixture(scope="class")
+    def ssh_command_block(self, script) -> str:
+        """The part of the script that decides what ssh it will fetch with.
+
+        Extracted and run for real below rather than pattern-matched: the
+        thing that went wrong was precedence between a config value and an
+        environment variable, which reading the source is exactly how to get
+        wrong twice.
+        """
+        return matched(
+            r'if \[ -z "\$\{GIT_SSH_COMMAND:-\}" \]; then\n.*?\nfi\n',
+            script,
+            flags=re.DOTALL,
+        ).group(0)
+
+    def derive(self, block: str, root: Path, *, inherited: str | None = None) -> str:
+        """Run the block against ``root`` and report the GIT_SSH_COMMAND it set."""
+        env = {k: v for k, v in os.environ.items() if k != "GIT_SSH_COMMAND"}
+        if inherited is not None:
+            env["GIT_SSH_COMMAND"] = inherited
+        program = (
+            "set -euo pipefail\n"
+            f"ROOT={root}\n"
+            'have_checkout() { command -v git >/dev/null && [ -d "$ROOT/.git" ]; }\n'
+            f"{block}\n"
+            'printf %s "${GIT_SSH_COMMAND:-}"\n'
+        )
+        result = subprocess.run(
+            ["bash", "-c", program], capture_output=True, text=True, env=env
+        )
+        assert result.returncode == 0, result.stderr
+        return result.stdout
+
+    @pytest.fixture
+    def checkout(self, tmp_path) -> Path:
+        subprocess.run(["git", "init", "--quiet", str(tmp_path)], check=True)
+        return tmp_path
+
+    def test_forcing_batch_mode_keeps_the_pinned_deploy_key(
+        self, ssh_command_block, checkout
+    ):
+        # The regression itself. The box has no other credential for a private
+        # remote, so dropping this identity is the difference between
+        # releasing origin/main and releasing whatever is already there.
+        key = "/opt/GSTBot/keys/gstbot_deploy_ed25519"
+        subprocess.run(
+            ["git", "-C", str(checkout), "config", "core.sshCommand", f"ssh -i {key}"],
+            check=True,
+        )
+        derived = self.derive(ssh_command_block, checkout)
+        assert key in derived, "the pinned deploy key was thrown away"
+        assert "BatchMode=yes" in derived, "a release could still hang on a prompt"
+
+    def test_batch_mode_is_forced_when_nothing_is_pinned(
+        self, ssh_command_block, checkout
+    ):
+        # A checkout with no core.sshCommand is the ordinary case elsewhere,
+        # and the hang this protects against is the reason the export exists.
+        derived = self.derive(ssh_command_block, checkout)
+        assert derived.split() == ["ssh", "-o", "BatchMode=yes"]
+
+    def test_it_works_where_there_is_no_checkout_to_ask(
+        self, ssh_command_block, tmp_path
+    ):
+        # `git config` against a non-repository exits non-zero, and under
+        # `set -e` an unguarded read of it would abort the release before any
+        # of its own diagnostics had run.
+        derived = self.derive(ssh_command_block, tmp_path)
+        assert "BatchMode=yes" in derived
+
+    def test_an_ssh_command_from_the_caller_is_left_alone(
+        self, ssh_command_block, checkout
+    ):
+        # An operator overriding it from the environment is deliberate, and
+        # the runbook's recovery step for a broken key is exactly that.
+        derived = self.derive(ssh_command_block, checkout, inherited="ssh -i /tmp/other")
+        assert derived == "ssh -i /tmp/other"
+
+    def test_a_fetch_that_cannot_authenticate_says_so(self, commands):
+        # The other half of the bug: the failure was discarded, so a box whose
+        # credential had broken looked exactly like a box that never had one —
+        # and the second is a supported configuration that releases the local
+        # tree on purpose. Falling back is fine; falling back in silence is
+        # how it went unnoticed across five releases.
+        assert not re.search(r"git -C \"\$ROOT\" fetch[^\n]*2>/dev/null", commands), (
+            "a fetch failure discarded here is a stale release reported as a good one"
+        )
+        fetch = matched(r"fetch_origin\(\) \{.*?\n\}", commands, flags=re.DOTALL).group(0)
+        assert "warn " in fetch, "a fetch that failed must reach the operator"
+
 
 # ---------------------------------------------------------------------------
 # The nightly dump
