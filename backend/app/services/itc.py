@@ -330,6 +330,17 @@ def rule_37(invoices: list[Invoice], *, as_of: date | None = None) -> Rule37Resu
     reverse-charge purchase has no credit to reverse, and reporting one would
     send a business chasing a payment for no tax reason.
 
+    "Unpaid" is judged as of *as_of*, not as of now. A payment made after the
+    date being asked about had not happened yet on that date, and reading
+    ``paid_at`` as a plain flag made a closed period's answer depend on what has
+    happened since. That is not a display quirk: :func:`app.services.filing.build_gstr3b`
+    anchors this to the close of the period precisely so that re-generating an
+    old return reproduces it, and paying the supplier in February silently
+    deleted the reversal from January's 3B — a return that had already been
+    filed with it, and whose stored copy ``record_filing`` rewrites every time
+    the ARN is corrected. Under-reversed credit is over-claimed credit, and it
+    carries interest.
+
     An invoice with no date is skipped rather than assumed overdue. The clock
     runs from the invoice date, and a missing date means the extraction failed,
     not that 180 days have passed.
@@ -346,7 +357,7 @@ def rule_37(invoices: list[Invoice], *, as_of: date | None = None) -> Rule37Resu
     result = Rule37Result()
 
     for invoice in invoices:
-        if invoice.paid_at is not None:
+        if invoice.paid_at is not None and invoice.paid_at <= today:
             continue
         if not invoice.claims_credit:
             continue

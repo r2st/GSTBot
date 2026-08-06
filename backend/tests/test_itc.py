@@ -200,6 +200,70 @@ def test_rule_37_ignores_a_paid_invoice():
     assert result.reversal.total == Decimal("0.00")
 
 
+class TestPaymentIsJudgedAsOfTheDateAsked:
+    """A payment that had not happened yet cannot have stopped the clock.
+
+    ``as_of`` is not a display preference. :func:`filing.build_gstr3b` anchors
+    it to the close of the period so that re-generating a closed month's return
+    reproduces it — and ``paid_at`` read as a plain flag broke exactly that:
+    paying the supplier in February deleted the reversal out of January's 3B,
+    a return already filed with it. Under-reversed credit is over-claimed
+    credit, and it carries interest.
+    """
+
+    # Dated 15 June 2025, so the 180 days run out on 12 December and the
+    # reversal belongs to the 2025-12 return.
+    LAPSED = date(2025, 6, 15)
+    PERIOD_CLOSE = date(2025, 12, 31)
+
+    def test_a_payment_after_the_period_does_not_erase_its_reversal(self):
+        invoice = purchase(invoice_date=self.LAPSED, paid_at=date(2026, 1, 20))
+
+        result = itc_service.rule_37([invoice], as_of=self.PERIOD_CLOSE)
+
+        assert [item.invoice_id for item in result.overdue] == [1]
+        assert result.reversal_in("2025-12").igst == Decimal("18000.00")
+
+    def test_the_closed_return_reads_the_same_before_and_after_paying(self):
+        unpaid = purchase(invoice_date=self.LAPSED)
+        paid_later = purchase(invoice_date=self.LAPSED, paid_at=date(2026, 1, 20))
+
+        at_the_time = itc_service.rule_37([unpaid], as_of=self.PERIOD_CLOSE)
+        regenerated = itc_service.rule_37([paid_later], as_of=self.PERIOD_CLOSE)
+
+        assert (
+            regenerated.reversal_in("2025-12").total
+            == at_the_time.reversal_in("2025-12").total
+        )
+
+    def test_a_payment_on_the_day_itself_does_stop_the_clock(self):
+        """The boundary is inclusive: paid on the date asked about is paid."""
+        invoice = purchase(invoice_date=self.LAPSED, paid_at=self.PERIOD_CLOSE)
+
+        result = itc_service.rule_37([invoice], as_of=self.PERIOD_CLOSE)
+
+        assert result.overdue == []
+        assert result.reversal.total == Decimal("0.00")
+
+    def test_a_payment_before_the_clock_expired_still_prevents_the_reversal(self):
+        """Paying inside the 180 days is what the rule is asking for."""
+        invoice = purchase(invoice_date=self.LAPSED, paid_at=date(2025, 8, 1))
+
+        result = itc_service.rule_37([invoice], as_of=self.PERIOD_CLOSE)
+
+        assert result.overdue == []
+        assert result.approaching == []
+
+    def test_the_later_period_that_re_avails_it_sees_the_payment(self):
+        """By March the payment has happened, so nothing is standing."""
+        invoice = purchase(invoice_date=self.LAPSED, paid_at=date(2026, 1, 20))
+
+        result = itc_service.rule_37([invoice], as_of=date(2026, 3, 31))
+
+        assert result.overdue == []
+        assert result.reversal.total == Decimal("0.00")
+
+
 def test_rule_37_ignores_invoices_that_never_claimed_credit():
     """Blocked credit and reverse charge have no credit to reverse."""
     blocked = purchase(id=1, invoice_date=date(2026, 1, 1), itc_eligible=False)

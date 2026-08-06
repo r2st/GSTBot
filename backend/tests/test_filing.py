@@ -899,6 +899,67 @@ class TestAClosedPeriodsReturnDoesNotMove:
         assert may["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
         assert september["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
 
+    def test_paying_the_supplier_later_does_not_rewrite_the_filed_return(
+        self, db_session, business, monkeypatch
+    ):
+        """The last way a closed return could still move under you.
+
+        The clock was anchored to the period; ``paid_at`` was not. It was read
+        as a plain flag, so settling the invoice in June deleted April's
+        reversal — retrospectively, out of a return that had already been filed
+        with it. Under-reversed credit is over-claimed credit, and the
+        difference carries interest.
+
+        Worse than a wrong preview, because ``record_filing`` stores the return
+        as this module builds it *now*: adding the ARN a week later rewrote the
+        stored copy of a filing that had already happened.
+        """
+        invoice = self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            # The 181st day is 2026-04-30 — inside PERIOD and no other month.
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2026, 5, 2))
+        as_filed = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        # The supplier is paid in June, which re-avails the credit — in June.
+        invoice.paid_at = date(2026, 6, 15)
+        db_session.commit()
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2026, 7, 2))
+        regenerated = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert as_filed["itc_elg"]["itc_rev"][0]["iamt"] == 9000.00
+        assert regenerated == as_filed
+
+    def test_a_payment_inside_the_period_is_still_seen_by_its_return(
+        self, db_session, business, monkeypatch
+    ):
+        """Anchoring the payment must not blind the return to one it should see.
+
+        Paid before the 180 days ran out, so there is nothing for this period
+        to reverse — the same answer whenever it is asked.
+        """
+        self.purchase(
+            db_session,
+            business,
+            invoice_number="P-OCT",
+            invoice_date=date(2025, 10, 31),
+            period="2025-10",
+            igst=Decimal("9000.00"),
+            paid_at=date(2026, 2, 10),
+        )
+
+        monkeypatch.setattr(gst_calendar, "today_ist", lambda: date(2027, 6, 2))
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert document["itc_elg"]["itc_rev"][0]["iamt"] == 0.0
+
     def test_a_later_month_keeps_the_credit_it_earned(
         self, db_session, business, monkeypatch
     ):
