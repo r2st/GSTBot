@@ -210,6 +210,34 @@ export function hsnError(value) {
   return "";
 }
 
+/**
+ * Why an ARN is unacceptable, or "".
+ *
+ * Mirrors ARN_PATTERN in app/services/filing.py, including its deliberate
+ * looseness. The portal issues a 15-character reference, but the two ways to be
+ * wrong here are not symmetric: too strict locks a business out of recording a
+ * filing that genuinely happened, and the deadline alert for that period then
+ * never clears — so the product goes on nagging them about a return they have
+ * already filed. Only something plainly not an ARN is refused.
+ *
+ * The empty string is acceptable: the acknowledgement is often not to hand at
+ * the moment someone marks a return done, and it can be supplied later.
+ */
+export function arnError(value) {
+  const raw = String(value ?? "").replace(/\s+/g, "").toUpperCase();
+  if (raw === "") return "";
+  if (!/^[0-9A-Z]+$/.test(raw)) return "An ARN is letters and digits only.";
+  if (raw.length < 10 || raw.length > 32) {
+    return "That does not look like an ARN. The portal's acknowledgement shows a 15-character reference.";
+  }
+  return "";
+}
+
+/** An ARN as the server wants it: no spaces, upper case. "" when blank. */
+export function normalizeArn(value) {
+  return String(value ?? "").replace(/\s+/g, "").toUpperCase();
+}
+
 function lengthError(value, max, label) {
   const raw = String(value ?? "");
   if (raw.length > max) return `${label} is limited to ${max} characters.`;

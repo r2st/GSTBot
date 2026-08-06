@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonStats } from "../components/Skeleton";
@@ -6,7 +6,8 @@ import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
-import { currentPeriod, periodLabel, rupees } from "../lib/format";
+import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
+import { arnError, normalizeArn } from "../lib/validate";
 
 /** The last 12 filing periods, newest first. */
 function recentPeriodOptions(now = new Date()) {
@@ -39,6 +40,50 @@ function saveBlob(blob, filename) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+/**
+ * Whether *period* has finished, and so could have been filed at all.
+ *
+ * A return covers a whole month and the portal does not open it until that
+ * month is over — the server refuses a record for a period that has not ended.
+ * The picker opens on the current month, so without this check the first thing
+ * a user meets on this panel is a 422 for doing the obvious thing.
+ *
+ * String comparison, because `YYYY-MM` is zero-padded and therefore sorts in
+ * calendar order.
+ */
+function periodHasEnded(period, now = new Date()) {
+  return period < currentPeriod(now);
+}
+
+/** How a return stands: filed, overdue, or still inside its deadline. */
+function standingChip(item) {
+  if (item.filed) {
+    return item.filed_late
+      ? { tone: "warn", label: "Filed late" }
+      : { tone: "good", label: "Filed" };
+  }
+  if (item.days_until_due < 0) {
+    return { tone: "bad", label: `Overdue by ${Math.abs(item.days_until_due)}d` };
+  }
+  return { tone: "warn", label: `Due in ${item.days_until_due}d` };
+}
+
+function StatusRow({ item }) {
+  const chip = standingChip(item);
+  return (
+    <tr>
+      <td>{periodLabel(item.period)}</td>
+      <td>{RETURNS[item.return_type]?.label ?? item.return_type.toUpperCase()}</td>
+      <td>{dateLabel(item.due_date)}</td>
+      <td>
+        <span className={`chip chip-${chip.tone}`}>{chip.label}</span>
+      </td>
+      <td>{item.filed ? dateLabel(item.filed_on) : "—"}</td>
+      <td className="muted small">{item.arn || "—"}</td>
+    </tr>
+  );
 }
 
 function IssueRow({ issue }) {
@@ -74,6 +119,17 @@ export default function FilingPage() {
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showJson, setShowJson] = useState(false);
+  const [standings, setStandings] = useState(null);
+  const [arn, setArn] = useState("");
+  const [arnProblem, setArnProblem] = useState("");
+  // Bumped after a filing is recorded, to refetch a status the record changed.
+  const [statusToken, setStatusToken] = useState(0);
+  // The period and return type the picker is showing, readable from a callback
+  // that has been waiting on the network. Recording a filing rebuilds the whole
+  // return server-side, so it is slow enough for the picker to have moved on —
+  // and a confirmation naming the wrong month is worse than none.
+  const shown = useRef({ period, returnType });
+  shown.current = { period, returnType };
 
   const load = useCallback(async (target, kind, { signal } = {}) => {
     setLoading(true);
@@ -104,6 +160,24 @@ export default function FilingPage() {
     return () => controller.abort();
   }, [load, period, returnType]);
 
+  // The status table covers six completed periods at once, so it does not
+  // depend on the picker — only on a filing having been recorded. Its failure
+  // is deliberately not put in the banner: the page's job is preparing a
+  // return, and a status panel that could not load must not make the export
+  // buttons look broken.
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .filingStatus({ signal: controller.signal })
+      .then((data) => {
+        if (!controller.signal.aborted) setStandings(data);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setStandings(null);
+      });
+    return () => controller.abort();
+  }, [statusToken]);
+
   async function handleDownload(extension) {
     setBusy(true);
     setError("");
@@ -119,8 +193,43 @@ export default function FilingPage() {
     }
   }
 
+  async function handleRecordFiled(event) {
+    event.preventDefault();
+    const problem = arnError(arn);
+    setArnProblem(problem);
+    if (problem) return;
+
+    const target = shown.current;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const cleaned = normalizeArn(arn);
+      await api.recordFiled(target.returnType, {
+        period: target.period,
+        // Omitted rather than sent empty: on the server an absent ARN means
+        // "not to hand" and leaves a stored one alone, while an empty string is
+        // not an ARN at all.
+        ...(cleaned ? { arn: cleaned } : {}),
+      });
+      setArn("");
+      setNotice(
+        `Recorded ${RETURNS[target.returnType].label} for ${periodLabel(target.period)} as filed.`,
+      );
+      setStatusToken((token) => token + 1);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const validation = preview?.validation;
   const meta = RETURNS[returnType];
+  const alreadyFiled = standings?.items?.find(
+    (item) => item.period === period && item.return_type === returnType,
+  );
+  const recordable = periodHasEnded(period);
 
   return (
     <div className="page">
@@ -272,6 +381,63 @@ export default function FilingPage() {
           )}
 
           <section className="panel">
+            <h2>Record this filing</h2>
+            <p className="muted small">
+              GSTBot prepares the return; the portal is where it is submitted, and nothing
+              here can see that happen. Tell us once you have filed — otherwise the
+              deadline reminders keep treating {periodLabel(period)} as outstanding.
+            </p>
+            {!recordable && (
+              <p className="muted small">
+                {periodLabel(period)} has not ended yet, so there is nothing to record —
+                the portal does not open a return until the month it covers is over.
+              </p>
+            )}
+            {alreadyFiled?.filed && (
+              <p className="muted small">
+                Already recorded as filed on {dateLabel(alreadyFiled.filed_on)}
+                {alreadyFiled.arn ? ` (ARN ${alreadyFiled.arn})` : ""}. Recording it again
+                corrects the reference rather than filing twice.
+              </p>
+            )}
+            <form className="inline-form" onSubmit={handleRecordFiled}>
+              <label htmlFor="filing-arn">
+                <span>ARN (optional)</span>
+                <input
+                  id="filing-arn"
+                  type="text"
+                  value={arn}
+                  maxLength={40}
+                  placeholder="AA270426000000X"
+                  disabled={!recordable}
+                  aria-invalid={arnProblem ? "true" : undefined}
+                  aria-describedby={arnProblem ? "filing-arn-error" : undefined}
+                  onChange={(e) => {
+                    setArn(e.target.value);
+                    if (arnProblem) setArnProblem("");
+                  }}
+                />
+              </label>
+              <button
+                type="submit"
+                className="btn btn-primary"
+                disabled={busy || !recordable}
+              >
+                {busy ? "Working…" : `Mark ${meta.label} as filed`}
+              </button>
+            </form>
+            {arnProblem && (
+              <p className="field-error" id="filing-arn-error" role="alert">
+                {arnProblem}
+              </p>
+            )}
+            <p className="muted small">
+              You can leave the ARN blank now and add it later — recording the same period
+              again never clears a reference already saved.
+            </p>
+          </section>
+
+          <section className="panel">
             <h2>Validation</h2>
             {validation.issues.length === 0 ? (
               <p className="muted">
@@ -302,6 +468,36 @@ export default function FilingPage() {
             )}
           </section>
         </>
+      )}
+
+      {standings?.items?.length > 0 && (
+        <section className="panel">
+          <h2>Filing status</h2>
+          <p className="muted small">
+            The last six completed periods, as of {dateLabel(standings.as_of)}. The current
+            month is not listed — the portal does not open a return until the month it
+            covers is over.
+          </p>
+          <TableScroll label="Filing status by period">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Period</th>
+                  <th scope="col">Return</th>
+                  <th scope="col">Due</th>
+                  <th scope="col">Standing</th>
+                  <th scope="col">Filed on</th>
+                  <th scope="col">ARN</th>
+                </tr>
+              </thead>
+              <tbody>
+                {standings.items.map((item) => (
+                  <StatusRow key={`${item.period}-${item.return_type}`} item={item} />
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
+        </section>
       )}
     </div>
   );

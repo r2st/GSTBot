@@ -511,6 +511,27 @@ button.chip.is-active {
   align-items: center;
   margin: 0.75rem 0;
 }
+/* A label-and-submit pair that sits on one line on a desktop and stacks on a
+   phone. `align-items: end` keeps the button's baseline on the input's rather
+   than on the label above it. */
+.inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: end;
+  margin: 0.75rem 0;
+}
+.inline-form label {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 220px;
+  flex: 1 1 220px;
+}
+.inline-form label > span {
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
 /* The findings table is seven columns wide and must scroll inside the panel
    rather than pushing the page sideways on a phone. */
 .table-scroll {

@@ -251,6 +251,23 @@ export const api = {
   gstr1: (period, { signal } = {}) => request(`/filing/gstr1${query({ period })}`, { signal }),
   gstr3b: (period, { signal } = {}) => request(`/filing/gstr3b${query({ period })}`, { signal }),
 
+  /** Recent periods, with each return's due date and whether it was filed. */
+  filingStatus: ({ signal } = {}) => request("/filing/status", { signal }),
+
+  /**
+   * Record that a return was filed on the portal.
+   *
+   * Nothing in this product can observe a submission — the portal is where a
+   * return is actually filed — so the deadline alerting has only this to go on.
+   * A filing nobody records is a business that keeps being told it is late.
+   *
+   * Idempotent per period and return type: sending the same period again
+   * corrects the ARN or the date rather than filing twice. Omitting the ARN
+   * leaves a stored one alone, so it can be supplied later.
+   */
+  recordFiled: (returnType, payload) =>
+    request(`/filing/${returnType}/filed`, { method: "POST", body: payload }),
+
   /** The download URL for an export. Used as an href, not fetched. */
   exportUrl: (returnType, extension, period) =>
     `${BASE}/filing/export/${returnType}.${extension}${query({ period })}`,

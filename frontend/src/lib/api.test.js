@@ -494,3 +494,57 @@ describe("api", () => {
     });
   });
 });
+
+describe("filing records", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("asks for the recent filing standings", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ as_of: "2026-05-06", items: [] }));
+
+    await api.filingStatus();
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/v1/filing/status",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("posts a filing record against the return type in the path", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 1 }, { status: 201 }));
+
+    await api.recordFiled("gstr3b", { period: "2026-04", arn: "AA270426000000X" });
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/filing/gstr3b/filed");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({
+      period: "2026-04",
+      arn: "AA270426000000X",
+    });
+  });
+
+  it("sends a record with no ARN when the caller omits it", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 1 }, { status: 201 }));
+
+    await api.recordFiled("gstr1", { period: "2026-04" });
+
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({ period: "2026-04" });
+  });
+
+  it("surfaces the server's reason for refusing a record", async () => {
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "A filing date of 2027-01-01 is in the future." }, { status: 422 }),
+    );
+
+    await expect(api.recordFiled("gstr1", { period: "2026-04" })).rejects.toThrow(
+      "A filing date of 2027-01-01 is in the future.",
+    );
+  });
+});

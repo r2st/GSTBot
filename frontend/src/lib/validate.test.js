@@ -3,11 +3,13 @@ import {
   GSTR2B_EXTENSIONS,
   MAX_UPLOAD_MB,
   amountError,
+  arnError,
   fileError,
   gstinShapeError,
   hsnError,
   invoiceDateError,
   invoiceDraftErrors,
+  normalizeArn,
   normalizeGstin,
   partitionFiles,
   registrationErrors,
@@ -409,5 +411,60 @@ describe("registrationErrors", () => {
   it("enforces the server's password minimum", () => {
     expect(registrationErrors({ ...good, password: "short" }).password).toContain("8 characters");
     expect(registrationErrors({ ...good, password: "12345678" }).password).toBeUndefined();
+  });
+});
+
+
+describe("arnError", () => {
+  it("accepts the portal's 15-character acknowledgement", () => {
+    expect(arnError("AA270426000000X")).toBe("");
+  });
+
+  it("accepts one typed with the spaces the acknowledgement prints", () => {
+    expect(arnError("AA2704 26000000 X")).toBe("");
+  });
+
+  it("accepts a lower-cased one, since the server folds it", () => {
+    expect(arnError("aa270426000000x")).toBe("");
+  });
+
+  it("treats a blank field as acceptable rather than missing", () => {
+    // The acknowledgement is often not to hand when someone marks a return
+    // done, and refusing the record without it would leave the deadline alert
+    // firing for a return that is genuinely filed.
+    for (const blank of ["", "   ", null, undefined]) {
+      expect(arnError(blank)).toBe("");
+    }
+  });
+
+  it("refuses punctuation, which no ARN carries", () => {
+    expect(arnError("AA2704-2600-0000")).toContain("letters and digits");
+  });
+
+  it("refuses something far too short or too long to be one", () => {
+    expect(arnError("AB12")).toContain("does not look like an ARN");
+    expect(arnError("A".repeat(33))).toContain("does not look like an ARN");
+  });
+
+  it("stays as loose as the server's own pattern at both ends", () => {
+    // Mirrors ARN_PATTERN in app/services/filing.py. Too strict is the harmful
+    // direction: it locks a business out of recording a filing that happened.
+    expect(arnError("A".repeat(10))).toBe("");
+    expect(arnError("A".repeat(32))).toBe("");
+    expect(arnError("A".repeat(9))).not.toBe("");
+  });
+});
+
+describe("normalizeArn", () => {
+  it("strips whitespace and upper-cases", () => {
+    expect(normalizeArn(" aa2704 26000000 x ")).toBe("AA270426000000X");
+  });
+
+  it("gives the empty string for nothing, so a caller can omit the field", () => {
+    // An absent ARN means "not to hand" on the server and leaves a stored one
+    // alone; an empty string is not an ARN and would be refused.
+    expect(normalizeArn("")).toBe("");
+    expect(normalizeArn(null)).toBe("");
+    expect(normalizeArn("   ")).toBe("");
   });
 });

@@ -6,6 +6,12 @@ import FilingPage from "./FilingPage";
 
 const PERIOD = "2026-04";
 
+/** The month before this one, which is the newest period that can be filed. */
+function previousPeriod(now = new Date()) {
+  const date = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function validation(overrides = {}) {
   const issues = overrides.issues ?? [];
   return {
@@ -61,14 +67,60 @@ function gstr3b(overrides = {}) {
   };
 }
 
+function standing(overrides = {}) {
+  return {
+    period: PERIOD,
+    return_type: "gstr1",
+    due_date: "2026-05-11",
+    filed: false,
+    filed_on: null,
+    arn: null,
+    filed_late: false,
+    days_until_due: 5,
+    ...overrides,
+  };
+}
+
+function filingStatus(items = []) {
+  return { as_of: "2026-05-06", items };
+}
+
 /**
  * Route by URL rather than by call order: the page fires a preview fetch on
  * mount and again on every period or return-type change, so a queue of
  * responses would drift the moment a test changes one of them.
  */
-function mockApi({ gstr1: one = gstr1(), gstr3b: three = gstr3b(), status = 200 } = {}) {
-  global.fetch = vi.fn(async (url) => {
-    if (String(url).includes("/filing/export/")) {
+function mockApi({
+  gstr1: one = gstr1(),
+  gstr3b: three = gstr3b(),
+  status = 200,
+  filingStatus: statusBody = filingStatus(),
+  filingStatusStatus = 200,
+  onRecordFiled,
+  recordFailure,
+} = {}) {
+  global.fetch = vi.fn(async (url, options) => {
+    const href = String(url);
+
+    if (href.includes("/filing/status")) {
+      return {
+        ok: filingStatusStatus < 400,
+        status: filingStatusStatus,
+        statusText: filingStatusStatus < 400 ? "OK" : "Error",
+        text: async () => JSON.stringify(statusBody),
+      };
+    }
+    if (/\/filing\/gstr(1|3b)\/filed$/.test(href)) {
+      onRecordFiled?.({ url: href, body: JSON.parse(options?.body ?? "{}") });
+      return {
+        ok: !recordFailure,
+        status: recordFailure?.status ?? 201,
+        statusText: recordFailure ? "Error" : "Created",
+        text: async () =>
+          JSON.stringify(recordFailure?.body ?? { id: 1, period: PERIOD }),
+      };
+    }
+    if (href.includes("/filing/export/")) {
       return {
         ok: true,
         status: 200,
@@ -87,6 +139,21 @@ function mockApi({ gstr1: one = gstr1(), gstr3b: three = gstr3b(), status = 200 
       text: async () => JSON.stringify(body),
     };
   });
+}
+
+/**
+ * Step the picker back to the month before this one and return it.
+ *
+ * The picker opens on the current month, and a return for a month that has not
+ * ended cannot be recorded — the portal does not open it until the month is
+ * over, and the server refuses the record. So every test about recording a
+ * filing has to be on a completed period first.
+ */
+async function selectCompletedPeriod(user) {
+  const select = await screen.findByLabelText("Period");
+  const previous = select.options[1].value;
+  await user.selectOptions(select, previous);
+  return previous;
 }
 
 function renderPage() {
@@ -310,6 +377,244 @@ describe("FilingPage", () => {
     );
   });
 
+  describe("recording that a return was filed", () => {
+    /**
+     * Nothing in this product can observe a submission to the portal, so the
+     * deadline alerting has only this record to go on. Until it existed there
+     * was no way to say so from the app at all — the endpoint was live and
+     * unreachable — which left every business permanently overdue on returns
+     * they had already filed.
+     */
+    const markFiled = () => screen.findByRole("button", { name: /Mark GSTR-1 as filed/i });
+
+    it("sends the period and return type the picker is showing", async () => {
+      const user = userEvent.setup();
+      const onRecordFiled = vi.fn();
+      mockApi({ onRecordFiled });
+      renderPage();
+
+      const period = await selectCompletedPeriod(user);
+      await user.click(await markFiled());
+
+      await waitFor(() => expect(onRecordFiled).toHaveBeenCalled());
+      const { url, body } = onRecordFiled.mock.calls[0][0];
+      expect(url).toContain("/filing/gstr1/filed");
+      expect(body.period).toBe(period);
+    });
+
+    it("records the return type the toggle is on, not the one it started on", async () => {
+      const user = userEvent.setup();
+      const onRecordFiled = vi.fn();
+      mockApi({ onRecordFiled });
+      renderPage();
+
+      await loaded();
+      await selectCompletedPeriod(user);
+      await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+      await user.click(await screen.findByRole("button", { name: /Mark GSTR-3B as filed/i }));
+
+      await waitFor(() => expect(onRecordFiled).toHaveBeenCalled());
+      expect(onRecordFiled.mock.calls[0][0].url).toContain("/filing/gstr3b/filed");
+    });
+
+    it("sends an ARN when one is typed, upper-cased and without spaces", async () => {
+      const user = userEvent.setup();
+      const onRecordFiled = vi.fn();
+      mockApi({ onRecordFiled });
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      await user.type(
+        await screen.findByLabelText(/ARN/i),
+        "aa2704 26000000 x",
+      );
+      await user.click(await markFiled());
+
+      await waitFor(() => expect(onRecordFiled).toHaveBeenCalled());
+      expect(onRecordFiled.mock.calls[0][0].body.arn).toBe("AA270426000000X");
+    });
+
+    it("omits the ARN entirely rather than sending an empty one", async () => {
+      const user = userEvent.setup();
+      const onRecordFiled = vi.fn();
+      mockApi({ onRecordFiled });
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      await user.click(await markFiled());
+
+      await waitFor(() => expect(onRecordFiled).toHaveBeenCalled());
+      // On the server an absent ARN means "not to hand" and leaves a stored one
+      // alone; an empty string is not an ARN and would be refused.
+      expect(onRecordFiled.mock.calls[0][0].body).not.toHaveProperty("arn");
+    });
+
+    it("refuses something that is plainly not an ARN before sending it", async () => {
+      const user = userEvent.setup();
+      const onRecordFiled = vi.fn();
+      mockApi({ onRecordFiled });
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      await user.type(await screen.findByLabelText(/ARN/i), "AB12");
+      await user.click(await markFiled());
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(/does not look like an ARN/i);
+      expect(onRecordFiled).not.toHaveBeenCalled();
+    });
+
+    it("confirms the filing by naming its own period", async () => {
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      await user.click(await markFiled());
+
+      expect(await screen.findByRole("status")).toHaveTextContent(/Recorded GSTR-1 for/i);
+    });
+
+    it("refetches the status so the panel stops calling it outstanding", async () => {
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await selectCompletedPeriod(user);
+      const before = global.fetch.mock.calls.filter((call) =>
+        String(call[0]).includes("/filing/status"),
+      ).length;
+
+      await user.click(await markFiled());
+
+      await waitFor(() => {
+        const after = global.fetch.mock.calls.filter((call) =>
+          String(call[0]).includes("/filing/status"),
+        ).length;
+        expect(after).toBeGreaterThan(before);
+      });
+    });
+
+    it("reports a refusal from the server rather than claiming success", async () => {
+      const user = userEvent.setup();
+      mockApi({
+        recordFailure: {
+          status: 422,
+          body: { detail: "2026-04 could not have been filed on 2026-04-02." },
+        },
+      });
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      await user.click(await markFiled());
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "2026-04 could not have been filed on 2026-04-02.",
+      );
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    });
+
+    it("does not offer to record a month that has not ended", async () => {
+      // The picker opens on the current month, and the server refuses a record
+      // for a period the portal has not opened yet. Left enabled, the first
+      // thing anyone met on this panel was a 422 for doing the obvious thing.
+      mockApi();
+      renderPage();
+
+      await loaded();
+      expect(await markFiled()).toBeDisabled();
+      expect(screen.getByLabelText(/ARN/i)).toBeDisabled();
+      expect(screen.getByText(/has not ended yet, so there is nothing to record/i))
+        .toBeInTheDocument();
+    });
+
+    it("offers it again as soon as a completed period is picked", async () => {
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await selectCompletedPeriod(user);
+
+      expect(await markFiled()).toBeEnabled();
+      expect(
+        screen.queryByText(/has not ended yet, so there is nothing to record/i),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the filing status panel", () => {
+    it("shows each period's standing, due date and reference", async () => {
+      mockApi({
+        filingStatus: filingStatus([
+          standing({
+            filed: true,
+            filed_on: "2026-05-09",
+            arn: "AA270426000000X",
+            days_until_due: 2,
+          }),
+          standing({ return_type: "gstr3b", due_date: "2026-05-20", days_until_due: -4 }),
+        ]),
+      });
+      renderPage();
+
+      const table = await screen.findByRole("region", { name: "Filing status by period" });
+      expect(within(table).getByText("Filed")).toBeInTheDocument();
+      expect(within(table).getByText("AA270426000000X")).toBeInTheDocument();
+      expect(within(table).getByText("Overdue by 4d")).toBeInTheDocument();
+    });
+
+    it("marks a return filed after its due date as late rather than on time", async () => {
+      mockApi({
+        filingStatus: filingStatus([
+          standing({ filed: true, filed_on: "2026-05-19", filed_late: true }),
+        ]),
+      });
+      renderPage();
+
+      const table = await screen.findByRole("region", { name: "Filing status by period" });
+      expect(within(table).getByText("Filed late")).toBeInTheDocument();
+      expect(within(table).queryByText("Filed")).not.toBeInTheDocument();
+    });
+
+    it("says a period is already recorded rather than offering it blind", async () => {
+      mockApi({
+        filingStatus: filingStatus([
+          standing({
+            period: previousPeriod(),
+            filed: true,
+            filed_on: "2026-05-09",
+            arn: "AA270426000000X",
+          }),
+        ]),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      expect(
+        await screen.findByText(/Already recorded as filed on/i),
+      ).toHaveTextContent("AA270426000000X");
+    });
+
+    it("keeps the export working when the status panel cannot load", async () => {
+      // The page's job is preparing a return. A status panel that 500s must not
+      // make the export buttons look broken, or put a banner over a page that
+      // is working.
+      mockApi({ filingStatusStatus: 500 });
+      renderPage();
+
+      await loaded();
+      expect(
+        screen.getByRole("button", { name: /Download GSTR-1 JSON/i }),
+      ).toBeEnabled();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("region", { name: "Filing status by period" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
   describe("when answers come back out of order", () => {
     /**
      * A fetch that hands back the levers instead of resolving on its own.
@@ -323,6 +628,19 @@ describe("FilingPage", () => {
       global.fetch = vi.fn(
         (url, options = {}) =>
           new Promise((resolve, reject) => {
+            // The filing-status panel fetches independently of the picker, so
+            // it is answered immediately and kept out of `pending`. The
+            // ordering under test is between the two *previews*; queueing an
+            // unrelated third request here would only shift every index.
+            if (String(url).includes("/filing/status")) {
+              resolve({
+                ok: true,
+                status: 200,
+                statusText: "OK",
+                text: async () => JSON.stringify(filingStatus()),
+              });
+              return;
+            }
             pending.push({
               url: String(url),
               signal: options.signal,
