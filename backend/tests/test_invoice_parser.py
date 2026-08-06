@@ -591,3 +591,126 @@ class TestADateNoInvoiceCouldCarry:
         parsed = validate(self._dated(None))
         assert any("No invoice date found" in w for w in parsed.warnings)
         assert not any("outside the span" in w for w in parsed.warnings)
+
+
+# --------------------------------------------------------------------------
+# The labels a real document puts in front of a number and a date
+# --------------------------------------------------------------------------
+
+class TestTheInvoiceNumberSurvivesItsLabel:
+    """A prefixed number must come back whole, whatever the label looks like.
+
+    These all used to come back as the tail alone — "INV-001" read as "001" —
+    because a label the pattern could not match did not end the search. It
+    slid on and matched the ``inv`` alternative against the *value*, taking
+    the hyphen inside the number as the separator it had been looking for.
+
+    A truncated number is worse than a missing one and there is nothing
+    downstream to catch it. It goes into GSTR-1 as ``inum``, which is the
+    customer's evidence for their own credit; reconciliation matches a
+    GSTR-2B row on it, so the supplier's real invoice reports as missing from
+    the 2B; and duplicate detection keys on it, so the same document uploaded
+    twice no longer looks like the same document.
+    """
+
+    @staticmethod
+    def _number(line: str) -> str | None:
+        return parse_heuristic(f"TAX INVOICE\n{line}\nTaxable Value: 100.00\n").invoice_number
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Invoice No: INV-001",
+            "Invoice No.: INV-001",
+            "Invoice No. INV-001",
+            "Invoice No INV-001",
+            "Invoice Number: INV-001",
+            "Invoice Number INV-001",
+            "Invoice #: INV-001",
+            "Invoice # INV-001",
+            "Invoice No.:INV-001",
+            "Invoice No :- INV-001",
+            "Invoice No -: INV-001",
+            "INVOICE NO. : INV-001",
+            "Inv No.: INV-001",
+            "Inv. No.: INV-001",
+            "Bill No.: INV-001",
+            "Bill No: INV-001",
+            "Invoice: INV-001",
+        ],
+    )
+    def test_a_prefixed_number_is_not_truncated_to_its_digits(self, line):
+        assert self._number(line) == "INV-001"
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            # A slash-separated series number, which is the other common shape.
+            ("Invoice No.: TS/26-27/119", "TS/26-27/119"),
+            ("Invoice No.: INV/2026/007", "INV/2026/007"),
+            # The prefix is itself a label word — the case most likely to be
+            # eaten by a pattern that searches for one.
+            ("Invoice No.: BILL-99", "BILL-99"),
+            ("Invoice No.: 2026-0042", "2026-0042"),
+        ],
+    )
+    def test_a_number_that_looks_like_a_label_is_still_read_whole(self, line, expected):
+        assert self._number(line) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # No label at all. Leaving the field empty is the point: a bare
+            # "INV-001" in the body used to parse as the number "001", and a
+            # plausible wrong number is not a state a reviewer can see is
+            # wrong. An empty one carries "No invoice number found".
+            "TAX INVOICE\nINV-001\n",
+            # The letterhead under a bare "TAX INVOICE" heading is not a number.
+            "TAX INVOICE\nACME STEELS PVT LTD\n",
+            "Bill To: BUILDCO LIMITED\n",
+        ],
+    )
+    def test_nothing_is_invented_where_there_is_no_label(self, text):
+        assert parse_heuristic(text).invoice_number is None
+
+
+class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
+    @staticmethod
+    def _date(text: str):
+        return parse_heuristic(text).invoice_date
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Invoice Date: 15/04/2026",
+            "Invoice Date.: 15/04/2026",
+            "Invoice Date : 15/04/2026",
+            "INVOICE DATE.:15/04/2026",
+            "Date of Invoice: 15/04/2026",
+            "Bill Date: 15/04/2026",
+            "Date: 15/04/2026",
+            "Dated : 15.04.2026",
+        ],
+    )
+    def test_the_label_may_be_written_any_of_the_usual_ways(self, line):
+        assert self._date(f"TAX INVOICE\n{line}\n") == date(2026, 4, 15)
+
+    def test_a_due_date_printed_first_does_not_become_the_invoice_date(self):
+        """The period is derived from this field, so the wrong date is a wrong return.
+
+        A payment due date is normally printed *above* the invoice date, and a
+        bare ``date`` label matches "Due Date" as readily as "Invoice Date" —
+        so the leftmost match was the due date. The invoice then filed under
+        the month it had to be paid in rather than the month it was issued in.
+        """
+        parsed = parse_heuristic(
+            "TAX INVOICE\n"
+            "Due Date: 15/05/2026\n"
+            "Invoice Date: 15/04/2026\n"
+        )
+        assert parsed.invoice_date == date(2026, 4, 15)
+        assert parsed.period == "2026-04"
+
+    def test_a_due_date_alone_is_still_read_rather_than_dropped(self):
+        """The loose label stays a fallback: some documents only say "Date"."""
+        assert self._date("TAX INVOICE\nDue Date: 15/05/2026\n") == date(2026, 5, 15)

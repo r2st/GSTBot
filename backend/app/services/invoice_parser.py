@@ -331,13 +331,54 @@ def _normalize_rate(value: object) -> Decimal | None:
 # Heuristic extractor
 # --------------------------------------------------------------------------
 
+# "Invoice No.: INV-001" and the dozen other ways a document says the same
+# thing. Two details are load-bearing, both learned from the same failure.
+#
+# The separator is a *run* rather than one character. Invoices write "No.:",
+# "No :-", "NO. : " and a bare space, and a pattern accepting exactly one
+# punctuation mark matched none of them. That alone would only lose the number
+# — but losing it here is not what happened, because `search` does not stop at
+# a label that failed. It slid down the line and matched the `inv` alternative
+# against the *value*: "Invoice No.: INV-001" found "INV", took the hyphen as
+# its separator, and returned "001". The number was not missing, it was
+# silently wrong, and a wrong invoice number is the one field that cannot be
+# caught downstream — it files into GSTR-1 as the customer's evidence, it is
+# what reconciliation matches a GSTR-2B row on, and it is what duplicate
+# detection keys on. All three fail quietly and separately.
+#
+# So the bare hyphen is only a separator *after* an explicit "no"/"number"/
+# "#" token, which is what establishes that a label was read at all. Without
+# one, "INV-001" standing alone in the text no longer parses as the number
+# "001" — it does not parse, and an empty field with a warning on it is a
+# reviewable state in a way that a plausible wrong number is not.
 _INVOICE_NO_PATTERN = re.compile(
-    r"(?:invoice|inv|bill|tax\s+invoice)\s*(?:no|number|#|num)?\s*[:.\-#]\s*([A-Za-z0-9\-/]{2,30})",
+    r"(?:tax\s+invoice|invoice|inv|bill)[\s.]*"
+    r"(?:(?:no|number|num|#)[\s:.\-#]*|[:.#][\s:.\-#]*)"
+    r"([A-Za-z0-9][A-Za-z0-9\-/]{1,29})",
     re.IGNORECASE,
 )
+# A date, in any of the shapes :func:`to_date` knows how to read.
+_DATE_VALUE = r"(\d{1,4}[-/.\s][A-Za-z0-9]{1,9}[-/.\s]\d{2,4})"
+
+# Two patterns rather than one, tried in this order, because an invoice prints
+# more than one date and only one of them decides the filing period.
+#
+# A bare "date" label matches "Due Date" as happily as "Invoice Date" — and a
+# payment due date is normally printed *above* the invoice date, so the
+# leftmost match is the wrong one. The invoice then files under the month it
+# has to be paid in rather than the month it was issued in: one period late,
+# in a return that has already been filed by the time anyone reconciles it.
+#
+# So an explicit invoice-date label wins wherever the document carries one, and
+# the loose label is the fallback for documents that only say "Date:". The
+# separator is a run for the same reason as in the invoice number above —
+# "Date.:" and "DATE. : " are both printed.
 _DATE_PATTERN = re.compile(
-    r"(?:invoice\s*date|date|dated)\s*[:.\-]?\s*"
-    r"(\d{1,4}[-/.\s][A-Za-z0-9]{1,9}[-/.\s]\d{2,4})",
+    r"(?:invoice\s*date|date\s+of\s+invoice|bill\s*date)[\s:.\-]*" + _DATE_VALUE,
+    re.IGNORECASE,
+)
+_LOOSE_DATE_PATTERN = re.compile(
+    r"(?:dated|date)[\s:.\-]*" + _DATE_VALUE,
     re.IGNORECASE,
 )
 _AMOUNT = r"([0-9][0-9,]*\.?\d{0,2})"
@@ -401,7 +442,7 @@ def parse_heuristic(text: str) -> ParsedInvoice:
 
     if match := _INVOICE_NO_PATTERN.search(text):
         result.invoice_number = _clean_str(match.group(1), 64)
-    if match := _DATE_PATTERN.search(text):
+    if match := (_DATE_PATTERN.search(text) or _LOOSE_DATE_PATTERN.search(text)):
         result.invoice_date = to_date(match.group(1))
     if match := _HSN_PATTERN.search(text):
         result.hsn_code = match.group(1)
