@@ -313,8 +313,48 @@ describe("SuppliersPage", () => {
 
     const exposure = (await screen.findByRole("heading", { name: "Exposure right now" }))
       .nextElementSibling;
-    expect(within(exposure).getByText("₹9000.00")).toBeInTheDocument();
+    expect(within(exposure).getByText("₹9,000.00")).toBeInTheDocument();
     expect(within(exposure).getByText("2")).toBeInTheDocument();
+  });
+
+  it("groups the credit at risk the way an Indian business reads it", async () => {
+    // The API sends this as a decimal string, and this figure alone used to be
+    // rendered with a bare ₹ in front of it rather than through `rupees` —
+    // "₹180000.00" on the one screen whose job is saying how much credit a
+    // single supplier is putting at risk. Lakh grouping is why `rupees` exists.
+    const user = userEvent.setup();
+    mockApi({ detail: detail({ exposure: {
+      invoice_count: 24,
+      tax_total: "900000.00",
+      tax_at_risk: "180000.00",
+      unpaid_count: 2,
+    } }) });
+    renderPage();
+
+    await loaded();
+    await user.click(screen.getByRole("button", { name: "Details" }));
+
+    const exposure = (await screen.findByRole("heading", { name: "Exposure right now" }))
+      .nextElementSibling;
+    expect(within(exposure).getByText("₹1,80,000.00")).toBeInTheDocument();
+  });
+
+  it("shows a zero rather than a bare currency sign when there is no figure", async () => {
+    const user = userEvent.setup();
+    mockApi({ detail: detail({ exposure: {
+      invoice_count: 0,
+      tax_total: "0.00",
+      tax_at_risk: null,
+      unpaid_count: 0,
+    } }) });
+    renderPage();
+
+    await loaded();
+    await user.click(screen.getByRole("button", { name: "Details" }));
+
+    const exposure = (await screen.findByRole("heading", { name: "Exposure right now" }))
+      .nextElementSibling;
+    expect(within(exposure).getByText("₹0.00")).toBeInTheDocument();
   });
 
   it("closes the detail panel again", async () => {

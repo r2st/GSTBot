@@ -4,7 +4,7 @@ import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
-import { dateLabel, periodLabel } from "../lib/format";
+import { dateLabel, periodLabel, rupees } from "../lib/format";
 
 const RISK = {
   low: { label: "Low risk", tone: "good" },
@@ -110,7 +110,13 @@ function SupplierDetail({ supplier, onClose }) {
         </div>
         <div>
           <span className="muted">Credit at risk</span>
-          <strong>₹{supplier.exposure.tax_at_risk}</strong>
+          {/* Through the formatter like every other figure on the product.
+              The API sends this as a decimal string, so a bare ₹ in front of
+              it rendered "₹180000.00" — no lakh grouping, on the one screen
+              whose job is saying how much credit one supplier is putting at
+              risk. It also rendered a lone "₹" when the field was absent,
+              where `rupees` gives ₹0.00. */}
+          <strong>{rupees(supplier.exposure.tax_at_risk)}</strong>
         </div>
         <div>
           <span className="muted">Unpaid</span>
