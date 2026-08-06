@@ -175,6 +175,115 @@ def test_rounding_within_tolerance_is_not_a_mismatch():
     assert categories(result) == [MatchCategory.MATCHED]
 
 
+class TestAnInvoiceWithNoGrandTotalOnIt:
+    """A total the parser never found is not a difference with the supplier.
+
+    ``total_value`` is the only compared field that is not null and not
+    reliable. The column defaults to zero and the parser only fills it when the
+    document carried a total-shaped label, so an invoice whose total was printed
+    as "Amount Payable" is stored with a total of zero while every other figure
+    on it is right. The 2B side, meanwhile, derives its own when the portal row
+    does not carry one.
+
+    Compared literally, that zero is a difference of the whole invoice value
+    against a row nobody disputes — the worst false positive this engine can
+    produce. The user is sent to argue with a supplier about an invoice that
+    agrees to the paisa, the row is stamped MISMATCHED, and the supplier's
+    compliance score takes a mismatch that never happened.
+    """
+
+    def test_a_missing_books_total_does_not_invent_a_mismatch(self):
+        result = reconciliation.match(
+            [book(total_value=Decimal("0.00"))], [portal()], period=PERIOD
+        )
+
+        (finding,) = result.findings
+        assert finding.category is MatchCategory.MATCHED
+        assert finding.differences == []
+
+    def test_the_credit_on_it_is_still_claimed_in_full(self):
+        """The consequence that costs money: a mismatch is not a cap, but a
+        MISMATCHED row is what a business chases instead of claiming."""
+        result = reconciliation.match(
+            [book(total_value=Decimal("0.00"))], [portal()], period=PERIOD
+        )
+
+        assert result.itc_eligible == Decimal("81000.00")
+        assert result.itc_at_risk == Decimal("0.00")
+
+    def test_a_missing_portal_total_is_derived_the_same_way(self):
+        result = reconciliation.match(
+            [book()], [portal(total_value=Decimal("0.00"))], period=PERIOD
+        )
+
+        assert categories(result) == [MatchCategory.MATCHED]
+
+    def test_neither_side_having_one_still_matches(self):
+        result = reconciliation.match(
+            [book(total_value=Decimal("0.00"))],
+            [portal(total_value=Decimal("0.00"))],
+            period=PERIOD,
+        )
+
+        assert categories(result) == [MatchCategory.MATCHED]
+
+    def test_a_total_that_is_genuinely_wrong_is_still_a_mismatch(self):
+        """Derived only when absent. A present total is compared as it stands."""
+        result = reconciliation.match(
+            [book(total_value=Decimal("500000.00"))], [portal()], period=PERIOD
+        )
+
+        (finding,) = result.findings
+        assert finding.category is MatchCategory.MISMATCHED
+        assert [d.field for d in finding.differences] == ["total_value"]
+
+    def test_a_derived_total_still_catches_a_real_tax_difference(self):
+        """Filling the gap must not paper over the difference underneath it.
+
+        Each side derives from its own figures, so when neither carries a total
+        and the tax disagrees, the derived totals disagree too — the difference
+        is reported on both fields rather than swallowed.
+        """
+        result = reconciliation.match(
+            [book(total_value=Decimal("0.00"))],
+            [portal(igst=Decimal("72000.00"), total_value=Decimal("0.00"))],
+            period=PERIOD,
+        )
+
+        (finding,) = result.findings
+        assert finding.category is MatchCategory.MISMATCHED
+        assert {d.field for d in finding.differences} == {"igst", "total_value"}
+
+    def test_a_stated_portal_total_still_anchors_the_comparison(self):
+        """The books derive; the portal's own figure is used as it stands.
+
+        The books are short ₹9,000 of IGST, so the total derived from them is
+        short by the same ₹9,000 against the total the portal actually states.
+        Deriving the missing side does not make the invoice agree — it only
+        stops a *present* agreement being read as a disagreement.
+        """
+        result = reconciliation.match(
+            [book(total_value=Decimal("0.00"), igst=Decimal("72000.00"))],
+            [portal()],
+            period=PERIOD,
+        )
+
+        (finding,) = result.findings
+        assert finding.category is MatchCategory.MISMATCHED
+        assert {d.field for d in finding.differences} == {"igst", "total_value"}
+
+    def test_the_supplier_is_not_scored_for_a_mismatch_that_never_happened(
+        self, db_session, business
+    ):
+        """The lasting damage: the score feeds the risk level and the provision."""
+        result = reconciliation.match(
+            [book(total_value=Decimal("0.00"))], [portal()], period=PERIOD
+        )
+
+        assert result.counts()[MatchCategory.MISMATCHED] == 0
+        assert result.counts()[MatchCategory.MATCHED] == 1
+
+
 def test_tolerance_of_zero_surfaces_every_paisa():
     result = reconciliation.match(
         [book()],

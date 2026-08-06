@@ -232,14 +232,45 @@ def _sum_tax(record: GSTR2BRecord) -> Decimal:
     return record.total_tax
 
 
+def _compared_value(side: Invoice | GSTR2BRecord, name: str) -> Decimal:
+    """One side's figure for *name*, with the invoice value derived if absent.
+
+    ``total_value`` is the only field here that is not null and not reliable. It
+    defaults to zero on both sides and is only filled when a grand total was
+    actually found — the books' copy comes from the parser, which writes it only
+    when the document carried a total-shaped label, so an invoice whose total was
+    printed as "Amount Payable" is stored with a total of zero while every other
+    figure on it is right.
+
+    Compared literally, that zero is a difference of the whole invoice value
+    against a portal row that *does* carry one, and the invoice is reported
+    MISMATCHED on the single field neither side disputes. It is the worst shape
+    of false positive this engine can produce: the user is sent to argue with a
+    supplier about an invoice that agrees to the paisa, the row's status is
+    rewritten to MISMATCHED, and the supplier's compliance score takes a
+    mismatch that never happened — which then feeds the risk level and the
+    recommended provision.
+
+    So a missing total is filled the way :func:`app.services.filing._invoice_value`
+    fills it, from the figures that are always there. A total that is genuinely
+    wrong still differs, because it is present and compared as it stands.
+    """
+    value = getattr(side, name, None) or ZERO
+    if name == "total_value" and value <= ZERO:
+        taxable = getattr(side, "taxable_value", None) or ZERO
+        tax = side.total_tax or ZERO
+        return taxable + tax
+    return value
+
+
 def _differences(
     invoice: Invoice, record: GSTR2BRecord, tolerance: Decimal
 ) -> list[Difference]:
     """Fields where the two sides differ by more than *tolerance*."""
     found: list[Difference] = []
     for name in COMPARED_FIELDS:
-        books = getattr(invoice, name) or ZERO
-        portal = getattr(record, name) or ZERO
+        books = _compared_value(invoice, name)
+        portal = _compared_value(record, name)
         if abs(books - portal) > tolerance:
             found.append(Difference(field=name, books=books, gstr2b=portal))
     return found
