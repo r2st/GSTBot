@@ -314,16 +314,37 @@ function invoiceDraftWarnings(draft, errors) {
 }
 
 /**
+ * The loosest shape that is still an address: something, an @, a dotted host.
+ *
+ * Deliberately a subset of what the server enforces — it validates with
+ * pydantic's `EmailStr`, which is stricter — so this can only ever refuse
+ * addresses the server would refuse too. Anything cleverer is how a legitimate
+ * address gets rejected by a regex, and the server remains the authority.
+ */
+const EMAIL_SHAPE = /^\S+@\S+\.\S+$/;
+
+/**
  * Why a registration form cannot be submitted, or "" — keyed by field.
  *
- * The password rule matches the server's minimum. Email is left to the input's
- * own `type="email"`, which is what the browser and the server both key on.
+ * The password rule matches the server's minimum.
+ *
+ * Email is checked here rather than left to the input's own `type="email"`,
+ * because the form sets `noValidate` — which turns that check off along with
+ * the required-field bubbles it was disabled for. The sign-in path noticed and
+ * checks the field itself; this one did not, so registering with the email box
+ * empty was a round trip that came back as a generic 400 with nothing pointing
+ * at the field that caused it. On the one form a new user has to get through,
+ * that is the difference between a corrected typo and an abandoned signup.
  */
 export function registrationErrors(form) {
   const errors = {};
   const gstin = gstinShapeError(form.gstin);
   if (!normalizeGstin(form.gstin)) errors.gstin = "A GSTIN is required to register.";
   else if (gstin) errors.gstin = gstin;
+
+  const email = String(form.email ?? "").trim();
+  if (!email) errors.email = "Enter your email.";
+  else if (!EMAIL_SHAPE.test(email)) errors.email = "That does not look like an email address.";
 
   if (!String(form.legal_name ?? "").trim()) {
     errors.legal_name = "Legal name is required — it is what appears on your returns.";

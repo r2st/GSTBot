@@ -341,5 +341,83 @@ describe("LoginPage", () => {
       expect(registered()).toBe(false);
       expect(await screen.findByText("Checksum does not match")).toBeInTheDocument();
     });
+
+    it("asks for the email when registering, not just when signing in", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await goToRegister(user);
+
+      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText("Legal name"), "Acme Supplies");
+      await user.type(screen.getByLabelText("Password"), "supersecret123");
+      await user.click(screen.getByRole("button", { name: "Create account" }));
+
+      // `noValidate` turns off `type="email"` along with the required bubble,
+      // so an empty box used to be sent and came back as a generic 400.
+      expect(await screen.findByText("Enter your email.")).toBeInTheDocument();
+      expect(registered()).toBe(false);
+    });
+
+    it("says so when the email is not shaped like one", async () => {
+      const user = userEvent.setup();
+      renderPage();
+      await goToRegister(user);
+
+      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText("Legal name"), "Acme Supplies");
+      await user.type(screen.getByLabelText("Email"), "owner@acme");
+      await user.type(screen.getByLabelText("Password"), "supersecret123");
+      await user.click(screen.getByRole("button", { name: "Create account" }));
+
+      expect(await screen.findByText(/does not look like an email/)).toBeInTheDocument();
+      expect(registered()).toBe(false);
+    });
+  });
+
+  describe("switching between the two tabs", () => {
+    it("does not leave a registration complaint on the sign-in form", async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+      await user.type(screen.getByLabelText("Password"), "short");
+      await user.click(screen.getByRole("button", { name: "Create account" }));
+      expect(await screen.findByText("Use at least 8 characters.")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("tab", { name: "Sign in" }));
+
+      // The password box survives the switch, so the message attached to it
+      // did too — telling someone whose existing password is shorter than
+      // eight characters that it is why they cannot sign in.
+      expect(screen.queryByText("Use at least 8 characters.")).not.toBeInTheDocument();
+    });
+
+    it("does not leave a sign-in complaint on the registration form", async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(screen.getByRole("button", { name: "Sign in" }));
+      expect(await screen.findByText("Enter your email.")).toBeInTheDocument();
+
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+      expect(screen.queryByText("Enter your email.")).not.toBeInTheDocument();
+    });
+
+    it("drops a GSTIN verdict about a value the user has moved on from", async () => {
+      const user = userEvent.setup();
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ valid: true, state_name: "Maharashtra", pan: "AAPFU0939F" }),
+      );
+
+      renderPage();
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      expect(await screen.findByText(/Maharashtra/)).toBeInTheDocument();
+
+      await user.click(screen.getByRole("tab", { name: "Sign in" }));
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+
+      expect(screen.queryByText(/Maharashtra/)).not.toBeInTheDocument();
+    });
   });
 });

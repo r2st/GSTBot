@@ -354,11 +354,44 @@ describe("registrationErrors", () => {
   const good = {
     gstin: "27AAPFU0939F1ZV",
     legal_name: "Acme Supplies Pvt Ltd",
+    email: "owner@acmesupplies.in",
     password: "correct horse battery",
   };
 
   it("passes a complete form", () => {
     expect(registrationErrors(good)).toEqual({});
+  });
+
+  // The form sets `noValidate`, which turns off the input's own `type="email"`
+  // check along with the required-field bubbles it was disabled for. Without a
+  // rule here, registering with the box empty was a round trip that came back
+  // as a generic 400 pointing at no field in particular.
+  it("requires an email", () => {
+    expect(registrationErrors({ ...good, email: "" }).email).toBe("Enter your email.");
+  });
+
+  it("treats whitespace as empty", () => {
+    expect(registrationErrors({ ...good, email: "   " }).email).toBe("Enter your email.");
+  });
+
+  it("requires an email to be shaped like one", () => {
+    expect(registrationErrors({ ...good, email: "owner" }).email).toContain("does not look like");
+    expect(registrationErrors({ ...good, email: "owner@acme" }).email).toContain(
+      "does not look like",
+    );
+  });
+
+  it("accepts the addresses a real business registers with", () => {
+    // The shape check is a subset of the server's, so it must not refuse
+    // anything the server would take. Plus-addressing and a multi-label host
+    // are the two that a stricter regex usually gets wrong.
+    for (const email of [
+      "owner+gst@acmesupplies.in",
+      "a.b@mail.co.in",
+      "OWNER@ACME.IN",
+    ]) {
+      expect(registrationErrors({ ...good, email })).toEqual({});
+    }
   });
 
   it("requires a GSTIN", () => {

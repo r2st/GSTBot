@@ -33,6 +33,29 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const registering = mode === "register";
 
+  /**
+   * Switch tabs, taking the previous tab's complaints with it.
+   *
+   * The two forms do not ask the same questions, so a message left behind is
+   * usually a message about a field that is no longer on screen — and once,
+   * memorably, about one that is. A rejected registration password puts "Use
+   * at least 8 characters." under the password box; that box is still there
+   * after the switch to sign-in, so the sentence stayed, now attached to a
+   * field where it is not true and where an existing account with a shorter
+   * password reads it as the reason it cannot get in.
+   *
+   * The GSTIN verdict goes too, along with the address it was asked about, so
+   * returning to the tab re-asks rather than showing an answer about whatever
+   * was in the box some minutes ago.
+   */
+  function switchTo(next) {
+    setMode(next);
+    setError("");
+    setFieldErrors({});
+    setGstinCheck(null);
+    asked.current = "";
+  }
+
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
@@ -147,10 +170,7 @@ export default function LoginPage() {
             role="tab"
             aria-selected={!registering}
             className={!registering ? "auth-tab is-active" : "auth-tab"}
-            onClick={() => {
-              setMode("login");
-              setError("");
-            }}
+            onClick={() => switchTo("login")}
           >
             Sign in
           </button>
@@ -159,10 +179,7 @@ export default function LoginPage() {
             role="tab"
             aria-selected={registering}
             className={registering ? "auth-tab is-active" : "auth-tab"}
-            onClick={() => {
-              setMode("register");
-              setError("");
-            }}
+            onClick={() => switchTo("register")}
           >
             Create account
           </button>
