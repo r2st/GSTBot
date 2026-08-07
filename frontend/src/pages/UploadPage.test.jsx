@@ -368,3 +368,87 @@ describe("UploadPage", () => {
     });
   });
 });
+
+describe("running out of the monthly allowance mid-batch", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+  });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("stops uploading once the allowance is spent", async () => {
+    // The allowance does not come back partway through a batch, so every
+    // remaining file gets the same 402. Carrying on spends the upload rate
+    // limit on requests that cannot succeed.
+    const user = userEvent.setup();
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse(invoiceResponse()))
+      .mockResolvedValueOnce(
+        jsonResponse({ detail: "Monthly invoice allowance used up" }, { status: 402 }),
+      );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [
+      file("a.txt"),
+      file("b.txt"),
+      file("c.txt"),
+      file("d.txt"),
+    ]);
+
+    await screen.findByRole("alert");
+    // One success, one refusal, and nothing attempted after it.
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists the files it did not attempt rather than dropping them", async () => {
+    // A batch that quietly shrinks from four to two is how an invoice goes
+    // missing from a return.
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Monthly invoice allowance used up" }, { status: 402 }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [
+      file("a.txt"),
+      file("b.txt"),
+      file("c.txt"),
+    ]);
+
+    expect(await screen.findByText("b.txt")).toBeInTheDocument();
+    expect(screen.getByText("c.txt")).toBeInTheDocument();
+    expect(screen.getAllByText(/allowance ran out before this file/)).toHaveLength(2);
+  });
+
+  it("says how many were left and what to do about it", async () => {
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Monthly invoice allowance used up" }, { status: 402 }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /1 file\(s\) were not uploaded.*Upgrade the plan/,
+    );
+  });
+
+  it("keeps going through an ordinary per-file failure", async () => {
+    // A duplicate or an unreadable scan says nothing about the next file, so
+    // only the allowance stops the batch.
+    const user = userEvent.setup();
+    global.fetch
+      .mockResolvedValueOnce(
+        jsonResponse({ detail: { message: "Already on file", invoice_id: 3 } }, { status: 409 }),
+      )
+      .mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+
+    expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+  });
+});

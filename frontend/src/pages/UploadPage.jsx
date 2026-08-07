@@ -120,6 +120,38 @@ export default function UploadPage() {
           { filename: file.name, status: "error", error: err.message },
           ...prev,
         ]);
+
+        // The monthly allowance is spent, and it does not come back partway
+        // through a batch. Every remaining file would get the same 402, so
+        // carrying on means thirty more round trips that cannot succeed —
+        // spending the upload rate limit on them, and burying the one thing
+        // the user needs to read under thirty identical copies of it.
+        //
+        // Stopped rather than silently skipped: the files that were not
+        // attempted are listed as such, because a batch that quietly shrinks
+        // from forty to twelve is how an invoice goes missing from a return.
+        if (err.status === 402) {
+          const remaining = accepted.slice(index + 1);
+          // The banner says only what the rows cannot: how much of the batch
+          // never went. Repeating the server's message here as well would put
+          // it on screen twice for a single-file upload, where the row already
+          // carries it in full.
+          if (remaining.length > 0) {
+            setResults((prev) => [
+              ...remaining.map((skipped) => ({
+                filename: skipped.name,
+                status: "error",
+                error: "Not uploaded — the monthly allowance ran out before this file.",
+              })),
+              ...prev,
+            ]);
+            setError(
+              `The monthly allowance ran out. ${remaining.length} file(s) were not ` +
+                "uploaded. Upgrade the plan or try again next month.",
+            );
+          }
+          break;
+        }
       }
     }
     setProgress(null);
