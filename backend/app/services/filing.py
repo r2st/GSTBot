@@ -971,6 +971,17 @@ def to_csv(db: Session, business: Business, period: str, invoice_type: InvoiceTy
     uploaded invoice, and Excel runs a cell that starts with ``=``. The numeric
     columns are deliberately not put through it: this application formats them,
     and a credit note's leading ``-`` is a minus sign.
+
+    ``total_value`` is derived by :func:`_invoice_value` rather than read off
+    the column, for the reason that function exists: the stored total defaults
+    to zero and is only filled when the parser found a grand-total *label* on
+    the document, so an invoice whose total was printed as "Amount Payable"
+    carries a stored zero. Read straight off the row, this column reported a
+    real supply as one worth nothing — and reported it in the one artefact a CA
+    opens to check a period before it is filed, while ``/filing/export/gstr1.json``
+    for the same period carried the right figure all along. Two exports of one
+    month disagreeing about what an invoice is worth is worse than either being
+    wrong on its own, because the CSV is what gets believed.
     """
     buffer = io.StringIO()
     writer = csv.DictWriter(
@@ -992,7 +1003,7 @@ def to_csv(db: Session, business: Business, period: str, invoice_type: InvoiceTy
                 "sgst": str(_q(invoice.sgst or ZERO)),
                 "igst": str(_q(invoice.igst or ZERO)),
                 "cess": str(_q(invoice.cess or ZERO)),
-                "total_value": str(_q(invoice.total_value or ZERO)),
+                "total_value": str(_q(_invoice_value(invoice))),
                 "reverse_charge": "Y" if invoice.reverse_charge else "N",
                 "status": invoice.status.value,
             }

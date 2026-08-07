@@ -1141,6 +1141,83 @@ def test_csv_leaves_a_negative_amount_as_a_number(db_session, business):
     assert row["taxable_value"] == "-1000.00"
 
 
+def test_csv_values_an_invoice_whose_grand_total_was_never_read(db_session, business):
+    """A stored total of zero is "not found on the document", not "worth nil".
+
+    ``total_value`` is only filled when the parser found a grand-total *label*,
+    so an invoice whose total was printed as "Amount Payable" carries a stored
+    zero. Read straight off the column, the CSV reported a ₹1,18,000 supply as
+    worth nothing — in the one artefact a CA opens to check a period before it
+    is filed.
+    """
+    save(db_session, business.id, sale(total_value=Decimal("0.00")))
+
+    row = next(
+        iter(
+            csv.DictReader(
+                io.StringIO(
+                    filing_service.to_csv(
+                        db_session, business, PERIOD, InvoiceType.SALES
+                    )
+                )
+            )
+        )
+    )
+
+    assert row["total_value"] == "118000.00"
+
+
+def test_csv_prefers_the_total_the_document_actually_carried(db_session, business):
+    """Deriving is the fallback, not the rule.
+
+    Rounding at the line can leave taxable + tax a rupee off what the invoice
+    itself says, and the document is the authority — the derivation exists to
+    fill a gap, not to overrule a figure that was read.
+    """
+    save(db_session, business.id, sale(total_value=Decimal("117999.00")))
+
+    row = next(
+        iter(
+            csv.DictReader(
+                io.StringIO(
+                    filing_service.to_csv(
+                        db_session, business, PERIOD, InvoiceType.SALES
+                    )
+                )
+            )
+        )
+    )
+
+    assert row["total_value"] == "117999.00"
+
+
+def test_the_csv_and_the_json_value_one_invoice_the_same(db_session, business):
+    """Two exports of one month must not disagree about what a supply is worth.
+
+    The GSTR-1 JSON has derived a missing total since ``_invoice_value`` was
+    written; the CSV read the raw column. Same period, same invoice, two
+    downloads, two figures — and the CSV is the one that gets believed, because
+    it is the one a human opens.
+    """
+    save(db_session, business.id, sale(total_value=Decimal("0.00")))
+
+    row = next(
+        iter(
+            csv.DictReader(
+                io.StringIO(
+                    filing_service.to_csv(
+                        db_session, business, PERIOD, InvoiceType.SALES
+                    )
+                )
+            )
+        )
+    )
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+    json_value = document["b2b"][0]["inv"][0]["val"]
+
+    assert float(row["total_value"]) == json_value
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
