@@ -299,6 +299,28 @@ export const api = {
     };
   },
 
+  // ---- Alerts ----
+  //
+  // The daily sweep in the backend raises these, the dashboard counts them, and
+  // until now there was no client method for any of the three endpoints — so an
+  // alert could be raised and counted but never read, and never closed.
+  //
+  // Never closed is the part that mattered. The sweep's central rule is that a
+  // dismissal is respected and the alert is not raised again tomorrow, and that
+  // rule could not fire, because no caller could produce a dismissal. A business
+  // that filed on the portal without recording it here got the same "GSTR-3B is
+  // overdue" every morning with nothing on any screen able to stop it.
+
+  /** Alerts, open by default. `scope` is `open`, `closed` or `all`. */
+  listAlerts: (params = {}, { signal } = {}) =>
+    request(`/alerts${query(params)}`, { signal }),
+
+  /** Seen, not handled — the alert stays open and stays in the badge. */
+  markAlertRead: (id) => request(`/alerts/${id}/read`, { method: "POST" }),
+
+  /** Close it: "I know". The sweep will not raise it again unless it worsens. */
+  dismissAlert: (id) => request(`/alerts/${id}/dismiss`, { method: "POST" }),
+
   // ---- Suppliers ----
   listSuppliers: (params = {}, { signal } = {}) =>
     request(`/suppliers${query(params)}`, { signal }),

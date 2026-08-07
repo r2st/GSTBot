@@ -3,6 +3,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import Shell from "./components/Shell";
 import { SkeletonPanel } from "./components/Skeleton";
 import { useAuth } from "./hooks/useAuth";
+import AlertsPage from "./pages/AlertsPage";
 import DashboardPage from "./pages/DashboardPage";
 import FilingPage from "./pages/FilingPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
@@ -104,6 +105,14 @@ export default function App() {
         element={
           <Protected>
             <SuppliersPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/alerts"
+        element={
+          <Protected>
+            <AlertsPage />
           </Protected>
         }
       />

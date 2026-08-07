@@ -141,6 +141,15 @@ describe("Shell", () => {
     expect(container.querySelector(".nav-scrim")).toHaveAttribute("aria-hidden", "true");
   });
 
+  it("offers a way to reach the alerts", () => {
+    // The three alert endpoints shipped with no link to them, so the sweep
+    // could raise an alert that no screen in the product mentioned and no
+    // click could close.
+    renderShell();
+
+    expect(screen.getByRole("link", { name: "Alerts" })).toHaveAttribute("href", "/alerts");
+  });
+
   it("marks the current route as current", () => {
     renderShell({ route: "/invoices" });
     // NavLink sets aria-current on the active route; without it the only

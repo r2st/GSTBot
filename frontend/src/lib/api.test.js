@@ -548,3 +548,78 @@ describe("filing records", () => {
     );
   });
 });
+
+describe("alerts", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("asks for open alerts when a scope is given", async () => {
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ items: [], total: 0, open_total: 0, limit: 50, offset: 0 }),
+    );
+
+    await api.listAlerts({ scope: "open" });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/v1/alerts?scope=open",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
+  it("sends no query at all when nothing is filtered", async () => {
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ items: [], total: 0, open_total: 0, limit: 50, offset: 0 }),
+    );
+
+    await api.listAlerts();
+
+    expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/alerts");
+  });
+
+  it("posts a dismissal against the alert's own id", async () => {
+    // The whole reason this method exists: the daily sweep will not raise an
+    // alert it has already been told about, and until there was a client for
+    // this endpoint no caller could ever tell it.
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 4, status: "dismissed" }));
+
+    await api.dismissAlert(4);
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/alerts/4/dismiss");
+    expect(options.method).toBe("POST");
+  });
+
+  it("posts a read against the alert's own id", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: 4, status: "read" }));
+
+    await api.markAlertRead(4);
+
+    expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/alerts/4/read");
+    expect(global.fetch.mock.calls[0][1].method).toBe("POST");
+  });
+
+  it("carries the bearer token, since alerts are tenant-scoped", async () => {
+    setToken("tok-123");
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ items: [], total: 0, open_total: 0, limit: 50, offset: 0 }),
+    );
+
+    await api.listAlerts();
+
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer tok-123");
+  });
+
+  it("surfaces the server's reason for refusing", async () => {
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Alert not found" }, { status: 404 }),
+    );
+
+    await expect(api.dismissAlert(999)).rejects.toThrow("Alert not found");
+  });
+});

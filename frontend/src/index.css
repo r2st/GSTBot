@@ -667,6 +667,59 @@ button.chip.is-active {
   margin: 0;
   padding: 0;
 }
+
+/* Alerts. A stacked list rather than a table: an alert is a sentence to read
+   and two buttons to press, and the message is the point of the row. */
+.alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.alert-row {
+  padding: 0.9rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+  border-left: 3px solid transparent;
+}
+.alert-row:last-child {
+  border-bottom: none;
+}
+.alert-row.is-bad {
+  border-left-color: var(--bad);
+}
+.alert-row.is-warn {
+  border-left-color: var(--warn);
+}
+.alert-row.is-neutral {
+  border-left-color: var(--line);
+}
+.alert-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.alert-title {
+  margin: 0;
+  font-size: 1rem;
+}
+/* Unread is weight, not colour: severity already owns colour on this row, and
+   a second colour axis would make "overdue" and "not yet opened" compete. */
+.alert-title.is-unread {
+  font-weight: 700;
+}
+.alert-message {
+  margin: 0.4rem 0 0;
+  font-size: 0.9rem;
+}
+.alert-meta {
+  margin: 0.35rem 0 0;
+}
+.alert-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
 .result-row {
   display: grid;
   grid-template-columns: 1fr 2fr auto;

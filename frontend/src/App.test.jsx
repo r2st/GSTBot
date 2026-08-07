@@ -31,6 +31,7 @@ vi.mock("./pages/ReconcilePage", () => ({ default: () => <div>Reconcile page</di
 vi.mock("./pages/ITCPage", () => ({ default: () => <div>ITC page</div> }));
 vi.mock("./pages/FilingPage", () => ({ default: () => <div>Filing page</div> }));
 vi.mock("./pages/SuppliersPage", () => ({ default: () => <div>Suppliers page</div> }));
+vi.mock("./pages/AlertsPage", () => ({ default: () => <div>Alerts page</div> }));
 
 const USER = { id: 1, email: "owner@acme.in", business: { legal_name: "Acme Traders" } };
 
@@ -83,6 +84,13 @@ describe("App routing", () => {
       expect(screen.queryByText("Invoices page")).not.toBeInTheDocument();
     });
 
+    it("keeps alerts behind the login, since they name a tenant's returns", () => {
+      renderAt("/alerts", { user: null, loading: false });
+
+      expect(screen.getByText("Login page")).toBeInTheDocument();
+      expect(screen.queryByText("Alerts page")).not.toBeInTheDocument();
+    });
+
     it("shows the login page at /login", () => {
       renderAt("/login", { user: null, loading: false });
 
@@ -115,6 +123,7 @@ describe("App routing", () => {
       ["/itc", "ITC page"],
       ["/filing", "Filing page"],
       ["/suppliers", "Suppliers page"],
+      ["/alerts", "Alerts page"],
     ])("renders %s", (route, expected) => {
       renderAt(route);
 

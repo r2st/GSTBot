@@ -10,6 +10,7 @@ const LINKS = [
   { to: "/itc", label: "ITC" },
   { to: "/filing", label: "Filing" },
   { to: "/suppliers", label: "Suppliers" },
+  { to: "/alerts", label: "Alerts" },
 ];
 
 export default function Shell({ children }) {
@@ -19,7 +20,7 @@ export default function Shell({ children }) {
   const [navOpen, setNavOpen] = useState(false);
   const toggleRef = useRef(null);
 
-  // Seven links do not fit on a phone, so below 860px they collapse behind a
+  // Eight links do not fit on a phone, so below 860px they collapse behind a
   // button. The menu stays in the DOM either way — CSS decides whether it is a
   // row or a drawer — so there is one nav for assistive tech rather than two
   // that can drift apart.
