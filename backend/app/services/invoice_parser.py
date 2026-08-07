@@ -259,6 +259,47 @@ def to_money(value: object, default: Decimal | None = Decimal("0.00")) -> Decima
     return coerced
 
 
+# What a document, a portal export or a model says for "no" — and for "yes".
+# Kept as sets rather than as a regex because these are whole answers, not
+# substrings: "not applicable" must not be read as the "applicable" inside it.
+_TRUE_WORDS = frozenset({"Y", "YES", "TRUE", "1", "APPLICABLE", "T"})
+_FALSE_WORDS = frozenset(
+    {"N", "NO", "FALSE", "0", "F", "NA", "N/A", "NOT APPLICABLE", "NONE", "NIL", "-"}
+)
+
+
+def to_flag(value: object, *, default: bool = False) -> bool:
+    """Read a yes/no answer, whoever wrote it, or *default* if it is neither.
+
+    ``bool()`` is not this function. It says a non-empty string is true, and
+    the strings that arrive here are overwhelmingly the *word* for false:
+    "reverse charge: Not Applicable" is printed on a large share of Indian tax
+    invoices, and a model asked to copy what the document says copies that.
+    Read with ``bool()``, every one of those invoices came back flagged reverse
+    charge — which is not a cosmetic mislabel. It moves the tax to table 3.1(d)
+    of GSTR-3B as a liability the business must settle in cash, takes the
+    invoice's credit out of the pool it belongs in, and on a *sale* prints
+    ``rchrg: "Y"`` in the buyer's GSTR-2B, telling a customer they owe tax the
+    supplier has already charged them.
+
+    An answer that is neither falls back to *default* rather than guessing,
+    which is how the portal's own ``itcavl`` flag keeps defaulting to "credit
+    is available" while ``rev`` keeps defaulting to "no".
+    """
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int | float | Decimal):
+        return bool(value)
+    text = re.sub(r"\s+", " ", str(value)).strip().upper()
+    if text in _TRUE_WORDS:
+        return True
+    if text in _FALSE_WORDS:
+        return False
+    return default
+
+
 def to_date(value: object) -> date | None:
     """Parse the date formats that appear on Indian invoices.
 
@@ -545,7 +586,7 @@ def _from_model_payload(payload: dict, text: str, model: str) -> ParsedInvoice:
     result.invoice_number = _clean_str(payload.get("invoice_number"), 64)
     result.invoice_date = to_date(payload.get("invoice_date"))
     result.hsn_code = _clean_str(payload.get("hsn_code"), 8)
-    result.reverse_charge = bool(payload.get("reverse_charge"))
+    result.reverse_charge = to_flag(payload.get("reverse_charge"))
 
     # A GSTIN is kept only if it checksums. The model is reading blurry text
     # and a plausible-looking 15-character string is the one field where a

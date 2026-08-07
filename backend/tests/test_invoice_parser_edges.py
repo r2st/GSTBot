@@ -20,7 +20,7 @@ from decimal import Decimal
 
 import pytest
 
-from app.services import document_text, invoice_parser
+from app.services import document_text, gstr2b, invoice_parser
 from app.services.invoice_parser import (
     _from_model_payload,
     _vision_messages,
@@ -29,6 +29,7 @@ from app.services.invoice_parser import (
     parse_with_model,
     to_date,
     to_decimal,
+    to_flag,
 )
 from app.services.openrouter_client import OpenRouterError
 
@@ -134,6 +135,64 @@ class TestRateNormalisation:
 
     def test_zero_rated_is_kept_and_not_confused_with_missing(self):
         assert normalize_rate("0") == Decimal("0")
+
+
+class TestReadingAYesNoAnswer:
+    """``bool()`` is not this, and the difference is a tax liability.
+
+    "Reverse charge: Not Applicable" is printed on a large share of Indian tax
+    invoices, and a model told to copy what the document says copies it.
+    ``bool("Not applicable")`` is ``True``.
+    """
+
+    @pytest.mark.parametrize(
+        "answer",
+        ["N", "n", "No", "false", "FALSE", "0", "NA", "N/A", "not applicable", "nil", "-"],
+    )
+    def test_every_way_of_saying_no_means_no(self, answer):
+        assert to_flag(answer) is False
+
+    @pytest.mark.parametrize("answer", ["Y", "yes", "TRUE", "1", "applicable"])
+    def test_every_way_of_saying_yes_means_yes(self, answer):
+        assert to_flag(answer) is True
+
+    def test_a_reverse_charge_of_not_applicable_no_longer_flags_the_invoice(self):
+        """The whole reason this function exists.
+
+        Flagged, the tax moves to GSTR-3B table 3.1(d) as a liability payable
+        in cash, the invoice's credit leaves the pool it belongs in, and a
+        *sale* prints ``rchrg: "Y"`` in the buyer's GSTR-2B.
+        """
+        payload = {"reverse_charge": "Not applicable"}
+        assert _from_model_payload(payload, "", "m").reverse_charge is False
+
+    def test_a_real_reverse_charge_invoice_is_still_flagged(self):
+        payload = {"reverse_charge": "Yes"}
+        assert _from_model_payload(payload, "", "m").reverse_charge is True
+
+    def test_an_answer_that_is_neither_falls_back_rather_than_guessing(self):
+        """Which is how ``itcavl`` keeps defaulting to "credit is available"."""
+        assert to_flag("perhaps") is False
+        assert to_flag("perhaps", default=True) is True
+
+    def test_an_unanswered_question_takes_the_default(self):
+        assert to_flag(None, default=True) is True
+        assert to_flag("", default=True) is True
+        assert to_flag("   ", default=True) is True
+
+    def test_a_boolean_is_taken_at_its_word(self):
+        assert to_flag(False, default=True) is False
+        assert to_flag(True) is True
+
+    def test_a_number_is_read_the_way_a_number_is(self):
+        assert to_flag(0, default=True) is False
+        assert to_flag(1) is True
+        assert to_flag(Decimal("0"), default=True) is False
+
+    def test_the_portal_s_own_flags_go_through_the_same_reader(self):
+        """``gstr2b`` had a second, shorter list of what "no" looks like."""
+        assert gstr2b._flag("N/A", default=True) is False
+        assert gstr2b._flag("Not Applicable", default=True) is False
 
 
 # --------------------------------------------------------------------------

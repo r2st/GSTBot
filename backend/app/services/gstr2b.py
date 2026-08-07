@@ -36,7 +36,7 @@ from decimal import Decimal
 from app.models.mixins import MONEY_MAX
 from app.services import gst_calendar
 from app.services import gstin as gstin_service
-from app.services.invoice_parser import to_date, to_decimal, to_money
+from app.services.invoice_parser import to_date, to_decimal, to_flag, to_money
 
 logger = logging.getLogger(__name__)
 
@@ -133,17 +133,16 @@ class GSTR2BRecord:
 # ---------------------------------------------------------------------------
 
 def _flag(value: object, *, default: bool = False) -> bool:
-    """Read the portal's ``Y``/``N`` flags, and the words a CSV export uses."""
-    if value is None or value == "":
-        return default
-    if isinstance(value, bool):
-        return value
-    text = str(value).strip().upper()
-    if text in {"Y", "YES", "TRUE", "1"}:
-        return True
-    if text in {"N", "NO", "FALSE", "0"}:
-        return False
-    return default
+    """Read the portal's ``Y``/``N`` flags, and the words a CSV export uses.
+
+    :func:`~app.services.invoice_parser.to_flag` is the one reader, shared with
+    the extraction path, because both are being handed a human's answer to a
+    yes/no question and there is nothing GSTR-2B-specific about what "no" looks
+    like. It knows a few more spellings than this used to — "N/A", "Not
+    applicable", "nil" — which a hand-edited export carries as readily as a
+    photographed invoice does.
+    """
+    return to_flag(value, default=default)
 
 
 def period_from_portal(value: object) -> str | None:
