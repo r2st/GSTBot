@@ -295,7 +295,7 @@ class TestTheSpanAnInvoiceDateCanFallIn:
     """
 
     def test_gst_commenced_on_the_first_of_july_2017(self):
-        assert gst_calendar.GST_COMMENCEMENT == date(2017, 7, 1)
+        assert date(2017, 7, 1) == gst_calendar.GST_COMMENCEMENT
 
     def test_an_ordinary_date_is_inside_the_span(self):
         assert gst_calendar.is_filable_invoice_date(
@@ -350,9 +350,8 @@ class TestTheSpanAPeriodCanFallIn:
     """
 
     def test_the_span_starts_when_gst_commenced(self):
-        assert gst_calendar.FIRST_PERIOD == gst_calendar.period_of(
-            gst_calendar.GST_COMMENCEMENT
-        )
+        commenced = gst_calendar.period_of(gst_calendar.GST_COMMENCEMENT)
+        assert commenced == gst_calendar.FIRST_PERIOD
 
     @pytest.mark.parametrize(
         "period", ["2017-07", "2017-12", "2018-01", "2026-04", "2099-12"]

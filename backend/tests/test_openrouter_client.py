@@ -21,6 +21,7 @@ module's reading of a response, not httpx's ability to make a request.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 from datetime import UTC, datetime, timedelta
@@ -896,10 +897,8 @@ class TestAContentPartThatIsNotText:
         )
         # Whatever it makes of it, it must be a string or an OpenRouterError —
         # never TypeError, which is what escapes the caller's fallback.
-        try:
+        with contextlib.suppress(OpenRouterError):
             assert isinstance(chat_completion(MESSAGES), str)
-        except OpenRouterError:
-            pass
 
     def test_the_number_in_the_part_is_read_rather_than_dropped(
         self, configured, transport
