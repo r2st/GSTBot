@@ -1032,6 +1032,192 @@ class TestRule37IsPaidOnceNotEveryMonthAfter:
         assert may.rule_37_reversal.igst == Decimal("18000.00")
 
 
+class TestRule37GivesTheCreditBackWhenTheSupplierIsPaid:
+    """The other half of Rule 37, and the half that did not exist.
+
+    The proviso to s.16(2)(d) is not a forfeiture clause: "the recipient shall
+    be entitled to avail of the input tax credit on payment made by him". The
+    reversal is a deposit, and paying the supplier redeems it in the return for
+    the period the payment falls in.
+
+    Only the reversal was implemented. Setting ``paid_at`` stopped
+    :func:`~app.services.itc.rule_37` reporting the invoice at all, which
+    stopped the reversal recurring and returned nothing — so every invoice that
+    ever crossed 180 days cost its whole ITC, once, permanently. For a business
+    that pays anything late, that is a standing overstatement of tax.
+    """
+
+    # 181 days after 31 October 2025 is 30 April 2026, so this purchase lapses
+    # in 2026-04 and its credit is given back in that month's return.
+    LAPSED = date(2025, 10, 31)
+    LAPSE_PERIOD = "2026-04"
+
+    def lapsed_and_paid(self, db, business, paid_at, **kwargs):
+        return save(
+            db,
+            business.id,
+            invoice_number=kwargs.pop("invoice_number", "OLD-1"),
+            invoice_date=self.LAPSED,
+            period="2025-10",
+            paid_at=paid_at,
+            **kwargs,
+        )
+
+    def test_the_period_the_supplier_is_paid_in_takes_it_back(
+        self, db_session, business
+    ):
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-09", as_of=date(2026, 9, 30)
+        )
+
+        assert summary.rule_37_reavailment.igst == Decimal("18000.00")
+        # And it reaches the credit that settles the liability, which is the
+        # only reason the figure is worth computing.
+        assert summary.net_available.igst == Decimal("18000.00")
+
+    def test_it_is_taken_back_exactly_once(self, db_session, business):
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        for period, end in (
+            ("2026-10", date(2026, 10, 31)),
+            ("2026-11", date(2026, 11, 30)),
+            ("2027-02", date(2027, 2, 28)),
+        ):
+            summary = itc_service.summarise(db_session, business.id, period, as_of=end)
+            assert summary.rule_37_reavailment.total == Decimal("0.00"), period
+
+    def test_the_months_before_the_payment_take_back_nothing(
+        self, db_session, business
+    ):
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-08", as_of=date(2026, 8, 31)
+        )
+
+        assert summary.rule_37_reavailment.total == Decimal("0.00")
+
+    def test_the_reversal_and_the_re_availment_are_the_same_amount(
+        self, db_session, business
+    ):
+        """What the round trip has to come to, over the two returns it spans."""
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        reversed_in_april = itc_service.summarise(
+            db_session, business.id, self.LAPSE_PERIOD, as_of=date(2026, 4, 30)
+        ).rule_37_reversal
+        back_in_september = itc_service.summarise(
+            db_session, business.id, "2026-09", as_of=date(2026, 9, 30)
+        ).rule_37_reavailment
+
+        assert reversed_in_april.total == back_in_september.total == Decimal("18000.00")
+
+    def test_paying_inside_the_month_it_lapsed_gives_back_nothing(
+        self, db_session, business
+    ):
+        """The case that would invent credit out of nothing.
+
+        ``rule_37`` reads ``paid_at`` as of the close of the period, so an
+        invoice that crossed 180 days on the 15th and was paid on the 20th of
+        the same month was never reversed by any return. Re-availing it would
+        hand back credit the business never gave up — the one direction of this
+        rule that costs the government rather than the taxpayer.
+        """
+        self.lapsed_and_paid(db_session, business, date(2026, 4, 20))
+
+        summary = itc_service.summarise(
+            db_session, business.id, self.LAPSE_PERIOD, as_of=date(2026, 4, 30)
+        )
+
+        assert summary.rule_37_reversal.total == Decimal("0.00")
+        assert summary.rule_37_reavailment.total == Decimal("0.00")
+
+    def test_an_invoice_paid_before_it_ever_lapsed_gives_back_nothing(
+        self, db_session, business
+    ):
+        self.lapsed_and_paid(db_session, business, date(2026, 1, 10))
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-01", as_of=date(2026, 1, 31)
+        )
+
+        assert summary.rule_37_reavailment.total == Decimal("0.00")
+
+    def test_a_purchase_that_never_carried_credit_gives_back_nothing(
+        self, db_session, business
+    ):
+        """Blocked under s.17(5), or reverse charge: there was no credit to reverse."""
+        self.lapsed_and_paid(
+            db_session,
+            business,
+            date(2026, 9, 15),
+            invoice_number="BLOCKED-1",
+            itc_eligible=False,
+        )
+        self.lapsed_and_paid(
+            db_session,
+            business,
+            date(2026, 9, 15),
+            invoice_number="RCM-1",
+            reverse_charge=True,
+        )
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-09", as_of=date(2026, 9, 30)
+        )
+
+        assert summary.rule_37_reavailment.total == Decimal("0.00")
+
+    def test_it_is_claimed_in_table_4a_of_the_3b(self, db_session, business):
+        """Where the portal expects it, and where the netting has to tie.
+
+        4(A) is credit available and 4(C) is 4(A) less 4(B). A re-availment
+        that reached ``net_available`` but not the ``itc_avl`` row would file a
+        return whose own three lines do not add up.
+        """
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        document = filing.build_gstr3b(db_session, business, "2026-09")
+
+        other_itc = document["itc_elg"]["itc_avl"][0]
+        assert other_itc["ty"] == "OTH"
+        assert other_itc["iamt"] == 18000.0
+        assert document["itc_elg"]["itc_net"]["iamt"] == 18000.0
+
+    def test_the_re_availment_is_not_common_credit_for_rule_42(
+        self, db_session, business
+    ):
+        """It already bore the exempt ratio when it was first availed.
+
+        Rule 42 apportions the credit of the period that *takes* it. Credit
+        being restored was apportioned in its own period, and running it
+        through the ratio a second time would reverse the exempt share twice.
+        """
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        summary = itc_service.summarise(
+            db_session,
+            business.id,
+            "2026-09",
+            as_of=date(2026, 9, 30),
+            exempt_turnover=Decimal("50000.00"),
+            total_turnover=Decimal("100000.00"),
+        )
+
+        assert summary.proportionate.common_credit.total == Decimal("0.00")
+        assert summary.rule_37_reavailment.igst == Decimal("18000.00")
+        assert summary.net_available.igst == Decimal("18000.00")
+
+    def test_the_endpoint_reports_it(self, auth_client, db_session, business):
+        self.lapsed_and_paid(db_session, business, date(2026, 9, 15))
+
+        body = auth_client.get("/api/v1/itc?period=2026-09").json()
+
+        assert body["rule_37_reavailment"]["igst"] == "18000.00"
+
+
 def test_net_available_never_goes_negative(db_session, business):
     """A reversal larger than the period's credit is a liability, not negative credit."""
     save(

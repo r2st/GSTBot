@@ -200,6 +200,18 @@ export default function ITCPage() {
                   heads: proportionate.capital_credit_this_month,
                   help: `One month of ${proportionate.capital_months} (Rule 43)`,
                 },
+                // Only when there is some. A row of zeros on every screen for
+                // a rule most months never trigger is furniture, and the two
+                // rows either side of it are read on every one of them.
+                ...(Number(summary.rule_37_reavailment?.total ?? 0) > 0
+                  ? [
+                      {
+                        label: "Re-availed: suppliers paid",
+                        heads: summary.rule_37_reavailment,
+                        help: "Credit an earlier return reversed under Rule 37, taken back now that the supplier has been paid",
+                      },
+                    ]
+                  : []),
                 { label: "Less: reversals", heads: summary.total_reversal },
                 { label: "Net credit", heads: summary.net_available },
                 { label: "Output tax", heads: summary.output_tax },

@@ -297,8 +297,7 @@ class Rule37Result:
         for item in self.overdue:
             if item.invoice_date is None:
                 continue
-            lapsed_on = item.invoice_date + timedelta(days=RULE_37_DAYS + 1)
-            if start <= lapsed_on <= end:
+            if start <= lapse_date(item.invoice_date) <= end:
                 total = total + item.tax
         return total
 
@@ -311,6 +310,72 @@ class Rule37Result:
             "days": RULE_37_DAYS,
             "warning_days": RULE_37_WARNING_DAYS,
         }
+
+
+def lapse_date(invoice_date: date) -> date:
+    """The day Rule 37's credit reverses on an invoice dated *invoice_date*.
+
+    The day *after* the 180th, because the Act allows the whole of day 180.
+    One definition, because two halves of the same rule read it — the reversal
+    in :meth:`Rule37Result.reversal_in` and the re-availment in
+    :func:`rule_37_reavailment` — and a boundary that differed by a day between
+    them would reverse credit in one month and give it back in another, or give
+    back credit that was never reversed.
+    """
+    return invoice_date + timedelta(days=RULE_37_DAYS + 1)
+
+
+def rule_37_reavailment(invoices: list[Invoice], period: str) -> TaxHeads:
+    """Credit reversed for non-payment that *period* is entitled to take back.
+
+    The second half of Rule 37, and the half that was missing. The proviso to
+    s.16(2)(d) is explicit that the reversal is not forfeiture: "the recipient
+    shall be entitled to avail of the input tax credit on payment made by him".
+    The credit comes back in the return for the tax period the supplier is
+    actually paid in, at table 4(A)(5).
+
+    Only the reversal existed here. :meth:`Rule37Result.reversal_in` gave the
+    credit back to the government in the month the 180 days ran out, and
+    :func:`rule_37` then dropped the invoice from every later calculation the
+    moment ``paid_at`` was set — so paying the supplier in September stopped the
+    reversal recurring and returned nothing. The credit simply left the books.
+    For a business that pays late at all, that is a permanent overstatement of
+    tax: every invoice that ever crossed 180 days costs its whole ITC, once,
+    for good, whatever happens afterwards.
+
+    Two conditions, and the second is what keeps this from inventing credit:
+
+    * The supplier was paid *during* this period, so the entitlement arises now
+      and arises exactly once.
+    * The invoice had already lapsed *before* this period began. An invoice that
+      crossed 180 days and was paid inside the same month was never reversed —
+      ``rule_37`` reads ``paid_at`` as of the close of the period and excludes
+      it — so re-availing it would hand back credit the return never gave up.
+
+    Pure, and over the whole purchase register rather than the period's own
+    invoices: the invoice being paid is by construction at least six months old
+    and belongs to another period.
+    """
+    start = gst_calendar.period_start(period)
+    end = gst_calendar.period_end(period)
+    total = TaxHeads()
+    for invoice in invoices:
+        if invoice.paid_at is None or invoice.invoice_date is None:
+            continue
+        if not invoice.claims_credit:
+            continue
+        if not start <= invoice.paid_at <= end:
+            continue
+        if lapse_date(invoice.invoice_date) >= start:
+            # Never reversed by a return this one follows: either it has not
+            # lapsed at all, or it lapsed in this very period and was paid
+            # before the period closed.
+            continue
+        tax = _invoice_tax(invoice)
+        if tax.total <= ZERO:
+            continue
+        total = total + tax
+    return total
 
 
 def _invoice_tax(invoice: Invoice) -> TaxHeads:
@@ -610,6 +675,12 @@ class ITCSummary:
     # the part that lapsed during this period, and therefore the part this
     # period's return gives back. See :meth:`Rule37Result.reversal_in`.
     rule_37_reversal: TaxHeads = field(default_factory=TaxHeads)
+    # The other direction of the same rule: credit reversed in an earlier
+    # period on an invoice whose supplier was paid *in* this one. It is not in
+    # ``available`` — that pool is built from this period's own purchases, and
+    # the invoice being paid is six months old — so it is added to the credit
+    # separately. See :func:`rule_37_reavailment`.
+    rule_37_reavailment: TaxHeads = field(default_factory=TaxHeads)
     reverse_charge: ReverseChargePosition = field(default_factory=ReverseChargePosition)
 
     @property
@@ -641,6 +712,7 @@ class ITCSummary:
             "output_tax": self.output_tax.as_dict(),
             "rule_37": self.rule_37.as_dict(),
             "rule_37_reversal": self.rule_37_reversal.as_dict(),
+            "rule_37_reavailment": self.rule_37_reavailment.as_dict(),
             "proportionate": self.proportionate.as_dict(),
             "total_reversal": self.total_reversal.as_dict(),
             "net_available": self.net_available.as_dict(),
@@ -896,17 +968,26 @@ def summarise(
     # the reconciliation caps against — GSTR-2B has nothing to say about tax
     # the buyer pays themselves — and it is not common credit for Rule 42's
     # ratio, which is applied to ``available`` above.
+    #
+    # Rule 37's re-availment joins it from the other side, and for the mirror
+    # reason: an invoice paid this month after its credit lapsed is entitled to
+    # that credit back (proviso to s.16(2)(d)), and it is not in ``available``
+    # either — the invoice is at least six months old, so it belongs to another
+    # period's purchases and to another period's reconciliation. Without it the
+    # reversal was one-way and permanent, and a business that pays a supplier
+    # late lost the whole of that invoice's credit for good.
     rule_37_reversal = rule_37_result.reversal_in(period)
+    reavailment = rule_37_reavailment(all_purchases, period)
     reversal = rule_37_reversal + proportionate.total_reversal
     net_available = TaxHeads(
         igst=max(ZERO, available.igst + proportionate.capital_credit_this_month.igst
-                 + reverse_charge.credit.igst - reversal.igst),
+                 + reverse_charge.credit.igst + reavailment.igst - reversal.igst),
         cgst=max(ZERO, available.cgst + proportionate.capital_credit_this_month.cgst
-                 + reverse_charge.credit.cgst - reversal.cgst),
+                 + reverse_charge.credit.cgst + reavailment.cgst - reversal.cgst),
         sgst=max(ZERO, available.sgst + proportionate.capital_credit_this_month.sgst
-                 + reverse_charge.credit.sgst - reversal.sgst),
+                 + reverse_charge.credit.sgst + reavailment.sgst - reversal.sgst),
         cess=max(ZERO, available.cess + proportionate.capital_credit_this_month.cess
-                 + reverse_charge.credit.cess - reversal.cess),
+                 + reverse_charge.credit.cess + reavailment.cess - reversal.cess),
     )
 
     output_tax = _outward_tax(db, business_id, period)
@@ -924,5 +1005,6 @@ def summarise(
         invoice_count=len(period_purchases),
         unclaimed_count=unclaimed,
         rule_37_reversal=rule_37_reversal,
+        rule_37_reavailment=reavailment,
         reverse_charge=reverse_charge,
     )

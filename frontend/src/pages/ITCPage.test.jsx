@@ -39,6 +39,7 @@ function summary(overrides = {}) {
       capital_months: 60,
     },
     rule_37_reversal: heads(),
+    rule_37_reavailment: heads(),
     total_reversal: heads(),
     net_available: heads({ igst: "18000.00" }),
     set_off: {
@@ -461,5 +462,41 @@ describe("ITCPage", () => {
       // to prevent.
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("Rule 37's re-availment", () => {
+  // A reversal with no way back is a permanent overstatement of tax, and the
+  // figure that undoes it has to be visible on the screen that showed the
+  // reversal — otherwise the credit reappears in the 3B with nothing on any
+  // screen explaining where it came from.
+
+  it("shows the credit taken back when a supplier is finally paid", async () => {
+    mockApi(summary({ rule_37_reavailment: heads({ igst: "18000.00" }) }));
+    render(
+      <MemoryRouter>
+        <ITCPage />
+      </MemoryRouter>,
+    );
+
+    const row = (await screen.findByText("Re-availed: suppliers paid")).closest("tr");
+    expect(within(row).getAllByText("₹18,000.00")).not.toHaveLength(0);
+    expect(
+      screen.getByText(/Credit an earlier return reversed under Rule 37/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the row off a month that re-availed nothing", async () => {
+    // Most months trigger no re-availment at all, and a row of zeros beside
+    // the two figures read on every load is furniture.
+    mockApi(summary());
+    render(
+      <MemoryRouter>
+        <ITCPage />
+      </MemoryRouter>,
+    );
+
+    await screen.findAllByText("Credit available");
+    expect(screen.queryByText("Re-availed: suppliers paid")).not.toBeInTheDocument();
   });
 });

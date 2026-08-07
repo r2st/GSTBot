@@ -107,6 +107,12 @@ class ITCSummaryOut(BaseModel):
     # the only part this period's return gives back: Rule 37 is paid once, in
     # the return for the month the clock ran out, and re-availed on payment.
     rule_37_reversal: TaxHeadsOut
+    # The other direction of the same rule: credit an earlier return reversed
+    # for non-payment, on an invoice whose supplier was paid during *this*
+    # period. The proviso to s.16(2)(d) gives it back, and it is added to the
+    # claimable credit rather than netted off the reversal, because the two
+    # belong to different invoices and different months.
+    rule_37_reavailment: TaxHeadsOut
     proportionate: ProportionateOut
     total_reversal: TaxHeadsOut
     net_available: TaxHeadsOut

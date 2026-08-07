@@ -1186,6 +1186,11 @@ def build_gstr3b(
     then May, then June — so a business filing four months gave back four
     times what the rule asks for, and each of those returns still reproduced
     itself exactly, which is what made it invisible.
+
+    And the re-availment is the other half again. The reversal was declared and
+    the credit never came back: paying the supplier merely stopped the reversal
+    recurring, so an invoice that once crossed 180 days lost its whole ITC for
+    good. It is claimed here in 4(A) — see :func:`app.services.itc.rule_37_reavailment`.
     """
     if as_of is None:
         as_of = min(gst_calendar.period_end(period), gst_calendar.today_ist())
@@ -1222,7 +1227,17 @@ def build_gstr3b(
             bucket["iamt"] += invoice.igst or ZERO
 
     output = summary.output_tax
-    available = summary.available + summary.proportionate.capital_credit_this_month
+    # 4(A)(5), "All other ITC": this period's own credit, the month's slice of
+    # capital-goods credit under Rule 43, and credit an earlier return gave up
+    # under Rule 37 that this month's payment to the supplier brings back. The
+    # last of those had nowhere to go — the reversal was declared and the
+    # re-availment the proviso to s.16(2)(d) allows never was, so paying a
+    # supplier late cost the whole of that invoice's credit permanently.
+    available = (
+        summary.available
+        + summary.proportionate.capital_credit_this_month
+        + summary.rule_37_reavailment
+    )
     reversal = summary.total_reversal
     reverse_charge = summary.reverse_charge
 
