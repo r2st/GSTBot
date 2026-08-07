@@ -613,6 +613,76 @@ class TestOnlyCreditCanBeCreditAtRisk:
         )
 
 
+class TestExposureCountsOnlyRowsThatWereActuallyRead:
+    """A row nothing has extracted is not evidence about a supplier.
+
+    Every other module in the product draws this line at
+    ``UNREADABLE_STATUSES`` — the returns leave those rows out, the credit pool
+    leaves them out, the dashboard's tax summary leaves them out. This screen
+    excluded ``FAILED`` alone, and the two ways past it are not symmetric.
+    """
+
+    def supplier(self, db, business):
+        row = Supplier(business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE)
+        db.add(row)
+        db.commit()
+        return row
+
+    def test_a_row_still_queued_for_a_worker_is_not_a_document(
+        self, db_session, business
+    ):
+        """Columns of zeros, and an unpaid count it had no business joining."""
+        supplier = self.supplier(db_session, business)
+        book(db_session, business.id, invoice_number="REAL-1")
+        book(
+            db_session,
+            business.id,
+            invoice_number="QUEUED-1",
+            status=InvoiceStatus.UPLOADED,
+            taxable_value=Decimal("0.00"),
+            igst=Decimal("0.00"),
+            total_value=Decimal("0.00"),
+        )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.invoice_count == 1
+        assert result.unpaid_count == 1
+
+    def test_a_re_extraction_in_flight_does_not_count_its_old_figures(
+        self, db_session, business
+    ):
+        """The expensive half.
+
+        ``process_invoice`` commits ``PROCESSING`` before it reads anything, so
+        for the length of the parse the row still carries the figures from the
+        previous, successful read. Counted here and nowhere else, this screen
+        quoted a supplier's exposure from a document the return it is about to
+        file does not contain.
+        """
+        supplier = self.supplier(db_session, business)
+        book(
+            db_session,
+            business.id,
+            invoice_number="REPARSING-1",
+            status=InvoiceStatus.PROCESSING,
+        )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.invoice_count == 0
+        assert result.tax_total == Decimal("0.00")
+
+    def test_a_read_row_still_counts(self, db_session, business):
+        supplier = self.supplier(db_session, business)
+        book(db_session, business.id, status=InvoiceStatus.MATCHED)
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.invoice_count == 1
+        assert result.tax_total == Decimal("18000.00")
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------

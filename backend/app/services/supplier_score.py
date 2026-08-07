@@ -49,7 +49,12 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
+from app.models.invoice import (
+    UNREADABLE_STATUSES,
+    Invoice,
+    InvoiceStatus,
+    InvoiceType,
+)
 from app.models.supplier import RiskLevel, Supplier
 from app.services import gst_calendar
 
@@ -537,6 +542,19 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
     ``tax_total`` still totals the tax on every one of their documents. That is
     what it says and what the count beside it is: how much of this supplier's
     paperwork is in the books, credit or not.
+
+    Rows whose figures were never extracted are left out — every status in
+    :data:`~app.models.invoice.UNREADABLE_STATUSES`, which is the line the
+    returns, the credit pool and the dashboard all draw. This was the last
+    place still excluding ``FAILED`` alone, and the two ways past it are not
+    symmetric. A row still queued for a worker carries columns of zeros, so it
+    moved no money and inflated both the document count and the unpaid count
+    beside it. A row being *re-extracted* is the expensive one: ``PROCESSING``
+    is committed before anything is read, so the figures from the previous,
+    successful parse sit on it for the length of the parse — counted in full
+    here, and counted nowhere else. This screen is where a business decides
+    whether to hold a payment, and it was quoting a supplier's exposure from
+    rows the return it is about to file does not contain.
     """
     invoices = db.scalars(
         select(Invoice).where(
@@ -544,13 +562,12 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.PURCHASE,
             Invoice.counterparty_gstin == supplier.gstin,
+            Invoice.status.not_in(UNREADABLE_STATUSES),
         )
     ).all()
 
     result = SupplierExposure()
     for invoice in invoices:
-        if invoice.status == InvoiceStatus.FAILED:
-            continue
         tax = (
             (invoice.igst or ZERO)
             + (invoice.cgst or ZERO)
