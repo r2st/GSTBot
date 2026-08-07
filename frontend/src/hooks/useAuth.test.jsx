@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { getToken, setToken } from "../lib/api";
+import { api, getToken, setToken } from "../lib/api";
 import { AuthProvider, useAuth } from "./useAuth";
 
 const USER = {
@@ -209,6 +209,58 @@ describe("AuthProvider", () => {
 
       expect(getToken()).toBeNull();
     });
+  });
+});
+
+describe("a token that expires mid-session", () => {
+  // The access token lasts 24 hours and there is no refresh flow, so this is
+  // not an edge case — it is what happens to every user who leaves a tab open
+  // overnight.
+
+  it("ends the session when a request comes back 401", async () => {
+    setToken("stored-token");
+    mockApi();
+    renderWithProvider();
+    await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent(USER.email));
+
+    // A later request finds the token expired. Dropping it is not enough on
+    // its own: `user` stayed set, so `Protected` kept rendering, every request
+    // after this went out with no Authorization header, and `/login` — which
+    // is gated on `user`, not on the token — redirected straight back. The one
+    // screen that could fix it was the one screen unreachable.
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 401,
+      statusText: "Unauthorized",
+      text: async () => JSON.stringify({ detail: "Token has expired" }),
+    }));
+    await expect(api.dashboard()).rejects.toThrow();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("user")).toHaveTextContent("anonymous"),
+    );
+    expect(getToken()).toBeNull();
+  });
+
+  it("leaves a signed-in session alone when a request merely fails", async () => {
+    // Only a refused credential ends the session. A 500 or a dropped
+    // connection is a request to retry, not a reason to sign someone out
+    // mid-upload.
+    setToken("stored-token");
+    mockApi();
+    renderWithProvider();
+    await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent(USER.email));
+
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 503,
+      statusText: "Service Unavailable",
+      text: async () => JSON.stringify({ detail: "The database is temporarily unavailable." }),
+    }));
+    await expect(api.dashboard()).rejects.toThrow();
+
+    expect(screen.getByTestId("user")).toHaveTextContent(USER.email);
+    expect(getToken()).toBe("stored-token");
   });
 });
 

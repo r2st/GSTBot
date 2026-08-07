@@ -1,5 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, errorMessage, getToken, isAbortError, setToken } from "./api";
+import {
+  api,
+  errorMessage,
+  getToken,
+  isAbortError,
+  onUnauthorized,
+  setToken,
+} from "./api";
 
 function jsonResponse(body, { status = 200 } = {}) {
   return {
@@ -202,6 +209,65 @@ describe("api", () => {
     // Retrying with a credential the server already refused is pointless, and
     // it keeps the UI from ever falling back to the login screen.
     expect(getToken()).toBeNull();
+  });
+
+  it("announces a rejected token so the session can end with it", async () => {
+    // Dropping the token is only half of it. The session lives in React and
+    // outlived the credential: `user` stayed set, so the app kept rendering,
+    // every later request went out unauthenticated, and `/login` bounced back
+    // to `/`. The one screen that could fix it was unreachable.
+    setToken("stale-token");
+    const told = vi.fn();
+    const unsubscribe = onUnauthorized(told);
+
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Could not validate credentials" }, { status: 401 }),
+    );
+    await expect(api.me()).rejects.toThrow();
+
+    expect(told).toHaveBeenCalledTimes(1);
+    unsubscribe();
+  });
+
+  it("stops announcing once a subscriber has unsubscribed", async () => {
+    setToken("stale-token");
+    const told = vi.fn();
+    onUnauthorized(told)();
+
+    global.fetch.mockResolvedValueOnce(jsonResponse({ detail: "no" }, { status: 401 }));
+    await expect(api.me()).rejects.toThrow();
+
+    expect(told).not.toHaveBeenCalled();
+  });
+
+  it("says nothing about a 401 from a request that carried no token", async () => {
+    // A wrong password on the sign-in form is not an expired session, and
+    // announcing it as one would have the login page fight its own error
+    // handling.
+    setToken(null);
+    const told = vi.fn();
+    const unsubscribe = onUnauthorized(told);
+
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Incorrect email or password" }, { status: 401 }),
+    );
+    await expect(api.login("a@b.com", "wrong")).rejects.toThrow();
+
+    expect(told).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
+  it("does not let a throwing subscriber become the caller's error", async () => {
+    setToken("stale-token");
+    const unsubscribe = onUnauthorized(() => {
+      throw new Error("subscriber exploded");
+    });
+
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Could not validate credentials" }, { status: 401 }),
+    );
+    await expect(api.me()).rejects.toThrow("Could not validate credentials");
+    unsubscribe();
   });
 
   it("registers and keeps the returned session", async () => {

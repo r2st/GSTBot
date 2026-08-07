@@ -13,6 +13,44 @@ export function setToken(token) {
   else localStorage.removeItem(TOKEN_KEY);
 }
 
+// Told when a credential this client actually sent comes back refused.
+//
+// Dropping the dead token is only half of what has to happen, and on its own it
+// left the app in a state it could not get out of. The session lives in React
+// (`useAuth`), the token lives in localStorage, and clearing one without the
+// other means `user` is still set: every page goes on rendering, every request
+// now goes out with no Authorization header at all, and each one comes back
+// "You are not signed in. Please sign in again." — advice the user cannot take,
+// because `/login` redirects to `/` for as long as `user` is truthy. A token
+// expiring mid-session was therefore a dead end, escapable only by clearing
+// site data. The 24-hour expiry means every user meets it.
+const unauthorizedListeners = new Set();
+
+/** Subscribe to "the token was refused". Returns an unsubscribe function. */
+export function onUnauthorized(listener) {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+
+/**
+ * A rejected token is a dead token: drop it and say so.
+ *
+ * Only called when the request actually carried one. A 401 from the login form
+ * is a wrong password, not an expired session, and announcing it as one would
+ * make the sign-in page fight its own error handling.
+ */
+function tokenRejected() {
+  setToken(null);
+  for (const listener of unauthorizedListeners) {
+    try {
+      listener();
+    } catch {
+      // A subscriber that throws must not become the error the caller sees:
+      // the request has its own outcome to report and this is a side channel.
+    }
+  }
+}
+
 async function request(path, { method = "GET", body, form, auth = true, signal } = {}) {
   const headers = {};
   const token = getToken();
@@ -28,9 +66,10 @@ async function request(path, { method = "GET", body, form, auth = true, signal }
 
   const res = await fetch(`${BASE}${path}`, { method, headers, body: payload, signal });
 
-  // A rejected token is a dead token; drop it so the app falls back to login
-  // rather than retrying with a credential the server has already refused.
-  if (res.status === 401) setToken(null);
+  // A rejected token is a dead token; drop it, and end the session with it, so
+  // the app falls back to login rather than retrying with a credential the
+  // server has already refused.
+  if (res.status === 401 && auth && token) tokenRejected();
 
   if (res.status === 204) return null;
 
@@ -285,7 +324,7 @@ export const api = {
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
     const res = await fetch(api.exportUrl(returnType, extension, period), { headers });
-    if (res.status === 401) setToken(null);
+    if (res.status === 401 && token) tokenRejected();
     if (!res.ok) {
       // Same two hazards as `request`: an HTML error page from the edge must
       // not surface as a JSON parse error, and `statusText` is empty over
