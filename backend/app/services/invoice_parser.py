@@ -301,8 +301,12 @@ def _clean_str(value: object, max_length: int = 255) -> str | None:
     return text[:max_length]
 
 
-def _normalize_rate(value: object) -> Decimal | None:
+def normalize_rate(value: object) -> Decimal | None:
     """Coerce a tax rate, dropping anything that is not a real GST rate.
+
+    Public because :mod:`app.services.filing` reads the same rates back off a
+    stored ``line_items`` breakdown when it builds a return, and "what counts as
+    a rate" must not be answered twice.
 
     A model asked for "18" sometimes answers "0.18", so a value below 1 is
     read as a fraction and scaled — but only when it is not already a rate in
@@ -470,9 +474,9 @@ def parse_heuristic(text: str) -> ParsedInvoice:
     # the sum of the two halves — reporting 9 here would understate every
     # intra-state invoice by half.
     if "igst" in rates:
-        result.tax_rate = _normalize_rate(rates["igst"])
+        result.tax_rate = normalize_rate(rates["igst"])
     elif "cgst" in rates:
-        result.tax_rate = _normalize_rate(rates["cgst"] + rates.get("sgst", rates["cgst"]))
+        result.tax_rate = normalize_rate(rates["cgst"] + rates.get("sgst", rates["cgst"]))
 
     result.reverse_charge = bool(_REVERSE_CHARGE_PATTERN.search(text))
 
@@ -578,7 +582,7 @@ def _from_model_payload(payload: dict, text: str, model: str) -> ParsedInvoice:
                 f"Discarded an {kind} {attr.replace('_', ' ')}: {str(raw)[:40]}"
             )
         setattr(result, attr, amount or Decimal("0.00"))
-    result.tax_rate = _normalize_rate(payload.get("tax_rate"))
+    result.tax_rate = normalize_rate(payload.get("tax_rate"))
 
     pos = _clean_str(payload.get("place_of_supply"), 2)
     if pos and pos.isdigit() and pos.zfill(2) in gstin_service.STATE_CODES:

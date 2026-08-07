@@ -12,7 +12,7 @@ import pytest
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.services import filing as filing_service
 from app.services import gst_calendar
-from app.services.filing import Severity
+from app.services.filing import ZERO, Severity
 from tests.conftest import (
     BUSINESS_GSTIN,
     SUPPLIER_GSTIN_OTHER_STATE,
@@ -509,12 +509,27 @@ def test_gstr1_b2b_invoice_carries_the_portal_field_names(db_session, business):
     assert item["camt"] == 0.0
 
 
-def test_gstr1_puts_small_unregistered_sales_in_b2cs(db_session, business):
-    save(
-        db_session,
-        business.id,
-        sale(counterparty_gstin=None, counterparty_name="Walk-in", place_of_supply="29"),
+def small_b2c(**kwargs) -> Invoice:
+    """An inter-state counter sale below the B2CL limit, tax included.
+
+    ₹50,000 plus 18% is ₹59,000, which is under the ₹1 lakh that sends an
+    inter-state B2C supply to the invoice-wise block. The default ``sale`` is
+    not: ₹1 lakh plus tax clears the limit, and using it here would assert the
+    summary block on an invoice that no longer belongs in it.
+    """
+    defaults = dict(
+        counterparty_gstin=None,
+        place_of_supply="29",
+        taxable_value=Decimal("50000.00"),
+        igst=Decimal("9000.00"),
+        total_value=Decimal("59000.00"),
     )
+    defaults.update(kwargs)
+    return sale(**defaults)
+
+
+def test_gstr1_puts_small_unregistered_sales_in_b2cs(db_session, business):
+    save(db_session, business.id, small_b2c(counterparty_name="Walk-in"))
 
     document = filing_service.build_gstr1(db_session, business, PERIOD)
 
@@ -523,26 +538,18 @@ def test_gstr1_puts_small_unregistered_sales_in_b2cs(db_session, business):
     assert bucket["sply_ty"] == "INTER"
     assert bucket["pos"] == "29"
     assert bucket["rt"] == 18.0
-    assert bucket["txval"] == 100000.00
+    assert bucket["txval"] == 50000.00
 
 
 def test_gstr1_summarises_b2cs_by_place_and_rate(db_session, business):
     for number in ("C-1", "C-2"):
-        save(
-            db_session,
-            business.id,
-            sale(
-                invoice_number=number,
-                counterparty_gstin=None,
-                place_of_supply="29",
-            ),
-        )
+        save(db_session, business.id, small_b2c(invoice_number=number))
 
     document = filing_service.build_gstr1(db_session, business, PERIOD)
 
     (bucket,) = document["b2cs"]
-    assert bucket["txval"] == 200000.00
-    assert bucket["iamt"] == 36000.00
+    assert bucket["txval"] == 100000.00
+    assert bucket["iamt"] == 18000.00
 
 
 def test_gstr1_carries_the_state_split_into_a_b2cs_bucket(db_session, business):
@@ -672,20 +679,12 @@ class TestAnInvoiceWorthWhatItIsWorth:
 
     def test_a_small_b2c_sale_is_still_summarised(self, db_session, business):
         """The derivation must not push everything into b2cl."""
-        save(
-            db_session,
-            business.id,
-            sale(
-                counterparty_gstin=None,
-                place_of_supply="29",
-                total_value=Decimal("0.00"),
-            ),
-        )
+        save(db_session, business.id, small_b2c(total_value=Decimal("0.00")))
 
         document = filing_service.build_gstr1(db_session, business, PERIOD)
 
         assert "b2cl" not in document
-        assert document["b2cs"][0]["txval"] == 100000.00
+        assert document["b2cs"][0]["txval"] == 50000.00
 
     def test_the_threshold_is_the_value_with_tax_on_it(self, db_session, business):
         """₹2.4 lakh plus 18% is above ₹2.5 lakh; the taxable value alone is not."""
@@ -734,6 +733,377 @@ class TestAnInvoiceWorthWhatItIsWorth:
         document = filing_service.build_gstr1(db_session, business, PERIOD)
 
         assert document["b2b"][0]["inv"][0]["val"] == 118000.00
+
+
+class TestAnInvoiceThatMixesRates:
+    """A mixed-rate invoice is filed rate by rate, not at a blended average.
+
+    The parser's own schema tells the model to leave ``tax_rate`` null "if the
+    invoice mixes rates" and to return the breakdown in ``line_items``, so the
+    invoices that most needed the breakdown were exactly the ones filed without
+    it: ``_rate_of`` derived one rate from the totals and snapped it to the
+    nearest real slab, producing a line whose tax is not its rate applied to its
+    value. The portal rejects that on upload.
+    """
+
+    def mixed(self, **kwargs) -> Invoice:
+        """₹50,000 at 5% and ₹50,000 at 18%, sold within Maharashtra.
+
+        ₹2,500 + ₹9,000 = ₹11,500 of tax on ₹1,00,000, which is 11.5% — not a
+        slab, and nearest to 12%.
+        """
+        defaults = dict(
+            tax_rate=None,
+            cgst=Decimal("5750.00"),
+            sgst=Decimal("5750.00"),
+            igst=Decimal("0.00"),
+            total_value=Decimal("111500.00"),
+            line_items=[
+                {
+                    "description": "Printed books",
+                    "hsn_code": "49019900",
+                    "quantity": 40,
+                    "taxable_value": 50000,
+                    "tax_rate": 5,
+                },
+                {
+                    "description": "Laptop stands",
+                    "hsn_code": "84713010",
+                    "quantity": 10,
+                    "taxable_value": 50000,
+                    "tax_rate": 18,
+                },
+            ],
+        )
+        defaults.update(kwargs)
+        return local_sale(**defaults)
+
+    def test_without_the_breakdown_it_would_be_filed_at_a_rate_it_is_not(self):
+        """The failure this exists to prevent, pinned so it stays prevented."""
+        assert filing_service._rate_of(self.mixed(line_items=None)) == Decimal("12")
+
+    def test_the_b2b_block_carries_one_item_per_rate(self, db_session, business):
+        save(db_session, business.id, self.mixed())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        items = document["b2b"][0]["inv"][0]["itms"]
+        assert [item["num"] for item in items] == [1, 2]
+        assert [item["itm_det"]["rt"] for item in items] == [5.0, 18.0]
+
+    def test_each_item_carries_the_tax_its_own_rate_produces(self, db_session, business):
+        """Which is the whole point: the portal cross-foots rate against tax."""
+        save(db_session, business.id, self.mixed())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        five, eighteen = document["b2b"][0]["inv"][0]["itms"]
+        assert five["itm_det"]["txval"] == 50000.00
+        assert five["itm_det"]["camt"] == 1250.00
+        assert five["itm_det"]["samt"] == 1250.00
+        assert eighteen["itm_det"]["txval"] == 50000.00
+        assert eighteen["itm_det"]["camt"] == 4500.00
+        assert eighteen["itm_det"]["samt"] == 4500.00
+
+    def test_the_items_still_add_up_to_the_invoice(self, db_session, business):
+        """A block that does not foot is a rejected upload, whatever its rates."""
+        save(db_session, business.id, self.mixed())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        items = document["b2b"][0]["inv"][0]["itms"]
+        assert sum(item["itm_det"]["txval"] for item in items) == 100000.00
+        assert sum(item["itm_det"]["camt"] for item in items) == 5750.00
+        assert sum(item["itm_det"]["samt"] for item in items) == 5750.00
+
+    def test_the_hsn_summary_splits_by_line_rather_than_by_invoice(
+        self, db_session, business
+    ):
+        """Table 12 is rate-wise too, and each line has its own HSN.
+
+        Rolled up to the invoice, both lines were reported under whichever HSN
+        the parser happened to put in the invoice-level field, at a rate neither
+        of them carried.
+        """
+        save(db_session, business.id, self.mixed())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        data = {entry["hsn_sc"]: entry for entry in document["hsn"]["data"]}
+        assert data["49019900"]["rt"] == 5.0
+        assert data["49019900"]["txval"] == 50000.00
+        assert data["49019900"]["camt"] == 1250.00
+        assert data["84713010"]["rt"] == 18.0
+        assert data["84713010"]["camt"] == 4500.00
+
+    def test_the_hsn_summary_reports_the_quantity_the_lines_carry(
+        self, db_session, business
+    ):
+        """`qty` is 0 only when nothing was extracted; a line item carries one."""
+        save(db_session, business.id, self.mixed())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        data = {entry["hsn_sc"]: entry for entry in document["hsn"]["data"]}
+        assert data["49019900"]["qty"] == 40
+        assert data["84713010"]["qty"] == 10
+
+    def test_a_b2c_sale_lands_in_one_b2cs_bucket_per_rate(self, db_session, business):
+        save(db_session, business.id, self.mixed(counterparty_gstin=None))
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        buckets = {bucket["rt"]: bucket for bucket in document["b2cs"]}
+        assert set(buckets) == {5.0, 18.0}
+        assert buckets[5.0]["txval"] == 50000.00
+        assert buckets[18.0]["camt"] == 4500.00
+
+    def test_two_lines_on_one_rate_are_one_item_but_two_hsn_rows(
+        self, db_session, business
+    ):
+        """`itms` is rate-wise; the HSN table is finer than that."""
+        save(
+            db_session,
+            business.id,
+            self.mixed(
+                line_items=[
+                    {"hsn_code": "49019900", "taxable_value": 25000, "tax_rate": 5},
+                    {"hsn_code": "49029000", "taxable_value": 25000, "tax_rate": 5},
+                    {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
+                ]
+            ),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        items = document["b2b"][0]["inv"][0]["itms"]
+        assert [item["itm_det"]["rt"] for item in items] == [5.0, 18.0]
+        assert items[0]["itm_det"]["txval"] == 50000.00
+        assert len(document["hsn"]["data"]) == 3
+
+    def test_validation_now_objects_to_the_blended_rate(self):
+        """With no usable breakdown, the invoice still files at a snapped rate.
+
+        Nothing said so before: the arithmetic check only ran when a rate was
+        stored, so the invoices whose rate could not be read were also the ones
+        whose tax was never verified.
+        """
+        assert issues_for(self.mixed(line_items=None)) == {"tax_rate": Severity.ERROR}
+
+    def test_the_message_names_the_rate_it_would_be_filed_at(self):
+        (issue,) = filing_service.validate_invoice(
+            self.mixed(line_items=None), business_state="27", period=PERIOD
+        )
+        assert "12%" in issue.message
+
+    def test_a_usable_breakdown_validates_clean(self):
+        assert issues_for(self.mixed()) == {}
+
+    def test_a_breakdown_that_does_not_tie_to_the_invoice_is_not_used(self):
+        """Rate-wise lines that do not add up to their invoice are worse than none.
+
+        They would file a block footing to something other than the document it
+        sits under, which is a rejected upload rather than a wrong figure. So
+        the invoice falls back — and the fallback's blended rate is then caught
+        by validation, which is the outcome the user can act on.
+        """
+        invoice = self.mixed(
+            line_items=[
+                {"hsn_code": "49019900", "taxable_value": 10, "tax_rate": 5},
+                {"hsn_code": "84713010", "taxable_value": 20, "tax_rate": 18},
+            ]
+        )
+        assert filing_service._line_item_rate_lines(invoice) is None
+        assert issues_for(invoice) == {"tax_rate": Severity.ERROR}
+
+    @pytest.mark.parametrize(
+        "items",
+        [
+            pytest.param(
+                [{"taxable_value": 50000, "tax_rate": 5},
+                 {"taxable_value": 50000, "tax_rate": 17}],
+                id="a rate that is not a slab",
+            ),
+            pytest.param(
+                [{"taxable_value": 50000, "tax_rate": 5},
+                 {"taxable_value": "n/a", "tax_rate": 18}],
+                id="an unreadable value",
+            ),
+            pytest.param(
+                [{"taxable_value": 50000, "tax_rate": 5}, "Laptop stands"],
+                id="a line that is not an object",
+            ),
+            pytest.param(
+                [{"taxable_value": 50000, "tax_rate": 5},
+                 {"taxable_value": -50000, "tax_rate": 18}],
+                id="a negative value",
+            ),
+        ],
+    )
+    def test_a_breakdown_with_a_bad_line_is_not_used(self, items):
+        """All of it or none of it. Half a breakdown does not foot either."""
+        assert filing_service._line_item_rate_lines(self.mixed(line_items=items)) is None
+
+    def test_a_single_rate_breakdown_is_left_alone(self):
+        """The invoice-level figures are the more trustworthy ones."""
+        invoice = self.mixed(
+            tax_rate=Decimal("18"),
+            cgst=Decimal("9000.00"),
+            sgst=Decimal("9000.00"),
+            line_items=[
+                {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
+                {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
+            ],
+        )
+        assert filing_service._line_item_rate_lines(invoice) is None
+
+    def test_a_rupee_of_rounding_between_lines_and_invoice_is_absorbed(self):
+        """And lands on the largest line, so the block still foots exactly."""
+        invoice = self.mixed(
+            line_items=[
+                {"hsn_code": "49019900", "taxable_value": "49999.50", "tax_rate": 5},
+                {"hsn_code": "84713010", "taxable_value": "50000.00", "tax_rate": 18},
+            ]
+        )
+        lines = filing_service.rate_lines(invoice)
+        assert sum(line.taxable_value for line in lines) == Decimal("100000.00")
+        assert sum(line.cgst for line in lines) == Decimal("5750.00")
+
+    def test_a_breakdown_whose_rates_do_not_produce_the_invoice_s_tax_is_an_error(self):
+        """The lines add up to the invoice's value but not to its tax.
+
+        Filable — the block foots — and wrong, so it is reported rather than
+        silently uploaded for the portal to reject.
+        """
+        invoice = self.mixed(
+            cgst=Decimal("5000.00"),
+            sgst=Decimal("5000.00"),
+            total_value=Decimal("110000.00"),
+        )
+        (issue,) = filing_service.validate_invoice(
+            invoice, business_state="27", period=PERIOD
+        )
+        assert issue.field == "tax_rate"
+        assert "5%, 18%" in issue.message
+
+    def test_a_line_with_no_hsn_anywhere_is_left_out_of_the_summary(
+        self, db_session, business
+    ):
+        """A missing HSN is a warning, not a licence to invent one for table 12."""
+        save(
+            db_session,
+            business.id,
+            self.mixed(
+                hsn_code=None,
+                line_items=[
+                    {"taxable_value": 50000, "tax_rate": 5},
+                    {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
+                ],
+            ),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        (entry,) = document["hsn"]["data"]
+        assert entry["hsn_sc"] == "84713010"
+
+    def test_the_csv_still_reports_the_invoice_as_one_row(self, db_session, business):
+        """The CSV is a purchase register, not a return. One document, one row."""
+        save(db_session, business.id, self.mixed())
+
+        rows = list(
+            csv.DictReader(
+                io.StringIO(
+                    filing_service.to_csv(
+                        db_session, business, PERIOD, InvoiceType.SALES
+                    )
+                )
+            )
+        )
+
+        assert len(rows) == 1
+        assert rows[0]["taxable_value"] == "100000.00"
+
+
+class TestSplittingAnAmountAcrossRates:
+    """``_allocate`` is where the rate-wise block is made to foot."""
+
+    def test_the_parts_add_back_up_to_the_whole(self):
+        parts = filing_service._allocate(
+            Decimal("100.00"), [Decimal("1"), Decimal("1"), Decimal("1")]
+        )
+        assert sum(parts) == Decimal("100.00")
+        # The residual lands on the largest share, and the first of equals.
+        assert parts == [Decimal("33.34"), Decimal("33.33"), Decimal("33.33")]
+
+    def test_nothing_to_split_splits_into_nothing(self):
+        assert filing_service._allocate(ZERO, [Decimal("1"), Decimal("2")]) == [ZERO, ZERO]
+
+    def test_weightless_lines_leave_the_amount_whole(self):
+        """Every line nil-rated: there is no proportion to divide by.
+
+        Spreading it evenly would be inventing a split the figures do not
+        support, so it stays where it can be seen.
+        """
+        assert filing_service._allocate(Decimal("50.00"), [ZERO, ZERO]) == [
+            Decimal("50.00"),
+            ZERO,
+        ]
+
+
+class TestTheB2CLThreshold:
+    """Notification 12/2024-CT lowered it from ₹2.5 lakh to ₹1 lakh.
+
+    An inter-state B2C supply above the limit is reported invoice by invoice
+    rather than summarised, so the limit decides which block a supply lands in
+    — and the product was still using a figure two and a half times too high,
+    dropping the invoice-level detail on everything between the two.
+    """
+
+    def large_b2c(self, **kwargs) -> Invoice:
+        """₹1.5 lakh plus 18%: over the new limit, under the old one."""
+        defaults = dict(
+            counterparty_gstin=None,
+            place_of_supply="29",
+            taxable_value=Decimal("150000.00"),
+            igst=Decimal("27000.00"),
+            total_value=Decimal("177000.00"),
+        )
+        defaults.update(kwargs)
+        return sale(**defaults)
+
+    def test_a_supply_between_the_two_limits_is_now_listed(self, db_session, business):
+        save(db_session, business.id, self.large_b2c())
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert "b2cs" not in document
+        assert document["b2cl"][0]["inv"][0]["val"] == 177000.00
+
+    def test_a_period_filed_under_the_old_limit_reproduces_what_was_filed(
+        self, db_session, business
+    ):
+        """Re-generating an old return must not restate it.
+
+        The same reason ``build_gstr3b`` anchors Rule 37 to the close of the
+        period rather than to today.
+        """
+        old = "2024-08"
+        save(
+            db_session,
+            business.id,
+            self.large_b2c(invoice_date=date(2024, 8, 15), period=old),
+        )
+
+        document = filing_service.build_gstr1(db_session, business, old)
+
+        assert "b2cl" not in document
+        assert document["b2cs"][0]["txval"] == 150000.00
+
+    def test_the_limit_moves_with_the_period(self):
+        assert filing_service.b2cl_threshold("2024-10") == Decimal("250000.00")
+        assert filing_service.b2cl_threshold("2024-11") == Decimal("100000.00")
+        assert filing_service.b2cl_threshold("2026-04") == Decimal("100000.00")
 
 
 def test_gstr1_summarises_hsn_by_code_and_rate(db_session, business):

@@ -399,7 +399,7 @@ class TestTheParserAndTheFilingValidatorAgreeOnTheSlabs:
         "rate", ["0.1", "1", "1.5", "6", "7.5"]
     )
     def test_a_slab_the_parser_used_to_drop_now_survives(self, rate):
-        assert invoice_parser._normalize_rate(rate) == Decimal(rate)
+        assert invoice_parser.normalize_rate(rate) == Decimal(rate)
 
     def test_an_affordable_housing_invoice_keeps_its_rate(self):
         """1.5% is printed as 0.75% CGST plus 0.75% SGST."""
@@ -412,9 +412,9 @@ class TestTheParserAndTheFilingValidatorAgreeOnTheSlabs:
 
     def test_a_rate_that_is_not_a_slab_is_still_dropped(self):
         """Completing the list must not turn it into "anything goes"."""
-        assert invoice_parser._normalize_rate("17") is None
-        assert invoice_parser._normalize_rate("20") is None
-        assert invoice_parser._normalize_rate("15") is None
+        assert invoice_parser.normalize_rate("17") is None
+        assert invoice_parser.normalize_rate("20") is None
+        assert invoice_parser.normalize_rate("15") is None
 
 
 class TestTheSubOnePercentSlabs:
@@ -427,19 +427,19 @@ class TestTheSubOnePercentSlabs:
     """
 
     def test_a_quarter_percent_survives(self):
-        assert invoice_parser._normalize_rate("0.25") == Decimal("0.25")
+        assert invoice_parser.normalize_rate("0.25") == Decimal("0.25")
 
     def test_it_is_still_a_rate_when_it_arrives_as_a_number(self):
-        assert invoice_parser._normalize_rate(0.25) == Decimal("0.25")
+        assert invoice_parser.normalize_rate(0.25) == Decimal("0.25")
 
     def test_a_fraction_that_is_not_itself_a_rate_is_still_scaled(self):
         """Reading the literal first must not stop 0.18 meaning 18%."""
-        assert invoice_parser._normalize_rate("0.18") == Decimal("18")
-        assert invoice_parser._normalize_rate("0.05") == Decimal("5")
+        assert invoice_parser.normalize_rate("0.18") == Decimal("18")
+        assert invoice_parser.normalize_rate("0.05") == Decimal("5")
 
     def test_a_fraction_of_a_rate_that_is_not_one_is_still_dropped(self):
         """0.5 is neither a slab nor a fraction of one; 50% does not exist."""
-        assert invoice_parser._normalize_rate("0.5") is None
+        assert invoice_parser.normalize_rate("0.5") is None
 
     def test_the_two_readings_never_both_land_on_a_slab(self):
         """Why preferring the literal costs nothing.

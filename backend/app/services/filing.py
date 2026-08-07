@@ -66,7 +66,32 @@ ARITHMETIC_TOLERANCE = Decimal("1.00")
 
 # Above this invoice value an inter-state B2C supply must be reported
 # invoice-by-invoice (B2CL) rather than in the rate-wise B2CS summary.
-B2CL_THRESHOLD = Decimal("250000.00")
+#
+# The limit moved. Notification 12/2024-Central Tax replaced "two and a half
+# lakh rupees" with "one lakh rupees" in table 5 of FORM GSTR-1, and the portal
+# has applied the lower figure since the November 2024 return. Every period this
+# product will ever file is past that, so the old limit is kept only so that
+# re-generating a return for a period that was filed under it reproduces what
+# was filed — which is the same reason ``build_gstr3b`` anchors Rule 37 to the
+# close of the period rather than to today.
+#
+# The direction of the error matters. Filing a ₹1.5 lakh inter-state B2C supply
+# in the rate-wise summary does not lose the money — the tax is declared either
+# way — it drops the invoice-level detail the table exists to carry, and a
+# return missing detail the schema requires is one the department can ask about
+# long after the cash has been paid.
+B2CL_THRESHOLD = Decimal("100000.00")
+B2CL_THRESHOLD_BEFORE_NOV_2024 = Decimal("250000.00")
+B2CL_THRESHOLD_LOWERED_FROM = "2024-11"
+
+
+def b2cl_threshold(period: str) -> Decimal:
+    """The B2CL limit that applied to *period*."""
+    return (
+        B2CL_THRESHOLD
+        if period >= B2CL_THRESHOLD_LOWERED_FROM
+        else B2CL_THRESHOLD_BEFORE_NOV_2024
+    )
 
 # The portal's schema version at the time of writing. Sent verbatim in the
 # envelope; the offline utility checks it.
@@ -269,18 +294,45 @@ def validate_invoice(
             f"{invoice.tax_rate}% is not a GST rate",
         )
 
-    # Tax should be the rate applied to the taxable value. Checked only when a
-    # single rate is recorded: a multi-rate invoice has no one rate to apply,
-    # and its breakdown lives in line_items.
-    if invoice.tax_rate is not None and taxable > ZERO:
-        expected = _q(taxable * invoice.tax_rate / Decimal("100"))
+    # Tax should be the rate applied to the taxable value — checked against the
+    # rates this invoice will actually be *filed* at, which is not always the
+    # rate stored on it.
+    #
+    # It used to be checked only when ``tax_rate`` was set, on the grounds that
+    # a multi-rate invoice has no one rate to apply. But the return still has to
+    # declare a rate for every rupee, so :func:`rate_lines` finds one either way:
+    # from the stored breakdown where there is a usable one, and otherwise by
+    # deriving a single rate from the totals and snapping it to the nearest real
+    # slab. An invoice carrying ₹1,150 of tax on ₹10,000 is filed at 12% — the
+    # closest slab to the 11.5% the figures imply — and 12% of ₹10,000 is
+    # ₹1,200. The portal rejects that line, and validation, which exists to say
+    # so before an afternoon is spent, was silent on precisely the invoices
+    # whose rate it could not read.
+    if taxable > ZERO:
+        lines = rate_lines(invoice)
+        expected = _q(
+            sum((line.rate * line.taxable_value for line in lines), ZERO) / Decimal("100")
+        )
         charged = tax - (invoice.cess or ZERO)  # Cess is levied on its own base.
         if abs(charged - expected) > ARITHMETIC_TOLERANCE:
-            add(
-                "tax_rate",
-                Severity.ERROR,
-                f"Tax of {charged} does not match {invoice.tax_rate}% of {taxable} ({expected})",
-            )
+            if invoice.tax_rate is not None:
+                message = (
+                    f"Tax of {charged} does not match {invoice.tax_rate}% of {taxable} "
+                    f"({expected})"
+                )
+            elif len(lines) > 1:
+                rates = ", ".join(f"{line.rate}%" for line in lines)
+                message = (
+                    f"Tax of {charged} does not match the rate-wise breakdown this will "
+                    f"be filed at ({rates}), which comes to {expected}"
+                )
+            else:
+                message = (
+                    f"Tax of {charged} matches no GST rate on {taxable}. It will be filed "
+                    f"at {lines[0].rate}%, the nearest slab, which is {expected}. Set the "
+                    "rate or correct the tax."
+                )
+            add("tax_rate", Severity.ERROR, message)
 
     if invoice.total_value and abs(invoice.total_value - (taxable + tax)) > (
         ARITHMETIC_TOLERANCE
@@ -739,19 +791,188 @@ def _invoice_value(invoice: Invoice) -> Decimal:
     return invoice.total_value or _q((invoice.taxable_value or ZERO) + _tax_total(invoice))
 
 
-def _item_block(invoice: Invoice) -> dict:
-    """The portal's ``itms`` entry for a single-rate invoice."""
-    return {
-        "num": 1,
-        "itm_det": {
-            "rt": float(_rate_of(invoice)),
-            "txval": float(_q(invoice.taxable_value or ZERO)),
-            "iamt": float(_q(invoice.igst or ZERO)),
-            "camt": float(_q(invoice.cgst or ZERO)),
-            "samt": float(_q(invoice.sgst or ZERO)),
-            "csamt": float(_q(invoice.cess or ZERO)),
-        },
+@dataclass(frozen=True)
+class RateLine:
+    """One rate-wise slice of an invoice: what the portal reports, everywhere.
+
+    GSTR-1 is rate-wise from top to bottom. ``itms`` inside a B2B or B2CL
+    invoice, the B2CS summary and the HSN summary are all keyed by rate, and an
+    invoice that carries two rates has to appear in each of them twice.
+    """
+
+    rate: Decimal
+    taxable_value: Decimal
+    igst: Decimal
+    cgst: Decimal
+    sgst: Decimal
+    cess: Decimal
+    hsn_code: str | None = None
+    quantity: Decimal = ZERO
+
+
+def _allocate(total: Decimal, weights: list[Decimal]) -> list[Decimal]:
+    """Split *total* across *weights*, to the paisa, summing back to *total*.
+
+    The parts are rounded independently and the residual is handed to the
+    largest share, so the rate-wise lines of an invoice add up to the figure
+    stored on it exactly. They have to: the portal cross-foots ``itms`` against
+    the invoice, and a paisa of drift is a rejected upload.
+    """
+    if total == ZERO:
+        return [ZERO] * len(weights)
+    grand = sum(weights, ZERO)
+    if grand <= ZERO:
+        # No rate to apportion by — every line is nil-rated. Nothing sensible
+        # divides the amount, so it stays whole on the first line rather than
+        # being spread on no evidence.
+        return [total] + [ZERO] * (len(weights) - 1)
+    parts = [_q(total * weight / grand) for weight in weights]
+    largest = max(range(len(weights)), key=lambda index: weights[index])
+    parts[largest] += total - sum(parts, ZERO)
+    return parts
+
+
+def _line_item_rate_lines(invoice: Invoice) -> list[RateLine] | None:
+    """The invoice's stored breakdown as rate-wise lines, or ``None``.
+
+    ``None`` means "there is no breakdown worth filing from", and every caller
+    then falls back to treating the invoice as one line at :func:`_rate_of`.
+
+    The bar is deliberately high, because a breakdown that does not tie to the
+    invoice is worse than no breakdown: it would file rate-wise lines that add
+    up to something other than the invoice they sit under, which is a rejected
+    upload rather than a wrong figure. So the items are used only when every one
+    of them carries a real GST rate and a readable value, and when those values
+    add up to the invoice's own taxable value.
+
+    Two or more distinct rates is the case this exists for. A breakdown on a
+    single rate tells the return nothing the invoice did not already say, and
+    the extraction's per-line values are less trustworthy than the invoice-level
+    totals the rest of the product is built on — so it is left alone.
+    """
+    items = invoice.line_items
+    if not isinstance(items, list) or not items:
+        return None
+
+    groups: dict[tuple[Decimal, str | None], dict] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            return None
+        rate = invoice_parser.normalize_rate(item.get("tax_rate"))
+        if rate is None:
+            return None
+        taxable = invoice_parser.to_money(item.get("taxable_value"), default=None)
+        if taxable is None or taxable < ZERO:
+            return None
+        hsn = item.get("hsn_code")
+        hsn = str(hsn).strip() if hsn else None
+        quantity = invoice_parser.to_decimal(item.get("quantity"), default=None) or ZERO
+        bucket = groups.setdefault(
+            (rate, hsn or invoice.hsn_code), {"taxable": ZERO, "quantity": ZERO}
+        )
+        bucket["taxable"] += taxable
+        bucket["quantity"] += max(ZERO, quantity)
+
+    if len({rate for rate, _ in groups}) < 2:
+        return None
+
+    ordered = sorted(groups.items(), key=lambda entry: (entry[0][0], entry[0][1] or ""))
+    taxable_total = sum((bucket["taxable"] for _, bucket in ordered), ZERO)
+    invoice_taxable = _q(invoice.taxable_value or ZERO)
+    if abs(taxable_total - invoice_taxable) > ARITHMETIC_TOLERANCE:
+        return None
+
+    # The lines' own values are kept — they are what the document printed — with
+    # the paisa of rounding between them and the invoice given to the largest,
+    # so the block foots.
+    taxables = [_q(bucket["taxable"]) for _, bucket in ordered]
+    largest = max(range(len(taxables)), key=lambda index: taxables[index])
+    taxables[largest] += invoice_taxable - sum(taxables, ZERO)
+
+    weights = [rate * taxable for (rate, _), taxable in zip(
+        (key for key, _ in ordered), taxables, strict=True
+    )]
+    heads = {
+        head: _allocate(_q(getattr(invoice, head) or ZERO), weights)
+        for head in ("igst", "cgst", "sgst", "cess")
     }
+
+    return [
+        RateLine(
+            rate=rate,
+            taxable_value=taxables[index],
+            igst=heads["igst"][index],
+            cgst=heads["cgst"][index],
+            sgst=heads["sgst"][index],
+            cess=heads["cess"][index],
+            hsn_code=hsn,
+            quantity=bucket["quantity"],
+        )
+        for index, ((rate, hsn), bucket) in enumerate(ordered)
+    ]
+
+
+def rate_lines(invoice: Invoice) -> list[RateLine]:
+    """Every rate the invoice carries, with the money split across them.
+
+    One line for the ordinary invoice; one per rate for an invoice that mixes
+    them. The mixed case used to be flattened into a single line at a rate
+    derived from the totals, and the derivation is nonsense on a mixed invoice:
+    ₹5,000 at 5% beside ₹5,000 at 18% is ₹1,150 of tax on ₹10,000, which
+    :func:`_rate_of` reads as 11.5% and snaps to the nearest real slab, 12%. The
+    return then declared ``rt: 12, txval: 10000, camt: 575, samt: 575`` — a line
+    whose tax is not 12% of its value, which the portal rejects on upload.
+
+    The parser has always asked the model for the breakdown and stored it, and
+    its own schema says to leave ``tax_rate`` null "if the invoice mixes rates",
+    so precisely the invoices that needed the breakdown were the ones filed
+    without it.
+    """
+    lines = _line_item_rate_lines(invoice)
+    if lines is not None:
+        return lines
+    return [
+        RateLine(
+            rate=_rate_of(invoice),
+            taxable_value=_q(invoice.taxable_value or ZERO),
+            igst=_q(invoice.igst or ZERO),
+            cgst=_q(invoice.cgst or ZERO),
+            sgst=_q(invoice.sgst or ZERO),
+            cess=_q(invoice.cess or ZERO),
+            hsn_code=invoice.hsn_code,
+        )
+    ]
+
+
+def _item_blocks(lines: list[RateLine]) -> list[dict]:
+    """The portal's ``itms``: one entry per rate, numbered from one.
+
+    Folded by rate rather than emitted per line, because ``itms`` is rate-wise
+    and two lines of an invoice on the same slab are one entry there however
+    many HSN codes they span. The HSN summary keeps that finer grain.
+    """
+    by_rate: dict[Decimal, dict] = {}
+    for line in lines:
+        detail = by_rate.setdefault(
+            line.rate,
+            {"rt": float(line.rate), "txval": ZERO, "iamt": ZERO, "camt": ZERO,
+             "samt": ZERO, "csamt": ZERO},
+        )
+        detail["txval"] += line.taxable_value
+        detail["iamt"] += line.igst
+        detail["camt"] += line.cgst
+        detail["samt"] += line.sgst
+        detail["csamt"] += line.cess
+    return [
+        {
+            "num": number,
+            "itm_det": {
+                key: float(_q(value)) if isinstance(value, Decimal) else value
+                for key, value in detail.items()
+            },
+        }
+        for number, (_, detail) in enumerate(sorted(by_rate.items()), start=1)
+    ]
 
 
 def build_gstr1(db: Session, business: Business, period: str) -> dict:
@@ -776,11 +997,12 @@ def build_gstr1(db: Session, business: Business, period: str) -> dict:
     b2cs: dict[tuple[str, Decimal], dict] = {}
     hsn: dict[tuple[str, Decimal], dict] = {}
 
+    threshold = b2cl_threshold(period)
+
     for invoice in invoices:
         counterparty_state = gstin_service.state_code_of(invoice.counterparty_gstin or "")
         place_of_supply = invoice.place_of_supply or counterparty_state or business.state_code
-        rate = _rate_of(invoice)
-        taxable = _q(invoice.taxable_value or ZERO)
+        lines = rate_lines(invoice)
         interstate = place_of_supply != business.state_code
         # Derived rather than read straight off the row: which block a B2C
         # supply belongs in turns on this number, and a stored zero would put a
@@ -796,49 +1018,54 @@ def build_gstr1(db: Session, business: Business, period: str) -> dict:
                     "pos": place_of_supply,
                     "rchrg": "Y" if invoice.reverse_charge else "N",
                     "inv_typ": "R",  # Regular. SEZ and deemed export are not modelled yet.
-                    "itms": [_item_block(invoice)],
+                    "itms": _item_blocks(lines),
                 }
             )
-        elif interstate and value > B2CL_THRESHOLD:
+        elif interstate and value > threshold:
             b2cl.setdefault(place_of_supply, []).append(
                 {
                     "inum": invoice.invoice_number or "",
                     "idt": to_portal_date(invoice.invoice_date),
                     "val": float(value),
-                    "itms": [_item_block(invoice)],
+                    "itms": _item_blocks(lines),
                 }
             )
         else:
-            key = (place_of_supply, rate)
-            bucket = b2cs.setdefault(
-                key,
-                {
-                    "sply_ty": "INTER" if interstate else "INTRA",
-                    "typ": "OE",  # Other than e-commerce.
-                    "pos": place_of_supply,
-                    "rt": float(rate),
-                    "txval": ZERO,
-                    "iamt": ZERO,
-                    "camt": ZERO,
-                    "samt": ZERO,
-                    "csamt": ZERO,
-                },
-            )
-            bucket["txval"] += taxable
-            bucket["iamt"] += invoice.igst or ZERO
-            bucket["camt"] += invoice.cgst or ZERO
-            bucket["samt"] += invoice.sgst or ZERO
-            bucket["csamt"] += invoice.cess or ZERO
+            # Rate-wise, so an invoice that mixes rates lands in as many B2CS
+            # buckets as it has rates. Summarised at one blended rate it was a
+            # bucket whose tax is not its rate applied to its value, which is
+            # the one thing the portal checks about this block.
+            for line in lines:
+                bucket = b2cs.setdefault(
+                    (place_of_supply, line.rate),
+                    {
+                        "sply_ty": "INTER" if interstate else "INTRA",
+                        "typ": "OE",  # Other than e-commerce.
+                        "pos": place_of_supply,
+                        "rt": float(line.rate),
+                        "txval": ZERO,
+                        "iamt": ZERO,
+                        "camt": ZERO,
+                        "samt": ZERO,
+                        "csamt": ZERO,
+                    },
+                )
+                bucket["txval"] += line.taxable_value
+                bucket["iamt"] += line.igst
+                bucket["camt"] += line.cgst
+                bucket["samt"] += line.sgst
+                bucket["csamt"] += line.cess
 
-        if invoice.hsn_code:
-            hsn_key = (invoice.hsn_code, rate)
+        for line in lines:
+            if not line.hsn_code:
+                continue
             entry = hsn.setdefault(
-                hsn_key,
+                (line.hsn_code, line.rate),
                 {
-                    "hsn_sc": invoice.hsn_code,
+                    "hsn_sc": line.hsn_code,
                     "uqc": "NOS",  # Not extracted yet; NOS is the portal's catch-all.
-                    "qty": 0,
-                    "rt": float(rate),
+                    "qty": ZERO,
+                    "rt": float(line.rate),
                     "txval": ZERO,
                     "iamt": ZERO,
                     "camt": ZERO,
@@ -846,11 +1073,12 @@ def build_gstr1(db: Session, business: Business, period: str) -> dict:
                     "csamt": ZERO,
                 },
             )
-            entry["txval"] += taxable
-            entry["iamt"] += invoice.igst or ZERO
-            entry["camt"] += invoice.cgst or ZERO
-            entry["samt"] += invoice.sgst or ZERO
-            entry["csamt"] += invoice.cess or ZERO
+            entry["qty"] += line.quantity
+            entry["txval"] += line.taxable_value
+            entry["iamt"] += line.igst
+            entry["camt"] += line.cgst
+            entry["samt"] += line.sgst
+            entry["csamt"] += line.cess
 
     def _floats(bucket: dict) -> dict:
         return {

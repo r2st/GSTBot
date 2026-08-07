@@ -23,8 +23,8 @@ import pytest
 from app.services import document_text, invoice_parser
 from app.services.invoice_parser import (
     _from_model_payload,
-    _normalize_rate,
     _vision_messages,
+    normalize_rate,
     parse_invoice,
     parse_with_model,
     to_date,
@@ -121,19 +121,19 @@ class TestPlaceholderTextFromAModel:
 class TestRateNormalisation:
     def test_a_rate_that_is_not_a_number_at_all_is_dropped(self):
         # The model is asked for a percentage and sometimes answers prose.
-        assert _normalize_rate("mixed") is None
-        assert _normalize_rate(None) is None
+        assert normalize_rate("mixed") is None
+        assert normalize_rate(None) is None
 
     def test_a_fraction_is_read_as_a_percentage(self):
-        assert _normalize_rate("0.18") == Decimal("18")
+        assert normalize_rate("0.18") == Decimal("18")
 
     def test_a_rate_gst_does_not_use_is_dropped(self):
         # Most often a total mistaken for a percentage.
-        assert _normalize_rate("15") is None
-        assert _normalize_rate("1800") is None
+        assert normalize_rate("15") is None
+        assert normalize_rate("1800") is None
 
     def test_zero_rated_is_kept_and_not_confused_with_missing(self):
-        assert _normalize_rate("0") == Decimal("0")
+        assert normalize_rate("0") == Decimal("0")
 
 
 # --------------------------------------------------------------------------
