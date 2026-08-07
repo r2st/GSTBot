@@ -7,12 +7,23 @@ import { api, isAbortError } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 import { invoiceDraftErrors } from "../lib/validate";
 
+// What the extractor read off the document, and what a reviewer corrects when
+// it read it wrong.
+//
+// `place_of_supply` and `tax_rate` are here rather than left to the extraction
+// because both are printed on the paper and both decide a figure on the return.
+// Place of supply settles IGST against CGST+SGST and is copied verbatim into
+// `pos` on every GSTR-1 line — and when it is missing and no GSTIN can supply
+// it, `/filing/validate` blocks the period with an error that nothing on this
+// screen could fix. Tax rate is what the portal cross-checks the tax against.
 const EDITABLE = [
   { field: "counterparty_gstin", label: "Counterparty GSTIN" },
   { field: "counterparty_name", label: "Counterparty name" },
   { field: "invoice_number", label: "Invoice number" },
   { field: "invoice_date", label: "Invoice date", type: "date" },
+  { field: "place_of_supply", label: "Place of supply", hint: "Two-digit state code" },
   { field: "hsn_code", label: "HSN/SAC" },
+  { field: "tax_rate", label: "Tax rate %", type: "number", step: "0.01" },
   { field: "taxable_value", label: "Taxable value", type: "number" },
   { field: "cgst", label: "CGST", type: "number" },
   { field: "sgst", label: "SGST", type: "number" },
@@ -20,6 +31,115 @@ const EDITABLE = [
   { field: "cess", label: "Cess", type: "number" },
   { field: "total_value", label: "Total value", type: "number" },
 ];
+
+// Facts about the invoice that are not readings off it, and that no extraction
+// can supply: whether the supplier has been paid, whether the purchase was
+// capital goods, whether the credit is claimable at all, whether the buyer owes
+// the tax. The API has always taken all four; nothing in the app could send
+// them, which quietly broke the two reversal rules the ITC screen is built on.
+//
+// `paid_at` is the expensive one. Rule 37 reverses the whole of an invoice's
+// credit once it is 180 days unpaid, and with no way to record a payment every
+// purchase stayed unpaid for ever — so a business six months into using GSTBot
+// had credit reversed on invoices it had settled on time, in a GSTR-3B it then
+// filed. `is_capital_good` fails the other way: left false, a machine's credit
+// is claimed whole in the month of purchase instead of over Rule 43's sixty
+// months, which is over-claimed credit.
+//
+// Kept in their own group because the server keeps them in one: correcting an
+// extracted field marks the invoice reviewed, and recording a payment does not.
+const LEDGER_FLAGS = [
+  {
+    field: "paid_at",
+    label: "Supplier paid on",
+    type: "date",
+    hint: "Blank means unpaid. Rule 37 reverses the credit 180 days after the invoice date.",
+  },
+  {
+    field: "is_capital_good",
+    label: "Capital goods",
+    type: "checkbox",
+    hint: "Credit is spread over 60 months under Rule 43 instead of claimed this month.",
+  },
+  {
+    field: "itc_eligible",
+    label: "Credit is claimable",
+    type: "checkbox",
+    hint: "Clear this for exempt or nil-rated purchases, and for credit blocked by s.17(5) — a car, staff catering, a club membership.",
+  },
+  {
+    field: "reverse_charge",
+    label: "Reverse charge",
+    type: "checkbox",
+    hint: "The supplier charged no tax and you owe it directly. Declared in GSTR-3B 3.1(d) and payable in cash.",
+  },
+];
+
+const BOOLEAN_FIELDS = new Set(
+  LEDGER_FLAGS.filter((f) => f.type === "checkbox").map((f) => f.field),
+);
+
+/** Every field the form owns, extracted and ledger alike. */
+const ALL_FIELDS = [...EDITABLE, ...LEDGER_FLAGS];
+
+/**
+ * One row of the edit form.
+ *
+ * The error sits outside the `<label>`, and the label is tied to the input by
+ * htmlFor rather than by wrapping it. Nesting the message inside the label
+ * would fold it into the input's accessible name — the field would announce as
+ * "CGST CGST cannot be negative", and then the same text again from
+ * aria-describedby.
+ *
+ * A checkbox reverses that: its label belongs *after* the box, and its value is
+ * `checked` rather than `value`. Handing a boolean to `value` would put the
+ * string "true" in the box and leave the tick permanently off.
+ */
+function Field({ spec, draft, message, setDraft, setTouched }) {
+  const { field, label, type, hint, step } = spec;
+  const described = [message ? `${field}-error` : null, hint ? `${field}-hint` : null]
+    .filter(Boolean)
+    .join(" ");
+  const isCheckbox = type === "checkbox";
+  return (
+    <div
+      className={`field${message ? " is-invalid" : ""}${isCheckbox ? " field-check" : ""}`}
+    >
+      {!isCheckbox && <label htmlFor={field}>{label}</label>}
+      <input
+        id={field}
+        type={type ?? "text"}
+        step={step ?? (type === "number" ? "0.01" : undefined)}
+        {...(isCheckbox
+          ? {
+              checked: Boolean(draft[field]),
+              onChange: (e) =>
+                setDraft((prev) => ({ ...prev, [field]: e.target.checked })),
+            }
+          : {
+              value: draft[field] ?? "",
+              onChange: (e) => setDraft((prev) => ({ ...prev, [field]: e.target.value })),
+            })}
+        aria-invalid={message ? true : undefined}
+        // Points at the message so a screen reader reads the reason with the
+        // field rather than leaving it as unattached text.
+        aria-describedby={described || undefined}
+        onBlur={() => setTouched((prev) => ({ ...prev, [field]: true }))}
+      />
+      {isCheckbox && <label htmlFor={field}>{label}</label>}
+      {hint && (
+        <span className="muted small" id={`${field}-hint`}>
+          {hint}
+        </span>
+      )}
+      {message && (
+        <span className="field-error" id={`${field}-error`} role="alert">
+          {message}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function InvoiceDetailPage() {
   const { id } = useParams();
@@ -63,7 +183,15 @@ export default function InvoiceDetailPage() {
   const adopt = useCallback((data) => {
     setInvoice(data);
     setDraft(
-      Object.fromEntries(EDITABLE.map(({ field }) => [field, data[field] ?? ""])),
+      Object.fromEntries(
+        ALL_FIELDS.map(({ field }) => [
+          field,
+          // A checkbox is a boolean both ways. Coerced through "" like the text
+          // fields it would come back as the string "false", which is truthy,
+          // and every unticked flag would tick itself on the next render.
+          BOOLEAN_FIELDS.has(field) ? Boolean(data[field]) : data[field] ?? "",
+        ]),
+      ),
     );
   }, []);
 
@@ -109,7 +237,7 @@ export default function InvoiceDetailPage() {
     const target = id;
     // Everything becomes touched on submit, so a field the user never entered
     // still shows why the save did not go through.
-    setTouched(Object.fromEntries(EDITABLE.map(({ field }) => [field, true])));
+    setTouched(Object.fromEntries(ALL_FIELDS.map(({ field }) => [field, true])));
     if (hasErrors) {
       setNotice("");
       setError("Fix the highlighted fields before saving.");
@@ -122,9 +250,19 @@ export default function InvoiceDetailPage() {
     try {
       // Only changed fields are sent — the API leaves unmentioned fields
       // alone, so a blank one must not be transmitted as an empty string.
+      //
+      // A cleared text field is sent as null, which is how a misread GSTIN or
+      // date is taken back off an invoice. A flag never is: `itc_eligible`,
+      // `reverse_charge` and `is_capital_good` are NOT NULL columns with no
+      // cleared state, and the schema refuses an explicit null on them, so an
+      // unticked box has to travel as `false`.
       const changes = {};
-      for (const { field } of EDITABLE) {
+      for (const { field } of ALL_FIELDS) {
         const next = draft[field];
+        if (BOOLEAN_FIELDS.has(field)) {
+          if (Boolean(next) !== Boolean(invoice[field])) changes[field] = Boolean(next);
+          continue;
+        }
         const current = invoice[field] ?? "";
         if (String(next) !== String(current)) changes[field] = next === "" ? null : next;
       }
@@ -253,39 +391,41 @@ export default function InvoiceDetailPage() {
           </div>
         )}
 
-        <form onSubmit={handleSave} className="edit-grid" noValidate>
-          {EDITABLE.map(({ field, label, type }) => {
-            // Shown only once the field has been left or a save attempted:
-            // marking a GSTIN invalid while it is still being typed is noise.
-            const message = touched[field] ? errors[field] : "";
-            // The error sits outside the <label>, and the label is tied to the
-            // input by htmlFor rather than by wrapping it. Nesting the message
-            // inside the label would fold it into the input's accessible name
-            // — the field would announce as "CGST CGST cannot be negative",
-            // and then the same text again from aria-describedby.
-            return (
-              <div key={field} className={message ? "field is-invalid" : "field"}>
-                <label htmlFor={field}>{label}</label>
-                <input
-                  id={field}
-                  type={type ?? "text"}
-                  step={type === "number" ? "0.01" : undefined}
-                  value={draft[field] ?? ""}
-                  aria-invalid={message ? true : undefined}
-                  // Points at the message so a screen reader reads the reason
-                  // with the field rather than leaving it as unattached text.
-                  aria-describedby={message ? `${field}-error` : undefined}
-                  onBlur={() => setTouched((prev) => ({ ...prev, [field]: true }))}
-                  onChange={(e) => setDraft((prev) => ({ ...prev, [field]: e.target.value }))}
+        <form onSubmit={handleSave} noValidate>
+          <div className="edit-grid">
+            {EDITABLE.map((spec) => (
+              <Field
+                key={spec.field}
+                spec={spec}
+                draft={draft}
+                message={touched[spec.field] ? errors[spec.field] : ""}
+                setDraft={setDraft}
+                setTouched={setTouched}
+              />
+            ))}
+          </div>
+
+          <fieldset className="edit-fieldset">
+            <legend>Your books</legend>
+            <p className="muted small">
+              Not on the paper, and nothing can read them off it — but they decide what
+              this invoice’s credit is worth. Recording one does not mark the extraction
+              reviewed.
+            </p>
+            <div className="edit-grid">
+              {LEDGER_FLAGS.map((spec) => (
+                <Field
+                  key={spec.field}
+                  spec={spec}
+                  draft={draft}
+                  message={touched[spec.field] ? errors[spec.field] : ""}
+                  setDraft={setDraft}
+                  setTouched={setTouched}
                 />
-                {message && (
-                  <span className="field-error" id={`${field}-error`} role="alert">
-                    {message}
-                  </span>
-                )}
-              </div>
-            );
-          })}
+              ))}
+            </div>
+          </fieldset>
+
           <div className="edit-actions">
             {/* Not disabled on invalid input. A disabled button gives no
                 reason it is disabled; letting the submit through is what

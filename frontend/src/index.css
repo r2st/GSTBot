@@ -766,6 +766,43 @@ button.chip.is-active {
 }
 .edit-actions {
   grid-column: 1 / -1;
+  margin-top: 0.85rem;
+}
+
+/* The ledger facts — paid on, capital goods, credit claimable, reverse charge.
+   Separated from the extracted fields because they are a different kind of
+   claim: the fields above are what the document says, these are what the
+   business knows, and the API treats correcting one as a review and recording
+   the other as not. */
+.edit-fieldset {
+  margin: 1.25rem 0 0;
+  padding: 0.9rem 1rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.edit-fieldset legend {
+  padding: 0 0.4rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.edit-fieldset > .muted {
+  margin: 0 0 0.75rem;
+}
+
+/* A checkbox reads label-after-box, so it opts out of the stacked grid the
+   text fields use. */
+.edit-grid .field-check {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  column-gap: 0.5rem;
+}
+.field-check input {
+  width: auto;
+  justify-self: start;
+}
+.field-check .muted,
+.field-check .field-error {
+  grid-column: 1 / -1;
 }
 
 /* ---- Skeletons ----

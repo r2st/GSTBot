@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GSTR2B_EXTENSIONS,
+  GST_RATES,
   MAX_UPLOAD_MB,
   amountError,
   arnError,
@@ -11,8 +12,12 @@ import {
   invoiceDraftErrors,
   normalizeArn,
   normalizeGstin,
+  normalizePlaceOfSupply,
+  paidAtError,
   partitionFiles,
+  placeOfSupplyError,
   registrationErrors,
+  taxRateError,
 } from "./validate";
 
 /** A File of a stated size without allocating the bytes for it. */
@@ -466,5 +471,153 @@ describe("normalizeArn", () => {
     expect(normalizeArn("")).toBe("");
     expect(normalizeArn(null)).toBe("");
     expect(normalizeArn("   ")).toBe("");
+  });
+});
+
+describe("placeOfSupplyError", () => {
+  it("accepts a two-digit state code", () => {
+    expect(placeOfSupplyError("27")).toBe("");
+    expect(placeOfSupplyError("07")).toBe("");
+    expect(placeOfSupplyError("97")).toBe("");
+  });
+
+  it("accepts a single digit, because that is what people type", () => {
+    // 7 for Delhi is what a person types and 07 is what the portal wants,
+    // which is exactly what the server's own validator does with it.
+    expect(placeOfSupplyError("7")).toBe("");
+  });
+
+  it("treats blank as acceptable — clearing the field is a legitimate edit", () => {
+    for (const blank of ["", "  ", null, undefined]) {
+      expect(placeOfSupplyError(blank)).toBe("");
+    }
+  });
+
+  it("refuses anything that is not a code", () => {
+    expect(placeOfSupplyError("ZZ")).toContain("two-digit state code");
+    expect(placeOfSupplyError("Maharashtra")).toContain("two-digit state code");
+    expect(placeOfSupplyError("270")).toContain("two-digit state code");
+  });
+
+  it("refuses 00, which is the usual result of a leading digit being eaten", () => {
+    expect(placeOfSupplyError("00")).toContain("not a state code");
+  });
+
+  it("leaves the list of real codes to the server", () => {
+    // A second copy of STATE_CODES here would eventually disagree with the one
+    // that decides whether a return uploads. 39 is not assigned; the server
+    // says so, and this only checks the shape.
+    expect(placeOfSupplyError("39")).toBe("");
+  });
+});
+
+describe("normalizePlaceOfSupply", () => {
+  it("pads a single digit the way the portal wants it", () => {
+    expect(normalizePlaceOfSupply("7")).toBe("07");
+    expect(normalizePlaceOfSupply(" 7 ")).toBe("07");
+  });
+
+  it("leaves anything else alone", () => {
+    expect(normalizePlaceOfSupply("27")).toBe("27");
+    expect(normalizePlaceOfSupply("")).toBe("");
+  });
+});
+
+describe("taxRateError", () => {
+  it("accepts every slab GST levies", () => {
+    for (const rate of GST_RATES) {
+      expect(taxRateError(String(rate))).toBe("");
+    }
+  });
+
+  it("accepts blank, which clears the rate on a multi-rate invoice", () => {
+    expect(taxRateError("")).toBe("");
+    expect(taxRateError(null)).toBe("");
+  });
+
+  it("mirrors the server's own 0-to-100 bound", () => {
+    expect(taxRateError("-1")).toContain("negative");
+    expect(taxRateError("101")).toContain("over 100");
+    expect(taxRateError("abc")).toContain("must be a number");
+  });
+
+  it("does not block a rate outside the slabs — that is a warning", () => {
+    // The API takes anything from 0 to 100; /filing/validate is what calls a
+    // non-slab rate an error. Refusing it here would stop someone recording
+    // what the paper actually says.
+    expect(taxRateError("15")).toBe("");
+  });
+});
+
+describe("paidAtError", () => {
+  const today = new Date(2026, 3, 20); // 20 April 2026, local time.
+
+  it("accepts blank, which is what puts an invoice back on the 180-day clock", () => {
+    expect(paidAtError("", { today })).toBe("");
+    expect(paidAtError(null, { today })).toBe("");
+  });
+
+  it("accepts a payment on or before today", () => {
+    expect(paidAtError("2026-04-20", { today })).toBe("");
+    expect(paidAtError("2026-01-02", { today })).toBe("");
+  });
+
+  it("refuses a payment in the future", () => {
+    // A future payment date takes an invoice off the Rule 37 reversal list it
+    // belongs on, which is over-claimed credit with interest running on it.
+    expect(paidAtError("2026-04-21", { today })).toContain("future");
+  });
+
+  it("refuses a payment before the invoice was issued", () => {
+    const message = paidAtError("2026-01-01", {
+      today,
+      invoiceDate: "2026-04-01",
+    });
+    expect(message).toContain("2026-04-01");
+    expect(message).toContain("cannot have been paid before");
+  });
+
+  it("says nothing about an invoice date it has not been given", () => {
+    expect(paidAtError("2020-01-01", { today })).toBe("");
+  });
+
+  it("refuses a date that is not a date", () => {
+    expect(paidAtError("2026-02-30", { today })).toContain("does not exist");
+    expect(paidAtError("20/04/2026", { today })).toContain("YYYY-MM-DD");
+  });
+});
+
+describe("invoiceDraftErrors with the ledger fields", () => {
+  const today = new Date(2026, 3, 20);
+
+  it("reports a bad place of supply and tax rate against their own fields", () => {
+    const { errors } = invoiceDraftErrors(
+      { place_of_supply: "ZZ", tax_rate: "150" },
+      { today },
+    );
+    expect(errors.place_of_supply).toContain("two-digit state code");
+    expect(errors.tax_rate).toContain("over 100");
+  });
+
+  it("checks the payment date against the invoice date the form will save", () => {
+    // Not against the row as it stands: correcting a misread year is the
+    // commonest reason anyone touches that field, and the server compares the
+    // pair the PATCH lands.
+    const { errors } = invoiceDraftErrors(
+      { invoice_date: "2026-04-01", paid_at: "2026-03-01" },
+      { today },
+    );
+    expect(errors.paid_at).toContain("cannot have been paid before");
+  });
+
+  it("warns about a rate the portal will reject without blocking the save", () => {
+    const { errors, warnings } = invoiceDraftErrors({ tax_rate: "15" }, { today });
+    expect(errors.tax_rate).toBeUndefined();
+    expect(warnings.join(" ")).toContain("not a GST rate");
+  });
+
+  it("says nothing about a rate that is a real slab", () => {
+    const { warnings } = invoiceDraftErrors({ tax_rate: "18" }, { today });
+    expect(warnings.join(" ")).not.toContain("not a GST rate");
   });
 });

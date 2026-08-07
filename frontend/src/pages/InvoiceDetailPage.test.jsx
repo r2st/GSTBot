@@ -612,4 +612,162 @@ describe("InvoiceDetailPage", () => {
       expect(screen.queryByDisplayValue("Reparsed Name")).not.toBeInTheDocument();
     });
   });
+  describe("the facts that decide what the credit is worth", () => {
+    // Rule 37 reverses the whole of an invoice's credit once it is 180 days
+    // unpaid, and Rule 43 spreads a capital good's credit over sixty months.
+    // The API has always taken all four of these fields; nothing in the app
+    // could send them, so a business six months in had credit reversed on
+    // invoices it had paid on time — in a GSTR-3B it then filed.
+
+    it("offers the ledger facts no extraction can supply", async () => {
+      await renderPage();
+
+      expect(screen.getByLabelText("Supplier paid on")).toBeInTheDocument();
+      expect(screen.getByLabelText("Capital goods")).toBeInTheDocument();
+      expect(screen.getByLabelText("Credit is claimable")).toBeInTheDocument();
+      expect(screen.getByLabelText("Reverse charge")).toBeInTheDocument();
+    });
+
+    it("fills the flags from the invoice rather than from a string", async () => {
+      // Coerced through "" the way the text fields are, a false flag would
+      // arrive as the string "false" — which is truthy, so every unticked box
+      // would tick itself.
+      await renderPage(
+        invoice({ itc_eligible: true, reverse_charge: false, is_capital_good: false }),
+      );
+
+      expect(screen.getByLabelText("Credit is claimable")).toBeChecked();
+      expect(screen.getByLabelText("Reverse charge")).not.toBeChecked();
+      expect(screen.getByLabelText("Capital goods")).not.toBeChecked();
+    });
+
+    it("records a payment date, which is what stops the Rule 37 reversal", async () => {
+      const user = userEvent.setup();
+      await renderPage(invoice({ paid_at: null }));
+
+      await retype(user, "Supplier paid on", "2026-05-01");
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ paid_at: "2026-05-01" })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        paid_at: "2026-05-01",
+      });
+    });
+
+    it("clears a payment date as null, which puts the clock back on", async () => {
+      const user = userEvent.setup();
+      await renderPage(invoice({ paid_at: "2026-05-01" }));
+
+      await retype(user, "Supplier paid on", "");
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ paid_at: null })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({ paid_at: null });
+    });
+
+    it("sends an unticked flag as false, never as null", async () => {
+      // `itc_eligible` is a NOT NULL column and the schema refuses an explicit
+      // null on it — sent as null the save came back 422 with a message about
+      // a field the user had merely unticked.
+      const user = userEvent.setup();
+      await renderPage(invoice({ itc_eligible: true }));
+
+      await user.click(screen.getByLabelText("Credit is claimable"));
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ itc_eligible: false })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        itc_eligible: false,
+      });
+    });
+
+    it("marks a purchase as capital goods", async () => {
+      const user = userEvent.setup();
+      await renderPage(invoice({ is_capital_good: false }));
+
+      await user.click(screen.getByLabelText("Capital goods"));
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse(invoice({ is_capital_good: true })),
+      );
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        is_capital_good: true,
+      });
+    });
+
+    it("leaves an untouched flag out of the request", async () => {
+      const user = userEvent.setup();
+      await renderPage(invoice({ itc_eligible: true, reverse_charge: false }));
+
+      await retype(user, "Invoice number", "INV-CORRECTED");
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse(invoice({ invoice_number: "INV-CORRECTED" })),
+      );
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        invoice_number: "INV-CORRECTED",
+      });
+    });
+
+    it("blocks a payment date before the invoice was issued", async () => {
+      const user = userEvent.setup();
+      await renderPage(invoice({ invoice_date: "2026-04-15", paid_at: null }));
+
+      await retype(user, "Supplier paid on", "2026-01-01");
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      expect(
+        await screen.findByText(/cannot have been paid before it was issued/),
+      ).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("corrects a place of supply, which is what unblocks a filing", async () => {
+      // "Place of supply is missing and cannot be derived from a GSTIN" is a
+      // blocking error on /filing/validate, and there was no field on any
+      // screen that could clear it.
+      const user = userEvent.setup();
+      await renderPage(invoice({ place_of_supply: null }));
+
+      await retype(user, "Place of supply", "29");
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ place_of_supply: "29" })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        place_of_supply: "29",
+      });
+    });
+
+    it("blocks a place of supply that is not a state code", async () => {
+      const user = userEvent.setup();
+      await renderPage();
+
+      await retype(user, "Place of supply", "ZZ");
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      expect(await screen.findByText(/two-digit state code/)).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("warns about a rate outside the slabs without blocking the save", async () => {
+      const user = userEvent.setup();
+      await renderPage(invoice({ tax_rate: "18" }));
+
+      await retype(user, "Tax rate %", "15");
+
+      expect(await screen.findByText(/is not a GST rate/)).toBeInTheDocument();
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ tax_rate: "15" })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    });
+  });
 });

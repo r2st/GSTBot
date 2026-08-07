@@ -211,6 +211,99 @@ export function hsnError(value) {
 }
 
 /**
+ * Why a place of supply is unacceptable, or "".
+ *
+ * Shape only, for the same reason `gstinShapeError` is shape only: the list of
+ * codes GST assigns is the server's (`STATE_CODES` in app/services/gstin.py),
+ * it changes when the Council reorganises a state or union territory, and a
+ * second copy of it here would eventually disagree with the one that decides
+ * whether a return uploads. A single digit is padded rather than refused —
+ * `7` for Delhi is what a person types and `07` is what the portal wants, which
+ * is exactly what the server's own validator does with it.
+ */
+export function placeOfSupplyError(value) {
+  const raw = normalizePlaceOfSupply(value);
+  if (raw === "") return "";
+  if (!/^\d{2}$/.test(raw)) {
+    return "A place of supply is the two-digit state code, e.g. 27 for Maharashtra.";
+  }
+  if (raw === "00") return "00 is not a state code.";
+  return "";
+}
+
+/** A place of supply as the server wants it: two digits, zero-padded. */
+export function normalizePlaceOfSupply(value) {
+  const raw = String(value ?? "").trim();
+  return /^\d$/.test(raw) ? `0${raw}` : raw;
+}
+
+/**
+ * The rates GST actually levies.
+ *
+ * Mirrors VALID_TAX_RATES in app/services/invoice_parser.py. Unlike the state
+ * codes this is worth carrying, because it is only ever used to *warn*: the API
+ * accepts any rate from 0 to 100, and it is `/filing/validate` that calls a
+ * non-slab rate an error. Being a slab out of date here therefore costs a
+ * missing hint, never a refused edit.
+ */
+export const GST_RATES = [0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28];
+
+/** Why a tax rate is unacceptable, or "". Mirrors `Field(ge=0, le=100)`. */
+export function taxRateError(value) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return "";
+  // The minus is admitted by the shape check so that the next line can say
+  // "cannot be negative" rather than "must be a number", which is the same
+  // trade `amountError` makes: the reason a field is refused is the whole
+  // value of refusing it.
+  if (!/^-?\d*\.?\d*$/.test(raw) || raw === "." || raw === "-") {
+    return "Tax rate must be a number.";
+  }
+  const num = Number(raw);
+  if (!Number.isFinite(num)) return "Tax rate must be a number.";
+  if (num < 0) return "Tax rate cannot be negative.";
+  if (num > 100) return "Tax rate is a percentage, so it cannot be over 100.";
+  return "";
+}
+
+/**
+ * Why a payment date is unacceptable, or "".
+ *
+ * Blank is legitimate and load-bearing: clearing it means "not paid after all",
+ * which is what puts an invoice back on Rule 37's 180-day clock.
+ *
+ * Both refusals mirror the server, and both are about that clock rather than
+ * tidiness. A payment date in the future takes an invoice off the reversal list
+ * it belongs on, and one before the invoice was issued is a mistyped year doing
+ * the same thing — an under-reported reversal in GSTR-3B is over-claimed
+ * credit, with interest running on it.
+ */
+export function paidAtError(value, { invoiceDate, today = new Date() } = {}) {
+  const raw = String(value ?? "").trim();
+  if (raw === "") return "";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return "Use the date picker, or type YYYY-MM-DD.";
+
+  const [y, m, d] = raw.split("-").map(Number);
+  const probe = new Date(Date.UTC(y, m - 1, d));
+  if (probe.getUTCFullYear() !== y || probe.getUTCMonth() !== m - 1 || probe.getUTCDate() !== d) {
+    return "That date does not exist.";
+  }
+
+  const todayIso = new Date(
+    Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
+  )
+    .toISOString()
+    .slice(0, 10);
+  if (raw > todayIso) return "A payment cannot be dated in the future.";
+
+  const issued = String(invoiceDate ?? "").trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(issued) && raw < issued) {
+    return `The invoice is dated ${issued}; it cannot have been paid before it was issued.`;
+  }
+  return "";
+}
+
+/**
  * Why an ARN is unacceptable, or "".
  *
  * Mirrors ARN_PATTERN in app/services/filing.py, including its deliberate
@@ -267,6 +360,15 @@ export function invoiceDraftErrors(draft, options = {}) {
   set("invoice_number", lengthError(draft.invoice_number, MAX_INVOICE_NUMBER, "Invoice number"));
   set("invoice_date", invoiceDateError(draft.invoice_date, options));
   set("hsn_code", hsnError(draft.hsn_code));
+  set("place_of_supply", placeOfSupplyError(draft.place_of_supply));
+  set("tax_rate", taxRateError(draft.tax_rate));
+  // Checked against the invoice date as this form will leave it, not as the
+  // row holds it now: correcting a misread year is the commonest reason anyone
+  // touches that field, and the server compares the pair the PATCH lands.
+  set(
+    "paid_at",
+    paidAtError(draft.paid_at, { ...options, invoiceDate: draft.invoice_date }),
+  );
 
   for (const [field, label] of [
     ["taxable_value", "Taxable value"],
@@ -336,6 +438,17 @@ function invoiceDraftWarnings(draft, errors) {
         `Taxable plus tax comes to ₹${computed.toFixed(2)}, but the total says ₹${total.toFixed(2)}.`,
       );
     }
+  }
+
+  // A rate outside the slabs saves — the API takes anything from 0 to 100 —
+  // and `/filing/validate` then calls it an error the portal will reject. Said
+  // here it is a hint while the paper is still in the reviewer's hand; left to
+  // the filing screen it is a line in a report a month later.
+  const rate = num("tax_rate");
+  if (rate != null && !GST_RATES.includes(rate)) {
+    warnings.push(
+      `${rate}% is not a GST rate. The slabs are ${GST_RATES.join(", ")} — the portal rejects anything else.`,
+    );
   }
 
   return warnings;
