@@ -533,10 +533,20 @@ def _amount_on_line(line: str, *, after: int = 0) -> Decimal | None:
     is what lets one line carry two heads: see :func:`_tax_amounts_on_line`.
     A column with no number beyond it falls back to the whole line, because
     ``9,000.00 CGST`` prints the amount first and is still one head's figure.
+
+    The cut happens *before* the percentages come out, and the order is the
+    whole of it. ``after`` is an offset into the line the caller measured, and
+    removing a rate shortens the line ahead of it: strip first and every column
+    on the line slides left by as much text as the rates before it occupied,
+    while ``after`` goes on pointing at where the label used to be. On
+    ``CGST @ 6.00 % 1,111.11 SGST @ 6.00 % 2,222.22 CESS @ 12.00 % 3,333.33``
+    that drift is ten characters by the time it reaches the cess column, enough
+    to land inside the figure rather than before it — the cut fell after the
+    ``3,`` and the head was read as ₹333.33 rather than ₹3,333.33, an order of
+    magnitude of cess, silently, on a line that parses perfectly otherwise.
     """
-    stripped = _PERCENT_PATTERN.sub(" ", line)
-    for candidate in (stripped[after:], stripped) if after else (stripped,):
-        numbers = _NUMBER_PATTERN.findall(candidate)
+    for candidate in (line[after:], line) if after else (line,):
+        numbers = _NUMBER_PATTERN.findall(_PERCENT_PATTERN.sub(" ", candidate))
         if numbers:
             return to_money(numbers[-1], default=None)
     return None

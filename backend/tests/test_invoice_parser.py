@@ -828,6 +828,42 @@ class TestOneLineThatNamesTwoTaxHeads:
             Decimal("12000.00"),
         )
 
+    def test_a_spelt_out_rate_does_not_shift_the_column_after_it(self):
+        # Each column is found at an offset measured on the line as printed,
+        # and the rates come out of the line before the figures are read. Do
+        # those in the wrong order and every column slides left by as much text
+        # as the rates before it took up, while the offset goes on pointing
+        # where the label used to be.
+        #
+        # "@ 6.00 %" is six characters of rate against "6%"'s two, so a line
+        # that spells its rates out drifts far enough to matter — and this is
+        # the ordinary way a tax invoice prints them.
+        assert self._heads("CGST @ 6.00 % 1111.11 SGST @ 6.00 % 2222.22") == (
+            Decimal("1111.11"),
+            Decimal("2222.22"),
+            ZERO,
+            ZERO,
+        )
+
+    def test_the_drift_does_not_accumulate_into_the_last_figure(self):
+        # The drift is the sum of every rate before the column, so the third
+        # head on a line is where it first reaches all the way into a figure
+        # rather than merely past a label.
+        #
+        # Landing *inside* "3,333.33" is the case worth pinning: the cut fell
+        # after the "3," and the head read as ₹333.33 — an order of magnitude
+        # of cess, off by a factor of ten rather than absent, on a line that
+        # parses perfectly in every other respect. A missing figure is a blank
+        # a reviewer can see; this one arrives looking like a figure.
+        assert self._heads(
+            "CGST @ 6.00 % 1,111.11 SGST @ 6.00 % 2,222.22 CESS @ 12.00 % 3,333.33"
+        ) == (
+            Decimal("1111.11"),
+            Decimal("2222.22"),
+            ZERO,
+            Decimal("3333.33"),
+        )
+
     def test_a_heading_row_with_no_figures_reads_nothing(self):
         # A table header naming both heads carries no amounts at all, so there
         # is nothing to attribute and nothing is invented.
