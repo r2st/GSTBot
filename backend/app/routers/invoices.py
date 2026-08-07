@@ -14,7 +14,13 @@ from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import safe_filename, search_pattern
 from app.models.business import Business
-from app.models.invoice import Invoice, InvoiceSource, InvoiceStatus, InvoiceType
+from app.models.invoice import (
+    UNREADABLE_STATUSES,
+    Invoice,
+    InvoiceSource,
+    InvoiceStatus,
+    InvoiceType,
+)
 from app.schemas.invoice import (
     InvoiceDetailOut,
     InvoiceListOut,
@@ -418,7 +424,22 @@ def update_invoice(
     if corrections:
         invoice.parsed_with = "manual"
         invoice.extraction_confidence = 1.0
-        if invoice.status in (InvoiceStatus.FAILED, InvoiceStatus.UPLOADED):
+        # Every status that means "the figures on this row were never
+        # extracted" — which is what a correction has just stopped being true.
+        #
+        # This listed ``FAILED`` and ``UPLOADED`` and left ``PROCESSING`` out,
+        # and ``PROCESSING`` is the one nothing else can rescue. A worker that
+        # dies mid-parse leaves the row there permanently: the extraction is
+        # never coming back to move it, and the row is in
+        # ``UNREADABLE_STATUSES``, so filing, the credit pool and the tax
+        # summary all skip it. Typing the figures in by hand — the obvious
+        # thing to do about a document stuck on a spinner — answered 200,
+        # recorded ``manual`` and a confidence of 1.0, and changed nothing:
+        # the supply stayed out of GSTR-1 and out of the period's output tax,
+        # while ``/filing/validate`` went on advising the user to wait for an
+        # extraction to finish. Under-declared output tax carries interest, and
+        # the product had told them it was in hand.
+        if invoice.status in UNREADABLE_STATUSES:
             invoice.status = InvoiceStatus.PARSED
     if changes and invoice.invoice_type == InvoiceType.PURCHASE and invoice.counterparty_gstin:
         supplier = invoice_service.get_or_create_supplier(

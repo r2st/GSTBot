@@ -989,6 +989,96 @@ def test_a_payment_does_not_promote_a_failed_invoice_into_the_filing_pool(
     assert promoted["status"] == InvoiceStatus.PARSED.value
 
 
+class TestCorrectingARowAWorkerAbandoned:
+    """A ``processing`` invoice is the one nothing else can rescue.
+
+    ``FAILED`` is an extraction that gave up and ``UPLOADED`` is one that has
+    not started; a worker that dies mid-parse leaves ``PROCESSING``, and no
+    extraction is ever coming back to move it. The row sits in
+    ``UNREADABLE_STATUSES`` for ever, which means filing, the ITC pool and the
+    tax summary all skip it.
+
+    Typing the figures in is the obvious thing to do about a document stuck on
+    a spinner, and it used to change nothing: the PATCH answered 200 and
+    recorded ``manual`` with a confidence of 1.0, and the supply stayed out of
+    the return — while ``/filing/validate`` went on telling the user to wait
+    for an extraction to finish.
+    """
+
+    def abandoned(self, auth_client, db_session):
+        invoice_id = upload(
+            auth_client, "nothing readable here", name="blank.txt"
+        ).json()["invoice"]["id"]
+        invoice = db_session.get(Invoice, invoice_id)
+        invoice.status = InvoiceStatus.PROCESSING
+        invoice.invoice_type = InvoiceType.SALES
+        db_session.commit()
+        return invoice_id
+
+    def test_a_correction_promotes_it_into_the_filing_pool(
+        self, auth_client, db_session
+    ):
+        invoice_id = self.abandoned(auth_client, db_session)
+
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}",
+            json={
+                "invoice_number": "S-STUCK",
+                "invoice_date": "2026-04-15",
+                "counterparty_gstin": SUPPLIER_GSTIN_OTHER_STATE,
+                "place_of_supply": "29",
+                "hsn_code": "8471",
+                "tax_rate": "18",
+                "taxable_value": "100000.00",
+                "igst": "18000.00",
+                "total_value": "118000.00",
+            },
+        ).json()
+
+        assert body["status"] == InvoiceStatus.PARSED.value
+
+    def test_the_supply_then_actually_reaches_the_return(
+        self, auth_client, db_session
+    ):
+        """The half that was silently wrong: the status is what filing reads."""
+        invoice_id = self.abandoned(auth_client, db_session)
+        auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}",
+            json={
+                "invoice_number": "S-STUCK",
+                "invoice_date": "2026-04-15",
+                "counterparty_gstin": SUPPLIER_GSTIN_OTHER_STATE,
+                "place_of_supply": "29",
+                "hsn_code": "8471",
+                "tax_rate": "18",
+                "taxable_value": "100000.00",
+                "igst": "18000.00",
+                "total_value": "118000.00",
+            },
+        )
+
+        document = auth_client.get("/api/v1/filing/gstr1?period=2026-04").json()
+
+        assert document["document"]["b2b"][0]["inv"][0]["inum"] == "S-STUCK"
+        # And validation stops advising a wait that would never end.
+        assert not any(
+            "being extracted" in issue["message"]
+            for issue in document["validation"]["issues"]
+        )
+
+    def test_recording_a_payment_still_does_not_promote_it(
+        self, auth_client, db_session
+    ):
+        """The ledger fields are not a correction, whatever the status is."""
+        invoice_id = self.abandoned(auth_client, db_session)
+
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"is_capital_good": True}
+        ).json()
+
+        assert body["status"] == InvoiceStatus.PROCESSING.value
+
+
 def test_reparse_reruns_extraction(auth_client, sample_invoice_text):
     invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
     response = auth_client.post(f"/api/v1/invoices/{invoice_id}/reparse")
