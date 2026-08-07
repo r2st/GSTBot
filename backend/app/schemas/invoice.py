@@ -36,6 +36,14 @@ class InvoiceOut(BaseModel):
     igst: Decimal
     cess: Decimal
     total_value: Decimal
+    # What the invoice is *worth*, as every export values it — the stored total
+    # where the extractor found one, and taxable value plus tax where it did
+    # not. ``total_value`` above is the raw column and stays that way, because
+    # it is what a reviewer edits and what validation cross-foots; this is the
+    # figure a screen should print. Served rather than left to each client to
+    # derive, so the register and the return it produces cannot disagree about
+    # what one invoice came to. See ``Invoice.invoice_value``.
+    invoice_value: Decimal
     tax_rate: Decimal | None = None
     itc_eligible: bool
     reverse_charge: bool

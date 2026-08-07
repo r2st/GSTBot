@@ -183,7 +183,15 @@ export default function InvoicesPage() {
                     <td>{dateLabel(invoice.invoice_date)}</td>
                     <td className="num">{rupees(invoice.taxable_value)}</td>
                     <td className="num">{rupees(tax)}</td>
-                    <td className="num">{rupees(invoice.total_value)}</td>
+                    {/* `invoice_value`, not the raw `total_value` column. The
+                        column is only written when the extractor found a
+                        grand-total *label*, so an invoice whose total was
+                        printed as a bare "Total:" carries a stored zero with
+                        every other figure on it right — and this register
+                        listed a real supply at ₹0.00 while the GSTR-1 built
+                        from it carried the full amount. The server derives the
+                        one figure both use. */}
+                    <td className="num">{rupees(invoice.invoice_value)}</td>
                     <td>
                       <span className={`chip chip-${statusTone(invoice.status)}`}>
                         {statusLabel(invoice.status)}

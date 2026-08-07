@@ -449,8 +449,45 @@ _TOTAL_PATTERN = re.compile(
 )
 _HSN_PATTERN = re.compile(r"\b(?:HSN|SAC)(?:\s*/\s*SAC)?\s*(?:code)?\s*[:.\-]?\s*(\d{4,8})\b",
                           re.IGNORECASE)
+# "Whether the tax is payable on reverse charge basis" is required on the face
+# of every tax invoice by rule 46(p), so the answer is printed on essentially
+# all of them — and reading it backwards is expensive in both directions. A
+# false yes moves the tax into GSTR-3B table 3.1(d) as a liability that must be
+# settled in cash, takes the invoice's credit out of the pool, and on a *sale*
+# prints ``rchrg: "Y"`` into the customer's GSTR-2B, telling them they owe tax
+# the supplier has already charged. A false no leaves a real liability
+# undeclared, with interest running from the due date.
+#
+# The label and the answer are therefore matched as separate things, because
+# the words overlap. "Applicable" is an answer in "Reverse Charge: Applicable"
+# and part of the *label* in "Reverse Charge Applicable: No" — and the previous
+# pattern, which made the label word optional and then looked for an
+# affirmative, could not tell them apart. Failing to match "No", it simply
+# backtracked, gave the optional group up, and matched the label's own
+# "Applicable" as the answer. So "Reverse Charge Applicable: No" — one of the
+# commonest ways an Indian invoice prints this, along with "Whether Reverse
+# Charge Applicable: No" — came back flagged reverse charge, which is precisely
+# the reading :func:`to_flag` was written to stop and which survived here
+# because the answer never reached it.
+#
+# The label parts are matched possessively, so they cannot be given back to be
+# re-read as the answer. A label with no answer after it therefore matches
+# nothing at all, which is the right outcome: an unanswered heading is not a
+# declaration, and the whole module prefers an empty field a reviewer can see
+# to a plausible wrong one.
+#
+# The answer itself is whatever word follows, negatives included, and
+# :func:`to_flag` decides what it means — the same vocabulary that reads the
+# model's answer and the portal's flags, rather than a third opinion here. That
+# also picks up the affirmatives the old pattern could not reach: "Reverse
+# Charge (Y/N): Y" required a separator it had no room for, so an invoice that
+# genuinely was reverse charge read as one that was not.
 _REVERSE_CHARGE_PATTERN = re.compile(
-    r"reverse\s*charge\s*[:\-]?\s*(?:applicable\s*[:\-]?\s*)?(yes|y|true|applicable)\b",
+    r"reverse\s*charge"
+    r"(?:\s*\(\s*y\s*/\s*n\s*\))?+"  # "Reverse Charge (Y/N)"
+    r"(?:\s+(?:is\s+)?applicable|\s+basis)?+"  # label words, never the answer
+    r"\s*[:\-]?\s*"
+    r"(not\s+applicable|n\s*/\s*a|yes|no|true|false|applicable|y|n)\b",
     re.IGNORECASE,
 )
 
@@ -519,7 +556,11 @@ def parse_heuristic(text: str) -> ParsedInvoice:
     elif "cgst" in rates:
         result.tax_rate = normalize_rate(rates["cgst"] + rates.get("sgst", rates["cgst"]))
 
-    result.reverse_charge = bool(_REVERSE_CHARGE_PATTERN.search(text))
+    # The document's own answer, read by the same reader as the model's and the
+    # portal's. ``bool()`` on the match is what this used to be, and it could
+    # only ever say yes — see :data:`_REVERSE_CHARGE_PATTERN`.
+    if match := _REVERSE_CHARGE_PATTERN.search(text):
+        result.reverse_charge = to_flag(match.group(1))
 
     # Confidence here is coverage, not certainty: how many of the fields that
     # decide whether an invoice can be filed were actually found.

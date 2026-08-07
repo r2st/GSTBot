@@ -218,6 +218,38 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         return (self.cgst or ZERO) + (self.sgst or ZERO) + (self.igst or ZERO) + (self.cess or ZERO)
 
     @property
+    def invoice_value(self) -> Decimal:
+        """What this invoice is worth, tax included — its ``val`` in a return.
+
+        ``total_value`` is not null and not reliable. It defaults to zero and is
+        only written when the extractor found a grand-total *label* on the
+        document, so an invoice whose total was printed as a bare ``Total:`` —
+        which the heuristic pattern does not match, because "Total" also begins
+        "Total Tax" and "Sub Total" — carries a stored total of zero while every
+        other figure on it is right.
+
+        So the value is derived from the figures that are always there, and the
+        stored total is preferred only when there is one. Every export already
+        did this privately: the GSTR-1 ``val``, the CSV's total column and the
+        reconciliation's comparison each grew their own copy of the fallback
+        after each was found reporting a real supply as one worth nothing.
+
+        The screens did not, and that is what this property is for. The invoice
+        list, the upload results and the detail page's totals all read the
+        column, so one invoice was ₹0.00 in the register and ₹5,31,000 in the
+        return built from it — with nothing on either screen to say which was
+        wrong. Kept on the model for the reason :attr:`claims_credit` is: it
+        belongs to the invoice rather than to whichever caller asked, and a
+        fourth copy is a fourth chance to leave one out.
+
+        The stored column stays exactly as extracted. It is what a reviewer
+        edits and what validation cross-foots against taxable value plus tax, so
+        a genuinely wrong total has to stay visibly wrong rather than being
+        quietly replaced by a derived one.
+        """
+        return self.total_value or (self.taxable_value or ZERO) + self.total_tax
+
+    @property
     def claims_credit(self) -> bool:
         """Whether the tax on this row is credit the buyer may actually take.
 

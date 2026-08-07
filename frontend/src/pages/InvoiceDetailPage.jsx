@@ -318,7 +318,13 @@ export default function InvoiceDetailPage() {
           </div>
           <div>
             <dt>Total</dt>
-            <dd>{rupees(invoice.total_value)}</dd>
+            {/* What the return will declare this invoice at. The editable
+                "Total value" field above stays the raw column, because that is
+                what a reviewer corrects and what validation cross-foots — but
+                the column is zero whenever the extractor found no grand-total
+                label, and this panel is where someone checks the figures
+                against the paper. */}
+            <dd>{rupees(invoice.invoice_value)}</dd>
           </div>
         </dl>
       </section>

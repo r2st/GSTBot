@@ -65,6 +65,18 @@ function FindingRow({ finding }) {
     <tr>
       <td>
         <span className={`chip chip-${meta.tone}`}>{meta.label}</span>
+        {/* An invoice booked in another month that this statement declares —
+            the supplier catching up on a late filing. It is shown because the
+            statement names it, and it moves none of this period's figures,
+            because the month that booked it has already counted it. Without a
+            marker it was an unexplained extra row: the ITC totals and the
+            matched count beside them are the period's own, so a user counting
+            rows found one more than every number on the screen. */}
+        {finding.carried && (
+          <span className="chip chip-neutral" title={finding.note ?? ""}>
+            Late filing
+          </span>
+        )}
       </td>
       <td>
         {finding.invoice_id ? (
@@ -239,13 +251,28 @@ export default function ReconcilePage() {
   const visible =
     filter === "all" ? findings : findings.filter((f) => f.category === filter);
 
-  const counts = {
-    matched: run?.matched_count ?? 0,
-    mismatched: run?.mismatched_count ?? 0,
-    missing_in_2b: run?.missing_in_2b_count ?? 0,
-    missing_in_books: run?.missing_in_books_count ?? 0,
-    duplicate: run?.duplicate_count ?? 0,
-  };
+  // Counted off the findings themselves rather than read from the run's
+  // columns, because these numbers label the list the filter is about to show
+  // and the two were counting different things. The server's counters
+  // deliberately exclude carried findings — an invoice booked in another month
+  // belongs to that month's tally — while the report carries them, so a May
+  // statement holding one late-filed April invoice showed "Matched (3)" over a
+  // list of four matched rows, and "All" over a total that no category chip
+  // added up to. A count beside a filter has to be the number of rows that
+  // filter yields; the period's own tally is what the stat cards above report.
+  const counts = findings.reduce(
+    (tally, finding) => {
+      if (finding.category in tally) tally[finding.category] += 1;
+      return tally;
+    },
+    {
+      matched: 0,
+      mismatched: 0,
+      missing_in_2b: 0,
+      missing_in_books: 0,
+      duplicate: 0,
+    },
+  );
 
   return (
     <div className="page">
@@ -343,11 +370,17 @@ export default function ReconcilePage() {
               value={rupees(run.itc_claimed)}
               sub={`${run.total_invoices} purchase invoices`}
             />
+            {/* The run's own counter, not the chip tally below. Both are
+                right about different questions: this card is "how much of
+                *this period* matched", and its denominator excludes carried
+                invoices, so its numerator has to as well — a May run that
+                picked up one late-filed April invoice would otherwise read
+                "4 / 3". */}
             <StatCard
               label="Matched"
-              value={`${counts.matched} / ${run.total_invoices}`}
+              value={`${run.matched_count ?? 0} / ${run.total_invoices}`}
               sub={`Last run ${dateLabel(run.completed_at?.slice(0, 10))}`}
-              tone={counts.matched === run.total_invoices ? "good" : "warn"}
+              tone={(run.matched_count ?? 0) === run.total_invoices ? "good" : "warn"}
             />
           </section>
 

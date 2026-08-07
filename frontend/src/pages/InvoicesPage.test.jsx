@@ -20,6 +20,7 @@ function invoice(overrides = {}) {
     igst: "81000.00",
     cess: "0.00",
     total_value: "531000.00",
+    invoice_value: "531000.00",
     status: "matched",
     ...overrides,
   };

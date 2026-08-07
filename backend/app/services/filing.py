@@ -781,14 +781,14 @@ def _rate_of(invoice: Invoice) -> Decimal:
 def _invoice_value(invoice: Invoice) -> Decimal:
     """The invoice's value including tax — what the portal calls ``val``.
 
-    ``total_value`` is not null and not reliable: it defaults to zero and is
-    only filled when the parser found a grand-total label on the document, so a
-    perfectly good invoice whose total was printed as "Amount Payable" carries
-    a stored total of zero. Every place that reads the invoice's *value* has to
-    fall back to the figures that are always there, or it reads a real supply
-    as one worth nothing.
+    :attr:`~app.models.invoice.Invoice.invoice_value` is where the fallback now
+    lives; this quantizes its answer, because a figure going into a return is
+    rounded to the paisa and the property is not a formatter.
+
+    The rule itself moved to the model because three exports had grown their own
+    copy of it and the screens had none — see the property's own docstring.
     """
-    return invoice.total_value or _q((invoice.taxable_value or ZERO) + _tax_total(invoice))
+    return _q(invoice.invoice_value)
 
 
 @dataclass(frozen=True)

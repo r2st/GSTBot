@@ -23,6 +23,10 @@ function invoiceResponse(overrides = {}) {
       counterparty_gstin: "29AAGCB7383J1Z4",
       invoice_date: "2026-04-15",
       total_value: "531000.00",
+      // What the API derives and every screen prints: the stored total where
+      // there is one, taxable value plus tax where the extractor found no
+      // grand-total label to write it from.
+      invoice_value: "531000.00",
       warnings: [],
       ...overrides,
     },

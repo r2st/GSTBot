@@ -29,6 +29,7 @@ function invoice(overrides = {}) {
     igst: "0.00",
     cess: "0.00",
     total_value: "1180.00",
+    invoice_value: "1180.00",
     warnings: [],
     parsed_with: "heuristics",
     extraction_confidence: 0.8,

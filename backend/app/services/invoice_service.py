@@ -20,7 +20,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.business import Business
-from app.models.invoice import Invoice, InvoiceSource, InvoiceStatus, InvoiceType
+from app.models.invoice import (
+    UNREADABLE_STATUSES,
+    Invoice,
+    InvoiceSource,
+    InvoiceStatus,
+    InvoiceType,
+)
 from app.models.supplier import Supplier
 from app.services import gst_calendar
 from app.services import gstin as gstin_service
@@ -519,12 +525,31 @@ def tax_summary(
     is what the dashboard uses. This remains for the callers that want exactly
     one.
 
-    Failed extractions are left out, because the returns leave them out. The
+    Rows whose figures were never extracted are left out, because the returns
+    leave them out — every status in
+    :data:`~app.models.invoice.UNREADABLE_STATUSES`, not merely ``FAILED``. The
     dashboard's net liability is the number a business plans its cash around,
-    and it has to be the number the GSTR-3B it files will show — a row whose
-    figures are stale from an earlier read is not in the return, and must not
-    be in the total either. The status counts above are unaffected: those are
-    lifetime counts of documents, and a failed one still needs attention.
+    and it has to be the number the GSTR-3B it files will show.
+
+    Excluding only ``FAILED`` was the last place in the product still drawing
+    that line in its own spot, and the two ways past it were not symmetric. A
+    row still queued for a worker carries columns of zeros, so it moved no
+    money and inflated the count. A row being *re-extracted* is the expensive
+    one: ``process_invoice`` sets ``PROCESSING`` and commits before it reads
+    anything, so the figures from the previous, successful read sit on it for
+    the length of the parse — counted in full here, and left out of the return
+    by ``filing`` and out of the credit pool by ``itc``.
+
+    That is not only a dashboard that disagrees with itself for a few seconds.
+    :func:`~app.services.filing.record_filing` stores *these* totals on the
+    filed-return row, beside the document ``build_gstr1`` produced from the
+    other rule — so a filing recorded while anything was mid-re-parse was
+    written down with an invoice count and a taxable value that the return
+    stored in the very same row does not contain. That record is what an
+    assessment is answered from years later.
+
+    The status counts on the dashboard are unaffected: those are lifetime
+    counts of documents, and an unread one still needs attention.
 
     Three buckets, not two. ``sales`` and ``purchase`` are the tax that appears
     on invoices in each direction; ``credit`` is the part of the purchase side
@@ -602,7 +627,7 @@ def _summarise(
     conditions = [
         Invoice.business_id == business_id,
         Invoice.deleted_at.is_(None),
-        Invoice.status != InvoiceStatus.FAILED,
+        Invoice.status.not_in(UNREADABLE_STATUSES),
     ]
     if periods:
         conditions.append(

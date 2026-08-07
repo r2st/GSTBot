@@ -30,7 +30,10 @@ function ResultRow({ result }) {
         {invoice.invoice_number ? <strong>{invoice.invoice_number}</strong> : "No number found"}
         {invoice.counterparty_gstin ? ` · ${invoice.counterparty_gstin}` : ""}
         {invoice.invoice_date ? ` · ${dateLabel(invoice.invoice_date)}` : ""}
-        {` · ${rupees(invoice.total_value)}`}
+        {/* The derived value, not the raw column — an invoice whose total was
+            printed as a bare "Total:" leaves that column at zero, and this row
+            is the first thing anyone sees after an upload. */}
+        {` · ${rupees(invoice.invoice_value)}`}
       </span>
       {warnings.length > 0 && (
         <ul className="result-warnings">
