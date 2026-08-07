@@ -986,6 +986,23 @@ def _item_blocks(lines: list[RateLine]) -> list[dict]:
     ]
 
 
+def _is_registered(invoice: Invoice) -> bool:
+    """Whether this supply goes in a B2B block or a B2C one.
+
+    A GSTIN that does not checksum is not a registered counterparty for filing
+    purposes: the portal cannot attribute the supply to anybody, so it belongs
+    in B2CL or B2CS exactly as an invoice with no GSTIN at all does. Validation
+    reports the bad GSTIN as an error either way — this only decides where the
+    supply lands if it is filed regardless, which an export is entitled to do.
+
+    Named rather than repeated because GSTR-1 and GSTR-3B both ask it, and the
+    portal checks their answers against each other.
+    """
+    return bool(
+        invoice.counterparty_gstin and gstin_service.is_valid(invoice.counterparty_gstin)
+    )
+
+
 def build_gstr1(db: Session, business: Business, period: str) -> dict:
     """GSTR-1 for *period* in the portal's JSON shape.
 
@@ -1020,8 +1037,8 @@ def build_gstr1(db: Session, business: Business, period: str) -> dict:
         # ₹3 lakh invoice in the summary that exists for small ones.
         value = _invoice_value(invoice)
 
-        if invoice.counterparty_gstin and gstin_service.is_valid(invoice.counterparty_gstin):
-            b2b.setdefault(invoice.counterparty_gstin, []).append(
+        if _is_registered(invoice):
+            b2b.setdefault(invoice.counterparty_gstin or "", []).append(
                 {
                     "inum": invoice.invoice_number or "",
                     "idt": to_portal_date(invoice.invoice_date),
@@ -1186,9 +1203,18 @@ def build_gstr3b(
         outward_taxable += taxable
 
         # Table 3.2: inter-state supplies to unregistered persons, by state.
+        #
+        # "Unregistered" is decided exactly as :func:`build_gstr1` decides it,
+        # and that is the whole point of the helper: the portal cross-checks
+        # 3.2 against the B2CL and B2CS blocks of the GSTR-1 for the same
+        # period, so the two returns have to agree on which supplies are B2C.
+        # Testing only for a *present* GSTIN here made them disagree on the one
+        # invoice where it matters — a customer GSTIN that does not checksum is
+        # filed as B2C in GSTR-1, because a buyer the portal cannot identify
+        # cannot be given credit, and was silently missing from 3.2.
         counterparty_state = gstin_service.state_code_of(invoice.counterparty_gstin or "")
         place_of_supply = invoice.place_of_supply or counterparty_state or business.state_code
-        if not invoice.counterparty_gstin and place_of_supply != business.state_code:
+        if not _is_registered(invoice) and place_of_supply != business.state_code:
             bucket = interstate_unregistered.setdefault(
                 place_of_supply, {"pos": place_of_supply, "txval": ZERO, "iamt": ZERO}
             )

@@ -1211,6 +1211,63 @@ def test_gstr3b_lists_interstate_supplies_to_unregistered_persons(db_session, bu
     assert row["iamt"] == 18000.00
 
 
+class TestTheTwoReturnsAgreeOnWhoIsRegistered:
+    """GSTR-1's B2C blocks and GSTR-3B's table 3.2 describe the same supplies.
+
+    The portal cross-checks 3.2 against the B2CL and B2CS blocks of the GSTR-1
+    for the same period, so a supply the two returns classify differently is a
+    query waiting to be raised.
+
+    A customer GSTIN that does not checksum is where they disagreed. GSTR-1 has
+    always filed it as B2C — the portal cannot attribute a supply to a taxpayer
+    it cannot identify, so there is no b2b block to put it in — while 3.2 asked
+    only whether the field was *filled in*, and quietly left the supply out.
+    Validation calls the bad GSTIN an error either way, but an export does not
+    wait for validation to pass, and it is the export that gets uploaded.
+    """
+
+    # Right shape, wrong check digit: 27AAPFU0939F1ZV is the tenant's own, and
+    # the last character is what a transposition in a phone number field eats.
+    UNCHECKSUMMED = "29AAGCB7383J1ZZ"
+
+    def sale_to_an_unidentifiable_buyer(self, db, business):
+        save(
+            db,
+            business.id,
+            sale(counterparty_gstin=self.UNCHECKSUMMED, place_of_supply="29"),
+        )
+
+    def test_gstr1_files_it_as_b2c(self, db_session, business):
+        self.sale_to_an_unidentifiable_buyer(db_session, business)
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        # Inter-state and over the ₹1 lakh limit, so B2CL rather than the
+        # rate-wise summary — either way, not b2b.
+        assert "b2b" not in document
+        (block,) = document["b2cl"]
+        assert block["pos"] == "29"
+        assert block["inv"][0]["val"] == 118000.00
+
+    def test_gstr3b_reports_it_in_table_3_2_too(self, db_session, business):
+        self.sale_to_an_unidentifiable_buyer(db_session, business)
+
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        (row,) = document["inter_sup"]["unreg_details"]
+        assert row["pos"] == "29"
+        assert row["txval"] == 100000.00
+        assert row["iamt"] == 18000.00
+
+    def test_a_registered_buyer_stays_out_of_table_3_2(self, db_session, business):
+        """The other direction: 3.2 is B2C only, and a real GSTIN is not."""
+        save(db_session, business.id, sale())
+
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert document["inter_sup"]["unreg_details"] == []
+
+
 def test_gstr3b_table_4_carries_available_reversed_and_net_itc(db_session, business):
     save(
         db_session,
