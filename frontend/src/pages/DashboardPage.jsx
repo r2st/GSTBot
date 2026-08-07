@@ -52,6 +52,27 @@ function DueDateNotice({ dueDate }) {
   );
 }
 
+/**
+ * How many alerts are outstanding, and a way to reach them.
+ *
+ * `open_alerts` has been on this response since the dashboard was written and
+ * nothing rendered it — the count was fetched on every load and dropped. That
+ * was harmless only while there was nowhere to send anyone: the alerts
+ * themselves had no screen, so a badge would have been a number with no noun.
+ * Now that they do, this is the link between the sweep raising an alert and a
+ * business ever seeing it.
+ */
+function OpenAlertsNotice({ count }) {
+  if (!count) return null;
+  return (
+    <div className="banner banner-warn" role="status">
+      {count === 1 ? "1 alert needs your attention" : `${count} alerts need your attention`}
+      {" · "}
+      <Link to="/alerts">View alerts</Link>
+    </div>
+  );
+}
+
 function TrendChart({ periods }) {
   const values = periods.map((p) => Number(p.net_liability.total));
   const peak = Math.max(...values, 1);
@@ -181,6 +202,7 @@ export default function DashboardPage() {
       {data && (
         <>
           <DueDateNotice dueDate={data.next_due_date} />
+          <OpenAlertsNotice count={data.open_alerts} />
 
           <section className="stat-grid">
             <StatCard
@@ -252,7 +274,20 @@ export default function DashboardPage() {
                     <tr key={head}>
                       <th scope="row">{head.toUpperCase()}</th>
                       <td>{rupees(data.sales[head])}</td>
-                      <td>{rupees(data.purchase[head])}</td>
+                      {/* `credit`, not `purchase`. They are different figures
+                          and the API sends both precisely so this screen can
+                          tell them apart: `purchase` is the tax on every
+                          purchase, `credit` is the claimable part of it —
+                          excluding what is blocked under s.17(5) and what the
+                          supplier never charged under reverse charge.
+                          `net_liability` is computed against `credit`, so
+                          showing `purchase` in this column left the three
+                          numbers in a row not subtracting: output 18,000 less
+                          "credit" 9,000 with 18,000 payable, on a business
+                          whose purchases were all blocked. It also contradicted
+                          the "Input tax credit" card directly above, which has
+                          always shown `credit.total_tax`. */}
+                      <td>{rupees(data.credit?.[head])}</td>
                       <td>{rupees(data.net_liability[head])}</td>
                     </tr>
                   ))}
@@ -260,8 +295,10 @@ export default function DashboardPage() {
                 </table>
               </TableScroll>
               <p className="muted small">
-                Credit is tracked per head: IGST credit can offset CGST and SGST, but CGST
-                credit can never discharge an SGST liability.
+                Credit is the claimable part of your purchases — tax blocked under s.17(5)
+                or paid under reverse charge is not counted. It is tracked per head: IGST
+                credit can offset CGST and SGST, but CGST credit can never discharge an
+                SGST liability.
               </p>
             </div>
           </section>

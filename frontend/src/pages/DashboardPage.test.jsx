@@ -23,6 +23,9 @@ function dashboard(overrides = {}) {
     counts: { total: 3, sales: 1, purchase: 2, by_status: { parsed: 3 }, needs_review: 1 },
     sales: { ...BUCKET, count: 1, igst: "18000.00", total_tax: "18000.00" },
     purchase: { ...BUCKET, count: 2, igst: "9000.00", total_tax: "9000.00" },
+    // Every purchase claimable, which is the ordinary case. The tests below
+    // that care about the difference set `credit` lower than `purchase`.
+    credit: { ...BUCKET, count: 2, igst: "9000.00", total_tax: "9000.00" },
     net_liability: {
       cgst: "0.00",
       sgst: "0.00",
@@ -93,6 +96,76 @@ describe("DashboardPage", () => {
     expect(await screen.findByRole("row", { name: /IGST/ })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /CGST/ })).toBeInTheDocument();
     expect(screen.getByRole("row", { name: /SGST/ })).toBeInTheDocument();
+  });
+
+  it("shows claimable credit in the credit column, not every purchase", async () => {
+    // The two are different figures and the API sends both. `purchase` is the
+    // tax on every purchase; `credit` is the claimable part — excluding what is
+    // blocked under s.17(5) and what the supplier never charged under reverse
+    // charge. `net_liability` is computed against `credit`, so showing
+    // `purchase` here left the row not subtracting: 18,000 output less 9,000
+    // "credit" with 18,000 payable.
+    mockDashboard(
+      dashboard({
+        purchase: { ...BUCKET, count: 2, igst: "9000.00", total_tax: "9000.00" },
+        credit: { ...BUCKET, count: 0, igst: "0.00", total_tax: "0.00" },
+        input_tax_credit: "0.00",
+        net_liability: {
+          cgst: "0.00",
+          sgst: "0.00",
+          igst: "18000.00",
+          cess: "0.00",
+          total: "18000.00",
+        },
+      }),
+    );
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: /IGST/ });
+    const cells = within(row).getAllByRole("cell");
+    expect(cells[0]).toHaveTextContent("₹18,000.00"); // Output
+    expect(cells[1]).toHaveTextContent("₹0.00"); // Credit — blocked, so nil.
+    expect(cells[2]).toHaveTextContent("₹18,000.00"); // Payable
+  });
+
+  it("agrees with the input tax credit card above it", async () => {
+    // The card has always shown `credit.total_tax`. The table showing
+    // `purchase` meant the same screen gave two answers to one question.
+    mockDashboard(
+      dashboard({
+        purchase: { ...BUCKET, count: 2, igst: "9000.00", total_tax: "9000.00" },
+        credit: { ...BUCKET, count: 1, igst: "4000.00", total_tax: "4000.00" },
+        input_tax_credit: "4000.00",
+      }),
+    );
+    renderPage();
+
+    const row = await screen.findByRole("row", { name: /IGST/ });
+    const credit = within(row).getAllByRole("cell")[1];
+    expect(credit).toHaveTextContent("₹4,000.00");
+    // The unclaimable ₹9,000 is not what this column means.
+    expect(credit).not.toHaveTextContent("₹9,000.00");
+  });
+
+  it("links to the alerts that are waiting", async () => {
+    // `open_alerts` was fetched on every load and rendered nowhere, so the
+    // sweep could raise an alert that no screen ever mentioned.
+    mockDashboard(dashboard({ open_alerts: 3 }));
+    renderPage();
+
+    expect(await screen.findByText(/3 alerts need your attention/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /View alerts/ })).toHaveAttribute(
+      "href",
+      "/alerts",
+    );
+  });
+
+  it("says nothing about alerts when there are none", async () => {
+    mockDashboard(dashboard({ open_alerts: 0 }));
+    renderPage();
+
+    await screen.findByText(/Needs review/);
+    expect(screen.queryByRole("link", { name: /View alerts/ })).not.toBeInTheDocument();
   });
 
   it("counts invoices needing review", async () => {
