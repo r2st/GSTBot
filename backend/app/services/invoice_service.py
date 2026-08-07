@@ -10,7 +10,7 @@ import hashlib
 import logging
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -510,6 +510,86 @@ def _duplicate_message(number: str | None, existing: Invoice | None) -> str:
     if existing is not None:
         return f"{named} is already on file as invoice {existing.id}."
     return f"{named} is already on file."
+
+
+# What the row says once the reaper has given up on it. Written to
+# ``parse_error``, so it is the sentence the review screen shows beside the
+# document, and phrased as the next action rather than as a diagnosis: the
+# stored file is untouched and re-extraction is one button away.
+STALLED_PARSE_MESSAGE = (
+    "Extraction stopped before it finished — the worker reading this document "
+    "was interrupted. The file is still stored; use Re-parse to try again."
+)
+
+
+def reap_stalled_parses(
+    db: Session, *, now: datetime | None = None, stall_seconds: int | None = None
+) -> int:
+    """Fail invoices stranded in ``processing``, and return how many.
+
+    :func:`process_invoice` writes its own failures to the row, so the status is
+    an outcome for every error it can catch. It cannot catch the process ceasing
+    to exist. ``PROCESSING`` is committed *before* anything is read — deliberately,
+    so a crash cannot look like a successful parse — and the child holding a
+    decoded PDF is exactly what the OOM killer picks, what the 240s hard time
+    limit kills, and what a redeploy stops mid-document. No ``except`` runs in any
+    of those, so the row keeps the status forever.
+
+    Forever is the whole defect, and it is silent in both directions at once.
+    ``PROCESSING`` is in :data:`~app.models.invoice.UNREADABLE_STATUSES`, so the
+    GSTR-1, the period's output tax, the credit pool, the reconciliation and the
+    supplier's exposure all skip the row — correctly, because nothing has read
+    it. But the dashboard's needs-review count is ``PARSED`` plus ``FAILED``, and
+    the register renders the status as a neutral "Processing" chip. So the one
+    document that is missing from the return is the one document the product
+    shows as work in hand, and there is no screen on which it is ever counted,
+    listed or complained about. A business under-declares a supply and is told
+    the month is clean.
+
+    ``FAILED`` is the status this should have reached, and reaching it is what
+    makes the row visible: it lands in the needs-review count, renders as a red
+    chip, carries a reason, and — since ``FAILED`` is also unreadable — changes
+    not one rupee of any return in the process. The uploaded file was committed
+    before the parse ever started, so nothing has been lost and ``reparse`` is
+    still the fix; this only stops the product from waiting on a worker that is
+    not coming back.
+
+    ``updated_at`` is the clock, because the database maintains it and the claim
+    on the row is itself a write: a task that retries re-stamps it, so a parse
+    being legitimately re-attempted is never mistaken for a dead one. The
+    threshold is :data:`~app.core.config.Settings.invoice_parse_stall_seconds`,
+    which is set well above what any legitimate parse can take.
+
+    Idempotent, tenant-agnostic and safe to run on a schedule — it is a sweep
+    over an operational state, not over anybody's books.
+    """
+    now = now or datetime.now(UTC)
+    seconds = (
+        settings.invoice_parse_stall_seconds if stall_seconds is None else stall_seconds
+    )
+    cutoff = now - timedelta(seconds=seconds)
+
+    stalled = list(
+        db.scalars(
+            select(Invoice).where(
+                Invoice.status == InvoiceStatus.PROCESSING,
+                Invoice.deleted_at.is_(None),
+                Invoice.updated_at < cutoff,
+            )
+        ).all()
+    )
+    for invoice in stalled:
+        invoice.status = InvoiceStatus.FAILED
+        invoice.parse_error = STALLED_PARSE_MESSAGE
+    if stalled:
+        db.commit()
+        logger.warning(
+            "Reaped %d invoice(s) stalled in processing for over %ds: %s",
+            len(stalled),
+            seconds,
+            [invoice.id for invoice in stalled],
+        )
+    return len(stalled)
 
 
 def tax_summary(

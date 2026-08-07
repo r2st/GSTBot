@@ -76,9 +76,17 @@ celery_app.conf.update(
     # which is the OOM killer's usual choice because the child is the one
     # holding the decoded PDF. Requeueing there would put an invoice that
     # reliably exhausts memory back on the queue forever, since redelivery after
-    # worker loss does not count against max_retries. Failing that one task
-    # leaves the invoice visibly unparsed and re-extractable from the UI, which
-    # is the better of the two failures.
+    # worker loss does not count against max_retries. Failing that one task is
+    # the better of the two failures.
+    #
+    # "Failing" it is what the ``stalled-parse-sweep`` below is for, and the
+    # reason it had to be added: a lost child runs no ``except`` block, so the
+    # row it was holding stays in ``processing`` rather than reaching ``failed``.
+    # This paragraph used to claim the invoice was left "visibly unparsed and
+    # re-extractable from the UI", and neither half was true — ``processing``
+    # renders as a neutral chip that means work in hand, and the dashboard's
+    # needs-review count does not include it. The sweep is what makes the
+    # sentence true.
 )
 
 # The hour, in IST, at which the deadline sweep runs. Early enough that an alert
@@ -88,6 +96,11 @@ celery_app.conf.update(
 # which would be half past noon there, after most of the working morning the
 # alert exists to reach.
 DEADLINE_SWEEP_HOUR = 7
+
+# Minute past each hour at which stranded parses are reaped. Offset from the
+# top of the hour so it does not start alongside the deadline sweep, log
+# rotation and everything else that fires at :00.
+STALLED_SWEEP_MINUTE = 20
 
 celery_app.conf.beat_schedule = {
     # The only periodic task in this application, and the whole reason
@@ -103,6 +116,19 @@ celery_app.conf.beat_schedule = {
     "filing-deadline-sweep": {
         "task": "alerts.sweep_filing_deadlines",
         "schedule": crontab(hour=DEADLINE_SWEEP_HOUR, minute=0),
+    },
+    # Hourly, and unlike the sweep above this one is not a date-based judgement
+    # that can only change overnight — it is an operational state that a single
+    # OOM kill creates at any moment, and the row is invisible on every screen
+    # until this runs. Hourly is the smallest interval that is still comfortably
+    # longer than ``invoice_parse_stall_seconds``, so a sweep never races a parse
+    # that is merely slow.
+    #
+    # Cheap enough to run on a clock: one indexed query over a status that is
+    # empty in the ordinary case, and it commits only when it found something.
+    "stalled-parse-sweep": {
+        "task": "invoices.reap_stalled",
+        "schedule": crontab(minute=STALLED_SWEEP_MINUTE),
     },
 }
 

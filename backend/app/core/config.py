@@ -107,6 +107,19 @@ class Settings(BaseSettings):
     # mid-invoice. Low enough to bound that, high enough that fork cost stays
     # noise next to a model call.
     celery_max_tasks_per_child: int = Field(default=200, ge=1, le=100_000)
+    # How long an invoice may sit in ``processing`` before it is presumed dead.
+    #
+    # ``process_invoice`` writes its own failures to the row, so the only way to
+    # stay in that status is for the process to stop existing between the commit
+    # that claims the row and the one that records an outcome: the hard time
+    # limit killing the child, the OOM killer choosing it, or a redeploy. None of
+    # those runs an ``except`` block, so nothing marks the row.
+    #
+    # The floor is what a legitimate parse can take end to end — four attempts at
+    # the 240s hard limit plus three 60s retry delays, about nineteen minutes — and
+    # an hour leaves room for a queue that is backed up behind other work. Reaping
+    # early would fail an invoice that is still being read.
+    invoice_parse_stall_seconds: int = Field(default=3600, ge=600, le=86_400)
 
     # ---- Rate limiting ----
     rate_limit_enabled: bool = True

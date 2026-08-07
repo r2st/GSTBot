@@ -44,3 +44,32 @@ def parse_invoice_task(self, invoice_id: int) -> dict:
         raise self.retry(exc=exc) from exc
     finally:
         db.close()
+
+
+@celery_app.task(name="invoices.reap_stalled", bind=True, max_retries=2, default_retry_delay=300)
+def reap_stalled_parses_task(self) -> dict:
+    """Fail invoices left in ``processing`` by a worker that stopped existing.
+
+    The counterpart to :func:`parse_invoice_task`, and the reason it has to be a
+    scheduled task rather than error handling: every failure the parse can catch
+    is already written to the row, so what is left is the process dying — the
+    hard time limit, the OOM killer, a redeploy mid-document. Nothing runs in the
+    worker at that moment, so only a clock afterwards can notice, exactly as with
+    a missed filing deadline.
+
+    See :func:`app.services.invoice_service.reap_stalled_parses` for what the
+    stranded row costs while it sits there.
+
+    Retried twice, five minutes apart, then left alone: the sweep is idempotent
+    and runs again within the hour, so the case worth covering is a database that
+    happened to be unreachable, not a defect that would only be repeated.
+    """
+    db = SessionLocal()
+    try:
+        reaped = invoice_service.reap_stalled_parses(db)
+        return {"reaped": reaped}
+    except Exception as exc:  # noqa: BLE001 - retried, then surfaced
+        logger.exception("reap_stalled_parses_task failed")
+        raise self.retry(exc=exc) from exc
+    finally:
+        db.close()
