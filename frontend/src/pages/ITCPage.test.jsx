@@ -48,6 +48,14 @@ function summary(overrides = {}) {
       credit_used: heads({ igst: "18000.00" }),
       total_cash: "2000.00",
     },
+    reverse_charge: {
+      taxable_value: "0.00",
+      tax: heads(),
+      credit: heads(),
+      invoice_count: 0,
+      cash_payable: "0.00",
+    },
+    cash_payable: "2000.00",
     itc_at_risk: "0.00",
     reconciled: true,
     invoice_count: 3,
@@ -100,6 +108,29 @@ describe("ITCPage", () => {
     await loaded();
     expect(statCard(container, "Credit available")).toHaveTextContent("₹18,000.00");
     expect(statCard(container, "Cash to pay")).toHaveTextContent("₹2,000.00");
+  });
+
+  it("asks for the reverse-charge tax as cash the credit cannot settle", async () => {
+    mockApi(
+      summary({
+        reverse_charge: {
+          taxable_value: "100000.00",
+          tax: heads({ igst: "18000.00" }),
+          credit: heads({ igst: "18000.00" }),
+          invoice_count: 1,
+          cash_payable: "18000.00",
+        },
+        cash_payable: "20000.00",
+      }),
+    );
+    const { container } = renderPage();
+
+    await loaded();
+    // Not the set-off's ₹2,000: that waterfall settles output tax only.
+    const card = statCard(container, "Cash to pay");
+    expect(card).toHaveTextContent("₹20,000.00");
+    expect(card).toHaveTextContent("Includes ₹18,000.00 on reverse charge");
+    expect(screen.getByText("Reverse charge, in cash")).toBeInTheDocument();
   });
 
   it("warns when the period has not been reconciled", async () => {
@@ -385,6 +416,7 @@ describe("ITCPage", () => {
             cash_payable: heads({ igst: "500.00" }),
             total_cash: "500.00",
           },
+          cash_payable: "500.00",
         }),
       );
       await waitFor(() =>
@@ -401,6 +433,7 @@ describe("ITCPage", () => {
             cash_payable: heads({ igst: "64000.00" }),
             total_cash: "64000.00",
           },
+          cash_payable: "64000.00",
         }),
       );
 

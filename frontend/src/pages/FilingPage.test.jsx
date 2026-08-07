@@ -61,6 +61,14 @@ function gstr3b(overrides = {}) {
         credit_used: { igst: "18000.00", cgst: "0.00", sgst: "0.00", cess: "0.00", total: "18000.00" },
         total_cash: "2000.00",
       },
+      gstbot_reverse_charge: {
+        taxable_value: "0.00",
+        tax: { igst: "0.00", cgst: "0.00", sgst: "0.00", cess: "0.00", total: "0.00" },
+        credit: { igst: "0.00", cgst: "0.00", sgst: "0.00", cess: "0.00", total: "0.00" },
+        invoice_count: 0,
+        cash_payable: "0.00",
+      },
+      gstbot_cash_payable: "2000.00",
     },
     validation: validation(),
     ...overrides,
@@ -322,6 +330,35 @@ describe("FilingPage", () => {
     expect(within(panel).getByText("₹2,000.00")).toBeInTheDocument();
     expect(within(panel).getByText("₹18,000.00")).toBeInTheDocument();
     expect(within(panel).getByText("₹500.00")).toBeInTheDocument();
+  });
+
+  it("counts the reverse-charge liability in the cash it asks for", async () => {
+    // Credit cannot settle it, so it is not in the set-off's figure — and a
+    // business reading only that one is told to find too little money.
+    const user = userEvent.setup();
+    const document = gstr3b();
+    mockApi({
+      gstr3b: {
+        ...document,
+        document: {
+          ...document.document,
+          gstbot_reverse_charge: {
+            ...document.document.gstbot_reverse_charge,
+            cash_payable: "9000.00",
+          },
+          gstbot_cash_payable: "11000.00",
+        },
+      },
+    });
+    renderPage();
+
+    await loaded();
+    await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+
+    const panel = (await screen.findByRole("heading", { name: "What this leaves to pay" }))
+      .closest("section");
+    expect(within(panel).getByText("₹11,000.00")).toBeInTheDocument();
+    expect(within(panel).getByText("₹9,000.00")).toBeInTheDocument();
   });
 
   it("downloads an export under the name the server gave it", async () => {

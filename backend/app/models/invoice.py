@@ -51,6 +51,24 @@ class InvoiceStatus(str, Enum):
     MISSING_IN_2B = "missing_in_2b"  # In our books, absent from the supplier's GSTR-1.
 
 
+# The statuses that mean "the figures on this row were never extracted".
+# ``FAILED`` is an extraction that gave up; the other two are one that has not
+# run yet. Nothing in any of them can be filed or claimed, because the money
+# columns still hold their defaults.
+#
+# Kept beside the enum rather than in whichever service asked first, because
+# both the returns and the ITC position have to draw the line in the same
+# place. They did not: the returns excluded ``FAILED`` and the credit pool
+# excluded ``FAILED``, but a row still queued for a worker was filable to one
+# and countable to the other, and the two answers for one month disagreed for
+# reasons no screen showed.
+UNREADABLE_STATUSES = (
+    InvoiceStatus.FAILED,
+    InvoiceStatus.UPLOADED,
+    InvoiceStatus.PROCESSING,
+)
+
+
 class InvoiceSource(str, Enum):
     UPLOAD = "upload"
     EMAIL = "email"

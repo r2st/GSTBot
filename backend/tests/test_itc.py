@@ -460,7 +460,11 @@ def test_summary_excludes_blocked_and_reverse_charge_credit(db_session, business
     summary = itc_service.summarise(db_session, business.id, PERIOD)
 
     assert summary.available.igst == Decimal("18000.00")
-    assert summary.unclaimed_count == 2
+    # Only the blocked one is unclaimed. The reverse-charge purchase is out of
+    # this pool because no supplier charged its tax, not because the credit is
+    # lost: it comes back at 4(A)(3) and is counted below.
+    assert summary.unclaimed_count == 1
+    assert summary.reverse_charge.credit.igst == Decimal("18000.00")
 
 
 def test_capital_goods_credit_is_not_pooled_with_inputs(db_session, business):
@@ -472,6 +476,114 @@ def test_capital_goods_credit_is_not_pooled_with_inputs(db_session, business):
     assert summary.available.igst == Decimal("0.00")
     assert summary.proportionate.capital_credit.igst == Decimal("18000.00")
     assert summary.proportionate.capital_credit_this_month.igst == Decimal("300.00")
+
+
+class TestReverseChargeIsALiabilityCreditCannotSettle:
+    """s.9(3)/9(4): the one place a purchase creates tax to pay.
+
+    The buyer pays the government directly, declares it in GSTR-3B at 3.1(d),
+    and claims it straight back at 4(A)(3). Two halves that have to move
+    together: the liability is cash whatever the credit ledger holds, because
+    s.49(4) only lets credit settle "output tax" and s.2(82) puts reverse
+    charge outside that definition.
+    """
+
+    def test_a_reverse_charge_purchase_carries_a_liability_and_its_credit(
+        self, db_session, business
+    ):
+        save(db_session, business.id, invoice_number="RCM-1", reverse_charge=True)
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.reverse_charge.invoice_count == 1
+        assert summary.reverse_charge.taxable_value == Decimal("100000.00")
+        assert summary.reverse_charge.tax.igst == Decimal("18000.00")
+        assert summary.reverse_charge.credit.igst == Decimal("18000.00")
+        # And it is not in the pool the supplier's own filing evidences.
+        assert summary.available.igst == Decimal("0.00")
+
+    def test_the_credit_it_earns_is_claimable_this_period(self, db_session, business):
+        save(db_session, business.id, invoice_number="RCM-1", reverse_charge=True)
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.net_available.igst == Decimal("18000.00")
+
+    def test_credit_does_not_settle_it(self, db_session, business):
+        """A ledger deep enough to clear the output tax still leaves this to pay."""
+        save(db_session, business.id, invoice_number="RCM-1", reverse_charge=True)
+        db_session.add(
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.PARSED,
+                invoice_number="S-1",
+                invoice_date=date(2026, 4, 20),
+                period=PERIOD,
+                taxable_value=Decimal("100000.00"),
+                igst=Decimal("18000.00"),
+                total_value=Decimal("118000.00"),
+            )
+        )
+        db_session.commit()
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        # The reverse-charge credit settled the whole output tax...
+        assert summary.set_off.total_cash == Decimal("0.00")
+        # ...and the reverse-charge tax itself is still cash out of the door.
+        assert summary.cash_payable == Decimal("18000.00")
+
+    def test_a_blocked_reverse_charge_purchase_pays_and_gets_nothing_back(
+        self, db_session, business
+    ):
+        """s.17(5) on top of 9(3): the most expensive row on the register."""
+        save(
+            db_session,
+            business.id,
+            invoice_number="RCM-1",
+            reverse_charge=True,
+            itc_eligible=False,
+        )
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.reverse_charge.tax.igst == Decimal("18000.00")
+        assert summary.reverse_charge.credit.igst == Decimal("0.00")
+        assert summary.cash_payable == Decimal("18000.00")
+        assert summary.unclaimed_count == 1
+
+    def test_a_row_carrying_no_tax_is_not_a_liability(self, db_session, business):
+        """Empty tax boxes are an extraction that missed them, not a supply."""
+        save(
+            db_session,
+            business.id,
+            invoice_number="RCM-1",
+            reverse_charge=True,
+            igst=Decimal("0.00"),
+        )
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.reverse_charge.invoice_count == 0
+        assert summary.cash_payable == Decimal("0.00")
+
+    def test_the_reconciliation_cap_leaves_it_alone(self, db_session, business):
+        """GSTR-2B has nothing to say about tax the buyer pays themselves.
+
+        The cap scales the pool a supplier's filing evidences. A 2B that shows
+        nothing scales that pool to nothing — and used to be read as evidence
+        against a reverse-charge credit no supplier was ever going to declare.
+        """
+        save(db_session, business.id, invoice_number="RCM-1", reverse_charge=True)
+        reconciliation.store_gstr2b(db_session, business.id, PERIOD, [])
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        summary = itc_service.summarise(db_session, business.id, PERIOD)
+
+        assert summary.reconciled is True
+        assert summary.reverse_charge.credit.igst == Decimal("18000.00")
+        assert summary.net_available.igst == Decimal("18000.00")
 
 
 class TestCapitalCreditIsDueForSixtyMonths:

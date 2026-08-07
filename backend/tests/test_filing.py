@@ -372,6 +372,95 @@ def test_warnings_alone_do_not_block_a_filing(db_session, business):
     assert len(report.warnings) == 1
 
 
+class TestAnUnreadableRowBlocksThePeriod:
+    """A supply left out of the return has to be said out loud.
+
+    The return builders drop every invoice whose figures were never extracted,
+    which is right for the document — a row of zeros is worse than no row — but
+    it dropped them from validation too, and validation is the only thing that
+    says whether a period may be filed. A month holding a failed sales
+    extraction came back ``ok`` with that supply missing from GSTR-1, from the
+    CSV the CA checks it against, and from the totals stored on the filing.
+    Under-declared output tax carries interest.
+    """
+
+    def unreadable(self, **kwargs):
+        """A row as it looks before anything has been read off it."""
+        return sale(
+            invoice_number=None,
+            invoice_date=None,
+            place_of_supply=None,
+            hsn_code=None,
+            tax_rate=None,
+            taxable_value=Decimal("0.00"),
+            igst=Decimal("0.00"),
+            total_value=Decimal("0.00"),
+            **kwargs,
+        )
+
+    def test_a_failed_extraction_blocks_a_period_that_looked_clean(
+        self, db_session, business
+    ):
+        save(db_session, business.id, sale())
+        save(
+            db_session,
+            business.id,
+            self.unreadable(status=InvoiceStatus.FAILED, parse_error="model gave up"),
+        )
+
+        report = filing_service.validate_period(db_session, business, PERIOD)
+
+        assert report.ok is False
+        (issue,) = report.errors
+        assert issue.field == "status"
+        assert "model gave up" in issue.message
+
+    def test_a_row_still_being_extracted_blocks_it_too(self, db_session, business):
+        save(db_session, business.id, self.unreadable(status=InvoiceStatus.PROCESSING))
+
+        report = filing_service.validate_period(db_session, business, PERIOD)
+
+        assert report.ok is False
+        (issue,) = report.errors
+        assert "Still being extracted" in issue.message
+
+    def test_one_complaint_per_row_not_six(self, db_session, business):
+        """Not-read is the finding. The empty fields are only its symptoms.
+
+        Run through the field checks, one pending upload produced a complaint
+        about its number, its date, its GSTIN, its rate and its total — none of
+        which said the thing that was actually wrong.
+        """
+        save(db_session, business.id, self.unreadable(status=InvoiceStatus.UPLOADED))
+
+        report = filing_service.validate_period(db_session, business, PERIOD)
+
+        assert len(report.issues) == 1
+
+    def test_a_purchase_register_is_judged_the_same_way(self, db_session, business):
+        save(
+            db_session,
+            business.id,
+            self.unreadable(
+                invoice_type=InvoiceType.PURCHASE, status=InvoiceStatus.FAILED
+            ),
+        )
+
+        report = filing_service.validate_period(
+            db_session, business, PERIOD, invoice_type=InvoiceType.PURCHASE
+        )
+
+        assert report.ok is False
+
+    def test_the_unreadable_row_is_still_out_of_the_return(self, db_session, business):
+        """Reported, not filed. A row of zeros in GSTR-1 is the worse answer."""
+        save(db_session, business.id, self.unreadable(status=InvoiceStatus.UPLOADED))
+
+        document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+        assert set(document) == {"gstin", "fp", "version", "hash"}
+
+
 # ---------------------------------------------------------------------------
 # GSTR-1
 # ---------------------------------------------------------------------------
@@ -760,6 +849,67 @@ def test_gstr3b_carries_the_set_off_for_the_screen(db_session, business):
 
     assert "gstbot_set_off" in document
     assert document["gstbot_set_off"]["cash_payable"]["igst"] == "18000.00"
+
+
+class TestReverseChargeReachesTheReturn:
+    """Table 3.1(d), and the credit for it at 4(A)(3).
+
+    A business paying a goods transport agency, a lawyer, or rent to an
+    unregistered landlord owes the tax itself under s.9(3)/9(4). It used to
+    file a 3B declaring none of it — and that tax cannot be settled from the
+    credit ledger, so the omission is cash never paid with interest running on
+    it from the due date.
+    """
+
+    def purchase(self, **kwargs):
+        return sale(
+            invoice_type=InvoiceType.PURCHASE,
+            invoice_number="P-RCM",
+            reverse_charge=True,
+            **kwargs,
+        )
+
+    def test_the_liability_is_declared_at_3_1_d(self, db_session, business):
+        save(db_session, business.id, self.purchase())
+
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        inward = document["sup_details"]["isup_rev"]
+        assert inward["txval"] == 100000.00
+        assert inward["iamt"] == 18000.00
+
+    def test_the_credit_is_claimed_in_its_own_row_at_4_a_3(self, db_session, business):
+        save(db_session, business.id, self.purchase())
+
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        rows = {row["ty"]: row for row in document["itc_elg"]["itc_avl"]}
+        assert rows["ISRC"]["iamt"] == 18000.00
+        # Not folded into "all other ITC", which is the pool the supplier's own
+        # filing evidences.
+        assert rows["OTH"]["iamt"] == 0.0
+        assert document["itc_elg"]["itc_net"]["iamt"] == 18000.00
+
+    def test_a_period_with_none_declares_zeros(self, db_session, business):
+        save(db_session, business.id, sale())
+
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        assert document["sup_details"]["isup_rev"]["txval"] == 0.0
+        assert document["gstbot_cash_payable"] == "18000.00"
+
+    def test_the_cash_figure_carries_both_liabilities(self, db_session, business):
+        """The set-off's half alone tells a business to find too little money."""
+        save(db_session, business.id, sale())  # ₹18,000 of output tax.
+        save(db_session, business.id, self.purchase())  # ₹18,000, and its credit.
+
+        document = filing_service.build_gstr3b(db_session, business, PERIOD)
+
+        # The reverse-charge credit settles the output tax...
+        assert document["gstbot_set_off"]["total_cash"] == "0.00"
+        # ...and the reverse-charge tax is still payable in cash.
+        assert document["gstbot_reverse_charge"]["cash_payable"] == "18000.00"
+        assert document["gstbot_cash_payable"] == "18000.00"
 
 
 class TestAClosedPeriodsReturnDoesNotMove:

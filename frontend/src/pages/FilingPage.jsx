@@ -359,8 +359,24 @@ export default function FilingPage() {
               <div className="kv">
                 <div>
                   <span className="muted">Cash payable</span>
-                  <strong>{rupees(preview.document.gstbot_set_off.total_cash)}</strong>
+                  {/* Both liabilities. Credit settles output tax and cannot
+                      touch a reverse-charge one, so the set-off's own figure
+                      is only half of what has to be found. */}
+                  <strong>
+                    {rupees(
+                      preview.document.gstbot_cash_payable ??
+                        preview.document.gstbot_set_off.total_cash,
+                    )}
+                  </strong>
                 </div>
+                {Number(preview.document.gstbot_reverse_charge?.cash_payable ?? 0) > 0 && (
+                  <div>
+                    <span className="muted">Of which reverse charge</span>
+                    <strong>
+                      {rupees(preview.document.gstbot_reverse_charge.cash_payable)}
+                    </strong>
+                  </div>
+                )}
                 <div>
                   <span className="muted">Credit used</span>
                   <strong>

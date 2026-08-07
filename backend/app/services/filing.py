@@ -37,7 +37,12 @@ from sqlalchemy.orm import Session
 from app.core.sanitize import csv_safe
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
-from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
+from app.models.invoice import (
+    UNREADABLE_STATUSES,
+    Invoice,
+    InvoiceStatus,
+    InvoiceType,
+)
 from app.services import gst_calendar, invoice_parser, invoice_service
 from app.services import gstin as gstin_service
 from app.services import itc as itc_service
@@ -354,6 +359,33 @@ def validate_invoice(
     return issues
 
 
+def _unreadable_issue(invoice: Invoice) -> ValidationIssue:
+    """Why a row with no extracted figures is blocking, in its own words.
+
+    "Failed" and "not started yet" want different answers from the user — one
+    is fixed by a re-parse or by typing the figures in, the other by waiting —
+    so they are not collapsed into one message.
+    """
+    if invoice.status is InvoiceStatus.FAILED:
+        reason = invoice.parse_error or "the extraction gave up"
+        message = (
+            f"Could not be read ({reason}), so it is left out of the return entirely. "
+            "Re-parse it, enter the figures by hand, or delete it."
+        )
+    else:
+        message = (
+            "Still being extracted, so it is not in the return yet. Wait for the "
+            "extraction to finish and validate again."
+        )
+    return ValidationIssue(
+        invoice_id=invoice.id,
+        invoice_number=invoice.invoice_number,
+        field="status",
+        severity=Severity.ERROR,
+        message=message,
+    )
+
+
 def validate_period(
     db: Session,
     business: Business,
@@ -361,13 +393,33 @@ def validate_period(
     *,
     invoice_type: InvoiceType = InvoiceType.SALES,
 ) -> ValidationReport:
-    """Validate every invoice of one direction in a period."""
+    """Validate every invoice of one direction in a period.
+
+    Including the ones that are not in the return. :func:`_invoices` leaves out
+    every row whose figures were never extracted, which is right for the
+    document — a row of zeros in a return is worse than no row — but it made
+    them invisible here too, and this is the only thing that says whether a
+    period may be filed. A month holding three failed sales extractions came
+    back ``ok: true`` with those three supplies silently absent from GSTR-1,
+    from the CSV a CA checks it against, and from the totals stored when the
+    filing was recorded. Under-declared output tax carries interest, and the
+    product had told them the period was clean.
+
+    So an unreadable row is reported as an error against the period rather than
+    validated field by field: an invoice the parser never read has nothing to
+    say about its GSTIN or its rate, and the six separate complaints that came
+    out of running the field checks over one — number missing, date missing,
+    no taxable value — all mean "this has not been read" and none of them said
+    so.
+    """
     invoices = _invoices(db, business.id, period, invoice_type)
     report = ValidationReport(period=period, invoice_count=len(invoices))
     for invoice in invoices:
         report.issues.extend(
             validate_invoice(invoice, business_state=business.state_code, period=period)
         )
+    for invoice in _unreadable_invoices(db, business.id, period, invoice_type):
+        report.issues.append(_unreadable_issue(invoice))
     return report
 
 
@@ -612,9 +664,11 @@ def _invoices(
 ) -> list[Invoice]:
     """Filable invoices of one direction for a period, oldest first.
 
-    Excludes failed extractions: an invoice whose fields were never read has
+    Excludes every row whose figures were never extracted — see
+    :data:`UNREADABLE_STATUSES`. An invoice whose fields were never read has
     nothing to file, and putting a row of zeros in a return is worse than
-    leaving it out and reporting it as unfiled.
+    leaving it out and reporting it as unfiled, which
+    :func:`validate_period` does.
     """
     return list(
         db.scalars(
@@ -624,9 +678,28 @@ def _invoices(
                 Invoice.deleted_at.is_(None),
                 Invoice.invoice_type == invoice_type,
                 Invoice.period == period,
-                Invoice.status != InvoiceStatus.FAILED,
+                Invoice.status.not_in(UNREADABLE_STATUSES),
             )
             .order_by(Invoice.invoice_date.asc(), Invoice.id.asc())
+        ).all()
+    )
+
+
+def _unreadable_invoices(
+    db: Session, business_id: int, period: str, invoice_type: InvoiceType
+) -> list[Invoice]:
+    """The rows :func:`_invoices` leaves out, so validation can name them."""
+    return list(
+        db.scalars(
+            select(Invoice)
+            .where(
+                Invoice.business_id == business_id,
+                Invoice.deleted_at.is_(None),
+                Invoice.invoice_type == invoice_type,
+                Invoice.period == period,
+                Invoice.status.in_(UNREADABLE_STATUSES),
+            )
+            .order_by(Invoice.id.asc())
         ).all()
     )
 
@@ -826,6 +899,16 @@ def build_gstr3b(
     4(B), and 4(C) is the net — which is the figure that actually reduces the
     cash payable.
 
+    Table 3.1 takes one line from the purchase side: 3.1(d), the inward
+    supplies the buyer owes the tax on. It used to take none, and a business
+    paying a goods transport agency, a lawyer or an unregistered landlord filed
+    a 3B that declared no reverse-charge liability at all. That tax cannot be
+    settled from the credit ledger — s.49(4) lets credit pay "output tax", and
+    s.2(82) puts reverse charge outside it — so the omission is cash the
+    business did not pay, with interest running on it from the due date. The
+    credit it earns comes back at 4(A)(3), which is why the round trip is
+    close to free over the month and the missing declaration was invisible.
+
     Rule 37 is a clock — credit reverses 180 days after an invoice date — and a
     clock has to be told which day the return is a statement about. Reading it
     off *today* made a closed period's return move: a business that generated
@@ -876,6 +959,7 @@ def build_gstr3b(
     output = summary.output_tax
     available = summary.available + summary.proportionate.capital_credit_this_month
     reversal = summary.total_reversal
+    reverse_charge = summary.reverse_charge
 
     return {
         "gstin": business.gstin,
@@ -891,6 +975,19 @@ def build_gstr3b(
             },
             # 3.1(c): nil-rated and exempt outward supplies.
             "osup_nil_exmp": {"txval": float(_q(outward_exempt))},
+            # 3.1(d): inward supplies on which *we* owe the tax. The only line
+            # of table 3.1 fed by purchases rather than sales, and the one that
+            # was missing: a business paying freight, legal fees or rent to an
+            # unregistered landlord filed a 3B declaring none of it. The tax is
+            # payable in cash whatever the credit ledger holds, so the shortfall
+            # is real money and interest runs on it from the due date.
+            "isup_rev": {
+                "txval": float(_q(reverse_charge.taxable_value)),
+                "iamt": float(_q(reverse_charge.tax.igst)),
+                "camt": float(_q(reverse_charge.tax.cgst)),
+                "samt": float(_q(reverse_charge.tax.sgst)),
+                "csamt": float(_q(reverse_charge.tax.cess)),
+            },
         },
         # 3.2: of the above, supplies to unregistered persons in other states.
         "inter_sup": {
@@ -912,7 +1009,20 @@ def build_gstr3b(
                     "camt": float(_q(available.cgst)),
                     "samt": float(_q(available.sgst)),
                     "csamt": float(_q(available.cess)),
-                }
+                },
+                # 4(A)(3): the credit side of 3.1(d). Declared as its own row
+                # because the portal keeps it as one, and because it is the
+                # half that makes the reverse-charge round trip cost nothing
+                # over the month — claiming it in "all other ITC" would file a
+                # 3.1(d) liability with no visible credit against it, which is
+                # the shape of a return that invites a query.
+                {
+                    "ty": "ISRC",  # Inward supplies liable to reverse charge.
+                    "iamt": float(_q(reverse_charge.credit.igst)),
+                    "camt": float(_q(reverse_charge.credit.cgst)),
+                    "samt": float(_q(reverse_charge.credit.sgst)),
+                    "csamt": float(_q(reverse_charge.credit.cess)),
+                },
             ],
             "itc_rev": [
                 {
@@ -933,6 +1043,12 @@ def build_gstr3b(
         # Not part of the portal's schema: what the set-off leaves to pay in
         # cash, so the screen can show it without recomputing.
         "gstbot_set_off": summary.set_off.as_dict(),
+        # Also ours. The set-off above settles output tax only, because credit
+        # may not settle a reverse-charge liability — so the cash a business
+        # actually has to find this month is the two added together, and it is
+        # given here rather than left to a caller to remember.
+        "gstbot_reverse_charge": reverse_charge.as_dict(),
+        "gstbot_cash_payable": str(summary.cash_payable),
     }
 
 

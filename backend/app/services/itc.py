@@ -32,7 +32,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
+from app.models.invoice import UNREADABLE_STATUSES, Invoice, InvoiceType
 from app.services import gst_calendar, reconciliation
 
 ZERO = Decimal("0.00")
@@ -516,6 +516,78 @@ def capital_goods_in_service(invoices: list[Invoice], period: str) -> TaxHeads:
 
 
 # ---------------------------------------------------------------------------
+# Section 9(3)/9(4) — tax the buyer pays on the supplier's behalf
+# ---------------------------------------------------------------------------
+
+@dataclass
+class ReverseChargePosition:
+    """Tax owed on inward supplies under reverse charge, and what it earns.
+
+    Reverse charge is the one place a *purchase* creates a liability. On a
+    freight bill from a goods transport agency, on a lawyer's fee, on rent from
+    an unregistered landlord, the supplier charges nothing and the buyer pays
+    the tax to the government directly. It is declared in GSTR-3B table 3.1(d),
+    and it is not optional.
+
+    Two things follow, and they pull in opposite directions:
+
+    * **It must be paid in cash.** s.49(4) lets the credit ledger settle
+      "output tax", and s.2(82) defines output tax to exclude tax payable on
+      reverse charge. A ledger full of credit does not reduce this by a rupee,
+      which is why it is kept out of :class:`SetOffResult` and reported beside
+      it instead.
+    * **It becomes credit.** Once paid it is input tax like any other, claimed
+      in the same return at table 4(A)(3) — unless the input is one s.17(5)
+      blocks, which is what ``itc_eligible`` records.
+
+    So the cash effect of an ordinary reverse-charge purchase is close to nil
+    over the month, and the *declaration* is the whole point: leaving 3.1(d)
+    empty understates the liability, and interest runs on the shortfall from
+    the due date whether or not the credit was there to cover it.
+    """
+
+    taxable_value: Decimal = ZERO
+    tax: TaxHeads = field(default_factory=TaxHeads)
+    credit: TaxHeads = field(default_factory=TaxHeads)
+    invoice_count: int = 0
+
+    def as_dict(self) -> dict:
+        return {
+            "taxable_value": str(_q(self.taxable_value)),
+            "tax": self.tax.as_dict(),
+            "credit": self.credit.as_dict(),
+            "invoice_count": self.invoice_count,
+            "cash_payable": str(_q(self.tax.total)),
+        }
+
+
+def reverse_charge_position(invoices: list[Invoice]) -> ReverseChargePosition:
+    """The reverse-charge liability carried by *invoices*, and its credit.
+
+    Pure, over one period's purchases. An invoice counts when it is flagged
+    reverse charge and carries tax; the credit half counts only the part
+    s.17(5) does not block.
+    """
+    position = ReverseChargePosition()
+    for invoice in invoices:
+        if not invoice.reverse_charge:
+            continue
+        tax = _invoice_tax(invoice)
+        if tax.total <= ZERO:
+            # Nothing to declare and nothing to claim. A row whose tax boxes
+            # are empty is an extraction that missed them, not a supply the
+            # government is owed nothing on, and inventing a figure for it
+            # would put a made-up liability on a return.
+            continue
+        position.invoice_count += 1
+        position.taxable_value += invoice.taxable_value or ZERO
+        position.tax = position.tax + tax
+        if invoice.itc_eligible:
+            position.credit = position.credit + tax
+    return position
+
+
+# ---------------------------------------------------------------------------
 # The period summary the API serves
 # ---------------------------------------------------------------------------
 
@@ -538,6 +610,7 @@ class ITCSummary:
     # the part that lapsed during this period, and therefore the part this
     # period's return gives back. See :meth:`Rule37Result.reversal_in`.
     rule_37_reversal: TaxHeads = field(default_factory=TaxHeads)
+    reverse_charge: ReverseChargePosition = field(default_factory=ReverseChargePosition)
 
     @property
     def total_reversal(self) -> TaxHeads:
@@ -548,6 +621,18 @@ class ITCSummary:
         it lapsed in.
         """
         return self.rule_37_reversal + self.proportionate.total_reversal
+
+    @property
+    def cash_payable(self) -> Decimal:
+        """Every rupee this period has to be paid in cash, both liabilities.
+
+        The set-off says what output tax the credit ledger could not settle.
+        The reverse-charge liability is added whole, because credit may not
+        settle any of it — see :class:`ReverseChargePosition`. Reported as one
+        figure because it is one payment challan, and a screen that showed only
+        the set-off's half told a business to find less money than it owes.
+        """
+        return _q(self.set_off.total_cash + self.reverse_charge.tax.total)
 
     def as_dict(self) -> dict:
         return {
@@ -560,6 +645,8 @@ class ITCSummary:
             "total_reversal": self.total_reversal.as_dict(),
             "net_available": self.net_available.as_dict(),
             "set_off": self.set_off.as_dict(),
+            "reverse_charge": self.reverse_charge.as_dict(),
+            "cash_payable": str(self.cash_payable),
             "itc_at_risk": str(_q(self.itc_at_risk)),
             "reconciled": self.reconciled,
             "invoice_count": self.invoice_count,
@@ -573,7 +660,7 @@ def _purchases(db: Session, business_id: int, period: str | None = None) -> list
         Invoice.business_id == business_id,
         Invoice.deleted_at.is_(None),
         Invoice.invoice_type == InvoiceType.PURCHASE,
-        Invoice.status != InvoiceStatus.FAILED,
+        Invoice.status.not_in(UNREADABLE_STATUSES),
     ]
     if period:
         conditions.append(Invoice.period == period)
@@ -600,12 +687,14 @@ def purchase_invoices(
 def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
     """Output tax declared on sales invoices for *period*.
 
-    Failed extractions are excluded, because GSTR-1 excludes them: ``filing``
-    leaves a failed row out of the return entirely. Counting it here and not
-    there makes the ITC screen quote an output tax the 3B it produces will not
-    contain, and the difference lands on the cash the business is told to pay.
-    A re-parse is where this bites — the figures from the first, successful
-    read stay on the row after a later attempt fails.
+    Rows whose figures were never extracted are excluded, because the returns
+    exclude them: ``filing`` leaves anything in
+    :data:`~app.models.invoice.UNREADABLE_STATUSES` out of the document
+    entirely. Counting one here and not there makes the ITC screen quote an
+    output tax the 3B it produces will not contain, and the difference lands on
+    the cash the business is told to pay. A re-parse is where this bites — the
+    figures from the first, successful read stay on the row after a later
+    attempt fails.
     """
     row = db.execute(
         select(
@@ -618,7 +707,7 @@ def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.SALES,
             Invoice.period == period,
-            Invoice.status != InvoiceStatus.FAILED,
+            Invoice.status.not_in(UNREADABLE_STATUSES),
         )
     ).one()
     return TaxHeads(
@@ -638,10 +727,10 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
     classify every line by hand — the caller can override both figures when
     they know better.
 
-    Failed extractions are excluded for the same reason as ``_outward_tax``,
-    and one worse: a row whose tax fields were never read has no tax, so it
-    would be counted as an *exempt* supply and inflate the Rule 42 ratio —
-    reversing credit on the strength of an extraction that failed.
+    Unextracted rows are excluded for the same reason as ``_outward_tax``, and
+    one worse: a row whose tax fields were never read has no tax, so it would
+    be counted as an *exempt* supply and inflate the Rule 42 ratio — reversing
+    credit on the strength of an extraction that never happened.
     """
     rows = db.execute(
         select(
@@ -655,7 +744,7 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.SALES,
             Invoice.period == period,
-            Invoice.status != InvoiceStatus.FAILED,
+            Invoice.status.not_in(UNREADABLE_STATUSES),
         )
     ).all()
 
@@ -728,16 +817,35 @@ def summarise(
     last_run = reconciliation.latest_completed_run(db, business_id, period)
 
     # Claimable credit by head, from the books. Capital goods are excluded from
-    # the input pool: their credit belongs to Rule 43's sixty months.
+    # the input pool: their credit belongs to Rule 43's sixty months. So are
+    # reverse-charge purchases: no supplier charged that tax, so it is not
+    # credit on this document — it is credit on the payment the business is
+    # about to make, and it is pooled with the liability that creates it.
     available = TaxHeads()
     unclaimed = 0
     for invoice in period_purchases:
-        if not invoice.claims_credit:
+        if invoice.reverse_charge:
+            continue
+        if not invoice.itc_eligible:
+            # Exempt, nil-rated, or blocked under s.17(5): tax was paid and is
+            # simply not creditable.
             unclaimed += 1
             continue
         if invoice.is_capital_good:
             continue
         available = available + _invoice_tax(invoice)
+
+    # s.9(3)/9(4) inward supplies: a liability, and the credit it earns.
+    # Counted before the blocked ones, because a reverse-charge purchase that
+    # s.17(5) also blocks is the one case where the tax is paid in cash and no
+    # credit comes back — the most expensive row on the register, and the one
+    # a business most needs to see.
+    reverse_charge = reverse_charge_position(period_purchases)
+    unclaimed += sum(
+        1
+        for invoice in period_purchases
+        if invoice.reverse_charge and not invoice.itc_eligible
+    )
 
     capital_credit = capital_goods_in_service(all_purchases, period)
 
@@ -781,17 +889,24 @@ def summarise(
     # earlier ones were already given back in the returns for the months they
     # lapsed in, and charging them again here makes every month after the first
     # understate the credit by the whole of the running total.
+    #
+    # The reverse-charge credit joins the pool here rather than in
+    # ``available``: it is credit this period may claim, at table 4(A)(3), but
+    # it is not credit the *supplier* charged, so it has no place in the pool
+    # the reconciliation caps against — GSTR-2B has nothing to say about tax
+    # the buyer pays themselves — and it is not common credit for Rule 42's
+    # ratio, which is applied to ``available`` above.
     rule_37_reversal = rule_37_result.reversal_in(period)
     reversal = rule_37_reversal + proportionate.total_reversal
     net_available = TaxHeads(
         igst=max(ZERO, available.igst + proportionate.capital_credit_this_month.igst
-                 - reversal.igst),
+                 + reverse_charge.credit.igst - reversal.igst),
         cgst=max(ZERO, available.cgst + proportionate.capital_credit_this_month.cgst
-                 - reversal.cgst),
+                 + reverse_charge.credit.cgst - reversal.cgst),
         sgst=max(ZERO, available.sgst + proportionate.capital_credit_this_month.sgst
-                 - reversal.sgst),
+                 + reverse_charge.credit.sgst - reversal.sgst),
         cess=max(ZERO, available.cess + proportionate.capital_credit_this_month.cess
-                 - reversal.cess),
+                 + reverse_charge.credit.cess - reversal.cess),
     )
 
     output_tax = _outward_tax(db, business_id, period)
@@ -809,4 +924,5 @@ def summarise(
         invoice_count=len(period_purchases),
         unclaimed_count=unclaimed,
         rule_37_reversal=rule_37_reversal,
+        reverse_charge=reverse_charge,
     )

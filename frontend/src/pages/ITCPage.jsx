@@ -106,6 +106,13 @@ export default function ITCPage() {
   const rule37 = summary?.rule_37;
   const proportionate = summary?.proportionate;
   const setOff = summary?.set_off;
+  // The whole cash figure, not the set-off's half: credit may not settle a
+  // reverse-charge liability (s.49(4) with s.2(82)), so a screen showing only
+  // what the waterfall left unsettled tells a business to find less money than
+  // it owes. The backend adds the two; this reads its answer.
+  const reverseCharge = summary?.reverse_charge;
+  const reverseChargeCash = Number(reverseCharge?.cash_payable ?? 0);
+  const cashPayable = summary?.cash_payable ?? setOff?.total_cash;
 
   return (
     <div className="page">
@@ -163,9 +170,13 @@ export default function ITCPage() {
             />
             <StatCard
               label="Cash to pay"
-              value={rupees(setOff.total_cash)}
-              sub={`Output tax ${rupees(summary.output_tax.total)}`}
-              tone={Number(setOff.total_cash) > 0 ? "warn" : "good"}
+              value={rupees(cashPayable)}
+              sub={
+                reverseChargeCash > 0
+                  ? `Includes ${rupees(reverseCharge.cash_payable)} on reverse charge`
+                  : `Output tax ${rupees(summary.output_tax.total)}`
+              }
+              tone={Number(cashPayable) > 0 ? "warn" : "good"}
             />
           </section>
 
@@ -220,14 +231,28 @@ export default function ITCPage() {
             )}
             <div className="kv">
               <div>
-                <span className="muted">Cash payable</span>
+                <span className="muted">Output tax in cash</span>
                 <strong>{rupees(setOff.total_cash)}</strong>
               </div>
+              {reverseChargeCash > 0 && (
+                <div>
+                  <span className="muted">Reverse charge, in cash</span>
+                  <strong>{rupees(reverseCharge.cash_payable)}</strong>
+                </div>
+              )}
               <div>
                 <span className="muted">Credit carried forward</span>
                 <strong>{rupees(setOff.credit_carried_forward.total)}</strong>
               </div>
             </div>
+            {reverseChargeCash > 0 && (
+              <p className="muted small">
+                Credit cannot settle a reverse-charge liability — section 49(4) lets the
+                ledger pay output tax, and section 2(82) puts reverse charge outside it.
+                The {rupees(reverseCharge.cash_payable)} is paid on the challan whatever
+                the ledger holds, and comes back as credit in this same return.
+              </p>
+            )}
           </section>
 
           <section className="panel">

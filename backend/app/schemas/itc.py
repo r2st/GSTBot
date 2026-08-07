@@ -79,6 +79,21 @@ class ProportionateOut(BaseModel):
     capital_months: int
 
 
+class ReverseChargeOut(BaseModel):
+    """Tax owed on inward supplies under s.9(3)/9(4), and the credit it earns.
+
+    ``cash_payable`` is the whole of ``tax``: credit may not settle a
+    reverse-charge liability, so none of it comes off. ``credit`` is the part
+    s.17(5) does not block, claimed back in the same return at 4(A)(3).
+    """
+
+    taxable_value: str
+    tax: TaxHeadsOut
+    credit: TaxHeadsOut
+    invoice_count: int
+    cash_payable: str
+
+
 class ITCSummaryOut(BaseModel):
     """The whole ITC position for one period."""
 
@@ -96,6 +111,12 @@ class ITCSummaryOut(BaseModel):
     total_reversal: TaxHeadsOut
     net_available: TaxHeadsOut
     set_off: SetOffOut
+    reverse_charge: ReverseChargeOut
+    # Both liabilities added together: what ``set_off`` could not settle from
+    # credit, plus the whole reverse-charge liability, which credit may not
+    # settle at all. This is the figure on the challan, and a screen showing
+    # only the set-off's half understates what a business has to find.
+    cash_payable: str
     itc_at_risk: str
     # False when no reconciliation has been run for the period, in which case
     # ``available`` is what the books claim rather than what the 2B supports.
