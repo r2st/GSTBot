@@ -849,7 +849,18 @@ def _line_item_rate_lines(invoice: Invoice) -> list[RateLine] | None:
     single rate tells the return nothing the invoice did not already say, and
     the extraction's per-line values are less trustworthy than the invoice-level
     totals the rest of the product is built on — so it is left alone.
+
+    A stored ``tax_rate`` also settles it. That field is only ever null or a
+    human's answer: the parser is told to leave it null when the invoice mixes
+    rates, and the only other way it gets set is somebody typing it in while
+    looking at the paper. ``line_items`` cannot be edited at all, so a rate
+    typed in over a breakdown the parser left behind is a person correcting the
+    extraction, and the correction wins. What it does not do is win quietly —
+    the tax then does not match the rate, which is exactly what validation says
+    out loud.
     """
+    if invoice.tax_rate is not None:
+        return None
     items = invoice.line_items
     if not isinstance(items, list) or not items:
         return None

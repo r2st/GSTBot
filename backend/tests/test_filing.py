@@ -945,17 +945,34 @@ class TestAnInvoiceThatMixesRates:
         assert filing_service._line_item_rate_lines(self.mixed(line_items=items)) is None
 
     def test_a_single_rate_breakdown_is_left_alone(self):
-        """The invoice-level figures are the more trustworthy ones."""
+        """It tells the return nothing the invoice did not already say.
+
+        And the extraction's per-line values are the less trustworthy half of
+        what it read, so the invoice-level totals keep the last word.
+        """
         invoice = self.mixed(
-            tax_rate=Decimal("18"),
             cgst=Decimal("9000.00"),
             sgst=Decimal("9000.00"),
+            total_value=Decimal("118000.00"),
             line_items=[
                 {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
                 {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
             ],
         )
         assert filing_service._line_item_rate_lines(invoice) is None
+
+    def test_a_rate_somebody_typed_in_beats_the_breakdown(self):
+        """`line_items` cannot be edited; `tax_rate` is the field that can.
+
+        So a rate stored over a mixed breakdown is a person correcting the
+        extraction while looking at the paper, and it wins. Not quietly: the
+        tax then does not match the rate, which validation says out loud.
+        """
+        invoice = self.mixed(tax_rate=Decimal("18"))
+
+        assert filing_service._line_item_rate_lines(invoice) is None
+        assert [line.rate for line in filing_service.rate_lines(invoice)] == [Decimal("18")]
+        assert issues_for(invoice) == {"tax_rate": Severity.ERROR}
 
     def test_a_rupee_of_rounding_between_lines_and_invoice_is_absorbed(self):
         """And lands on the largest line, so the block still foots exactly."""
