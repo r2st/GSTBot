@@ -42,7 +42,12 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
-from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
+from app.models.invoice import (
+    UNREADABLE_STATUSES,
+    Invoice,
+    InvoiceStatus,
+    InvoiceType,
+)
 from app.models.reconciliation_run import (
     MatchCategory,
     ReconciliationRun,
@@ -126,6 +131,12 @@ class Finding:
     differences: list[Difference] = field(default_factory=list)
     matched_on: str | None = None  # "exact" or "normalized"
     note: str | None = None
+    # True when the invoice was booked under a different period from the one
+    # being reconciled, and this statement declares it late. Reported so the
+    # user can see it, and kept out of every counter and every rupee, because
+    # the period it belongs to has already counted it. See
+    # :func:`_carried_invoices`.
+    carried: bool = False
 
     def as_dict(self) -> dict:
         invoice = self.invoice
@@ -134,6 +145,7 @@ class Finding:
             "category": self.category.value,
             "matched_on": self.matched_on,
             "note": self.note,
+            "carried": self.carried,
             "supplier_gstin": (
                 invoice.counterparty_gstin
                 if invoice
@@ -210,8 +222,17 @@ class ReconciliationResult:
         return max(ZERO, self.itc_eligible - self.itc_eligible_capital)
 
     def counts(self) -> dict[MatchCategory, int]:
+        """The period's own findings, tallied by category.
+
+        Carried findings are left out: they are an earlier period's invoices,
+        already counted in the run for the period that booked them, and adding
+        them here would make a month's matched count grow every time a supplier
+        caught up on an old one.
+        """
         tally = dict.fromkeys(MatchCategory, 0)
         for finding in self.findings:
+            if finding.carried:
+                continue
             tally[finding.category] += 1
         return tally
 
@@ -221,10 +242,13 @@ class ReconciliationResult:
 
         Excludes ``missing_in_books``: those are the portal's rows, not ours,
         and counting them here would make the denominator disagree with the
-        purchase count on the dashboard.
+        purchase count on the dashboard. Excludes carried invoices for the same
+        reason — they belong to another month's denominator.
         """
         return sum(
-            1 for f in self.findings if f.category is not MatchCategory.MISSING_IN_BOOKS
+            1
+            for f in self.findings
+            if f.category is not MatchCategory.MISSING_IN_BOOKS and not f.carried
         )
 
 
@@ -280,10 +304,22 @@ def _book_invoices(db: Session, business_id: int, period: str) -> list[Invoice]:
     """Purchase invoices in the books for *period*, oldest first.
 
     Only purchases: GSTR-2B is a statement of inward supply, and a sales
-    invoice has no counterpart in it. Failed extractions are excluded — an
-    invoice whose fields were never read cannot be compared with anything, and
-    reporting it as "missing at the supplier's end" would be a lie about the
-    supplier.
+    invoice has no counterpart in it.
+
+    Rows whose figures were never extracted are excluded — see
+    :data:`~app.models.invoice.UNREADABLE_STATUSES`. An invoice nothing has read
+    cannot be compared with anything, and reporting it as "missing at the
+    supplier's end" would be a lie about the supplier.
+
+    That used to exclude only ``FAILED``, which left a row still queued for a
+    worker in the comparison. The consequence was not confined to this run:
+    :func:`_apply_statuses` writes each finding back onto the invoice, so a
+    reconciliation started while an upload was still being read rewrote it from
+    ``uploaded`` to ``missing_in_2b`` — a status that is *not* unreadable. The
+    row then left the blind spot every other module keeps it in, and its
+    untouched columns of zeros became a line in GSTR-1, a supply in the period's
+    output tax and a document in the count on the dashboard. Reconciling and
+    uploading are the two things a business does in the same sitting.
     """
     return list(
         db.scalars(
@@ -293,10 +329,81 @@ def _book_invoices(db: Session, business_id: int, period: str) -> list[Invoice]:
                 Invoice.deleted_at.is_(None),
                 Invoice.invoice_type == InvoiceType.PURCHASE,
                 Invoice.period == period,
-                Invoice.status != InvoiceStatus.FAILED,
+                Invoice.status.not_in(UNREADABLE_STATUSES),
             )
             .order_by(Invoice.invoice_date.asc(), Invoice.id.asc())
         ).all()
+    )
+
+
+def _carried_invoices(
+    db: Session, business_id: int, records: list[GSTR2BRecord], period: str
+) -> list[Invoice]:
+    """Booked purchases from *other* periods that this statement declares.
+
+    A 2B is not confined to its own month. When a supplier files late — which is
+    the ordinary reason a buyer's credit goes missing in the first place — the
+    invoice turns up in the statement for the month they finally filed, dated
+    months earlier. The buyer booked it when it arrived, under its own period.
+
+    Compared against one period's books, those rows had nowhere to land: the
+    April invoice sitting in an April period was invisible to May's run, so the
+    May statement's copy of it was reported as "in GSTR-2B but not in the
+    purchase register" — a business sent looking for an invoice it entered
+    months ago — while April's own run went on calling it missing at the
+    supplier's end forever, because April's 2B was generated before the supplier
+    filed and never will contain it.
+
+    So the specific invoices the statement names are fetched from whatever
+    period they were booked under. Only those: a period's other invoices are not
+    dragged into a run that has no statement to judge them against, which is
+    what :func:`match` guarantees by dropping a carried invoice that finds no
+    counterpart rather than reporting it.
+    """
+    numbers: set[str] = set()
+    gstins: set[str] = set()
+    for record in records:
+        if record.period and record.period == period:
+            continue
+        if record.invoice_number:
+            numbers.add(record.invoice_number.strip().upper())
+        if record.supplier_gstin:
+            gstins.add(record.supplier_gstin.upper())
+    if not numbers or not gstins:
+        return []
+
+    # Chunked for the same reason :func:`_suppliers_by_gstin` is: every driver
+    # bounds the parameters one statement may carry.
+    ordered_gstins = sorted(gstins)
+    rows: list[Invoice] = []
+    for start in range(0, len(ordered_gstins), _SUPPLIER_LOOKUP_CHUNK):
+        rows.extend(
+            db.scalars(
+                select(Invoice).where(
+                    Invoice.business_id == business_id,
+                    Invoice.deleted_at.is_(None),
+                    Invoice.invoice_type == InvoiceType.PURCHASE,
+                    Invoice.period != period,
+                    Invoice.status.not_in(UNREADABLE_STATUSES),
+                    Invoice.counterparty_gstin.in_(
+                        ordered_gstins[start : start + _SUPPLIER_LOOKUP_CHUNK]
+                    ),
+                )
+            ).all()
+        )
+
+    # The GSTIN narrows the query; the number decides. Matched loosely here for
+    # the same reason :func:`match` has a second pass — the buyer's data entry
+    # and the supplier's portal entry punctuate the same number differently.
+    loose = {normalize_invoice_number(number) for number in numbers}
+    return sorted(
+        (
+            row
+            for row in rows
+            if (row.invoice_number or "").strip().upper() in numbers
+            or normalize_invoice_number(row.invoice_number) in loose
+        ),
+        key=lambda row: (row.invoice_date or date.max, row.id),
     )
 
 
@@ -306,12 +413,22 @@ def match(
     *,
     period: str,
     tolerance: Decimal = DEFAULT_TOLERANCE,
+    carried: list[Invoice] | None = None,
 ) -> ReconciliationResult:
     """Pure matching: no database, no side effects, fully testable.
 
     Kept free of the session on purpose — this is the part of the product whose
     correctness costs a business money, and it should be assertable against
     plain lists rather than through a fixture.
+
+    *carried* holds invoices booked under a different period that this statement
+    nevertheless declares — a supplier catching up on a late filing. They are
+    matched so the statement's rows are not reported as absent from a purchase
+    register that has held them for months, and they are reported as findings so
+    the user can see what happened. Beyond that they are inert: no counter, no
+    rupee of credit and no invoice status moves on their account, because the
+    period that booked them has already counted them and a reconciliation of
+    May must not restate April.
     """
     result = ReconciliationResult(period=period, tolerance=tolerance)
 
@@ -350,8 +467,15 @@ def match(
     # Every invoice gets its exact attempt before any invoice gets a fuzzy one,
     # so a normalised collision cannot steal a row that an exact counterpart
     # was entitled to.
+    #
+    # The period's own invoices are paired before any carried one, at both
+    # passes. A carried invoice is here on the strength of a number the
+    # statement mentions, and it must never take a row this period's books have
+    # a claim to.
+    carried = carried or []
+    carried_ids = {id(invoice) for invoice in carried}
     paired: list[tuple[Invoice, GSTR2BRecord | None, str | None]] = []
-    for invoice in invoices:
+    for invoice in [*invoices, *carried]:
         gstin = (invoice.counterparty_gstin or "").upper()
         record = _take(exact_index, (gstin, (invoice.invoice_number or "").strip().upper()))
         paired.append((invoice, record, "exact" if record else None))
@@ -363,6 +487,17 @@ def match(
         found = _take(loose_index, (gstin, normalize_invoice_number(invoice.invoice_number)))
         if found is not None:
             paired[index] = (invoice, found, "normalized")
+
+    # A carried invoice that found nothing was only ever a guess at what the
+    # statement's out-of-period rows might be. Dropped rather than reported:
+    # this run has no evidence about a month it is not reconciling, and saying
+    # "missing at the supplier's end" about an invoice whose own period matched
+    # it cleanly would be a false alarm invented out of nothing.
+    paired = [
+        entry
+        for entry in paired
+        if entry[1] is not None or id(entry[0]) not in carried_ids
+    ]
 
     # ---- Pass 2: which of these are the same invoice booked twice ----
     # A duplicate is an invoice that shares a counterparty and (normalised)
@@ -395,6 +530,29 @@ def match(
                     category=MatchCategory.DUPLICATE,
                     invoice=invoice,
                     note=f"Same supplier and invoice number as invoice {original.id}",
+                )
+            )
+            continue
+
+        is_carried = id(invoice) in carried_ids
+        if is_carried and record is not None:
+            # Reported, and nothing more. The rupees belong to the run for the
+            # period that booked it.
+            differences = _differences(invoice, record, tolerance)
+            result.findings.append(
+                Finding(
+                    category=(
+                        MatchCategory.MISMATCHED if differences else MatchCategory.MATCHED
+                    ),
+                    invoice=invoice,
+                    record=record,
+                    differences=differences,
+                    matched_on=matched_on,
+                    carried=True,
+                    note=(
+                        f"Declared in this statement but booked under {invoice.period}, "
+                        "where its credit is counted. The supplier filed it late."
+                    ),
                 )
             )
             continue
@@ -540,6 +698,12 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
     per_gstin: dict[str, dict[str, int]] = {}
     filing_dates: dict[str, date] = {}
     for finding in result.findings:
+        if finding.carried:
+            # An invoice from another period is evidence about that period's
+            # observation, which already recorded it as missing. Counted again
+            # here it would be a matched *and* a missing for one invoice, and
+            # its filing delay would be measured against the wrong due date.
+            continue
         gstin = (
             finding.invoice.counterparty_gstin
             if finding.invoice is not None
@@ -638,14 +802,21 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
 
 
 def _apply_statuses(result: ReconciliationResult) -> None:
-    """Write each finding back onto its invoice's status."""
+    """Write each finding back onto its invoice's status.
+
+    Carried invoices keep the status their own period gave them. An invoice's
+    status is the verdict of the run for the period it was booked in, and
+    letting a later statement rewrite it would make the answer depend on which
+    month happened to be reconciled last — April says missing, May says matched,
+    April again says missing.
+    """
     status_for = {
         MatchCategory.MATCHED: InvoiceStatus.MATCHED,
         MatchCategory.MISMATCHED: InvoiceStatus.MISMATCHED,
         MatchCategory.MISSING_IN_2B: InvoiceStatus.MISSING_IN_2B,
     }
     for finding in result.findings:
-        if finding.invoice is None:
+        if finding.invoice is None or finding.carried:
             continue
         new_status = status_for.get(finding.category)
         if new_status is not None:
@@ -776,7 +947,13 @@ def run_reconciliation(
     try:
         invoices = _book_invoices(db, business_id, period)
         records = records_from_return(gstr_return)
-        result = match(invoices, records, period=period, tolerance=tolerance)
+        result = match(
+            invoices,
+            records,
+            period=period,
+            tolerance=tolerance,
+            carried=_carried_invoices(db, business_id, records, period),
+        )
 
         _apply_statuses(result)
         suppliers = _score_suppliers(db, business_id, result)

@@ -506,6 +506,212 @@ def test_other_periods_are_untouched(db_session, business):
     assert run.missing_in_books_count == 1
 
 
+class TestARowThatIsStillBeingRead:
+    """A reconciliation started mid-upload must not touch what nothing has read.
+
+    Only ``FAILED`` was excluded, so a row still queued for a worker went into
+    the comparison — and ``_apply_statuses`` wrote the verdict back onto it.
+    Reconciling and uploading are the two things a business does in one sitting.
+    """
+
+    @pytest.mark.parametrize(
+        "status", [InvoiceStatus.UPLOADED, InvoiceStatus.PROCESSING]
+    )
+    def test_it_is_left_out_of_the_run(self, db_session, business, status):
+        save(db_session, business.id, invoice_number="Q-1", status=status)
+        import_2b(db_session, business.id, [])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.total_invoices == 0
+        assert run.missing_in_2b_count == 0
+
+    def test_its_status_is_not_rewritten(self, db_session, business):
+        """The damage was not confined to the run.
+
+        ``missing_in_2b`` is not one of the statuses the rest of the product
+        treats as unreadable, so a row promoted into it left the blind spot
+        every other module keeps it in — and its untouched columns of zeros
+        became a line in the return and a supply in the period's output tax.
+        """
+        pending = save(
+            db_session, business.id, invoice_number="Q-1", status=InvoiceStatus.UPLOADED
+        )
+        import_2b(db_session, business.id, [])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        db_session.refresh(pending)
+        assert pending.status is InvoiceStatus.UPLOADED
+
+
+class TestASupplierWhoFilesLate:
+    """The late invoice turns up in a later month's statement, dated earlier.
+
+    A 2B is not confined to its own month: when a supplier finally files, the
+    invoice appears in the statement for the month they filed in, carrying its
+    original date. The buyer booked it when it arrived, under its own period —
+    so compared against one period's books it had nowhere to land, and the
+    business was told an invoice it entered months ago was not in its own
+    purchase register.
+    """
+
+    LATE = "2026-03"
+
+    def late_book(self, db, business_id) -> Invoice:
+        return save(
+            db,
+            business_id,
+            invoice_number="LATE-1",
+            period=self.LATE,
+            invoice_date=date(2026, 3, 10),
+        )
+
+    def late_record(self, **kwargs) -> GSTR2BRecord:
+        return portal(
+            invoice_number="LATE-1",
+            period=self.LATE,
+            invoice_date=date(2026, 3, 10),
+            **kwargs,
+        )
+
+    def test_it_is_no_longer_reported_as_absent_from_the_books(
+        self, db_session, business
+    ):
+        self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record()])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.missing_in_books_count == 0
+
+    def test_the_finding_says_where_it_was_booked(self, db_session, business):
+        self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record()])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        (finding,) = run.report["findings"]
+        assert finding["carried"] is True
+        assert finding["category"] == MatchCategory.MATCHED.value
+        assert self.LATE in finding["note"]
+
+    def test_it_counts_towards_nothing_in_this_period(self, db_session, business):
+        """March's run already counted it. May must not count it again."""
+        self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record()])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.total_invoices == 0
+        assert run.matched_count == 0
+        assert run.itc_eligible == Decimal("0.00")
+        assert run.itc_claimed == Decimal("0.00")
+
+    def test_the_invoice_keeps_the_status_its_own_period_gave_it(
+        self, db_session, business
+    ):
+        """Otherwise the answer depends on which month was reconciled last."""
+        invoice = self.late_book(db_session, business.id)
+        invoice.status = InvoiceStatus.MISSING_IN_2B
+        db_session.commit()
+        import_2b(db_session, business.id, [self.late_record()])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        db_session.refresh(invoice)
+        assert invoice.status is InvoiceStatus.MISSING_IN_2B
+
+    def test_the_supplier_is_not_scored_twice_for_one_invoice(
+        self, db_session, business
+    ):
+        """A matched here plus the missing March already recorded is two verdicts."""
+        self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record()])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.report["suppliers"] == {}
+
+    def test_a_record_this_period_has_no_invoice_for_is_still_reported(
+        self, db_session, business
+    ):
+        """The false alarm goes; the real one stays."""
+        import_2b(db_session, business.id, [portal(invoice_number="GHOST-1")])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.missing_in_books_count == 1
+
+    def test_an_out_of_period_invoice_the_statement_does_not_name_is_untouched(
+        self, db_session, business
+    ):
+        """Only the invoices the statement actually names are pulled in.
+
+        Dragging in a whole earlier period would have every one of its other
+        invoices find no counterpart here and be rewritten to
+        ``missing_in_2b`` — a run for May destroying March's verdicts.
+        """
+        other = save(
+            db_session,
+            business.id,
+            invoice_number="MARCH-9",
+            period=self.LATE,
+            invoice_date=date(2026, 3, 4),
+            status=InvoiceStatus.MATCHED,
+        )
+        self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record()])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        db_session.refresh(other)
+        assert other.status is InvoiceStatus.MATCHED
+        assert len(run.report["findings"]) == 1
+
+    def test_this_period_gets_first_claim_on_a_shared_number(self):
+        """A carried invoice must never take a row this period's books own.
+
+        Numbers that normalise together are the way this collides in practice,
+        since the unique index rules out two rows carrying the same number
+        literally. Within a pass the period's own books go first; across passes
+        the older rule still holds, and an exact counterpart beats a fuzzy one
+        whichever period it was booked in.
+        """
+        mine = book(id=1, invoice_number="LATE/1")
+        theirs = book(
+            id=2,
+            invoice_number="LATE_1",
+            period=self.LATE,
+            invoice_date=date(2026, 3, 10),
+        )
+
+        result = reconciliation.match(
+            [mine],
+            [portal(invoice_number="LATE-1")],
+            period=PERIOD,
+            carried=[theirs],
+        )
+
+        (finding,) = result.findings
+        assert finding.invoice is mine
+        assert finding.category is MatchCategory.MATCHED
+        assert finding.carried is False
+
+    def test_a_late_invoice_the_books_disagree_with_is_still_a_mismatch(
+        self, db_session, business
+    ):
+        self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record(igst=Decimal("72000.00"))])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        (finding,) = run.report["findings"]
+        assert finding["category"] == MatchCategory.MISMATCHED.value
+        assert finding["carried"] is True
+        assert run.mismatched_count == 0
+
+
 def test_runs_accumulate_rather_than_overwrite(db_session, business):
     """A period is reconciled again as suppliers file late."""
     save(db_session, business.id, invoice_number="A-1")
