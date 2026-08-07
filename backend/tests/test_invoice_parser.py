@@ -19,6 +19,10 @@ from app.services.invoice_parser import (
 from app.services.openrouter_client import OpenRouterError, extract_json_object
 from tests.conftest import BUSINESS_GSTIN, SUPPLIER_GSTIN_OTHER_STATE, SUPPLIER_GSTIN_SAME_STATE
 
+# What an unread tax head is left as, which is what several of the tax-line
+# tests below are about: a blank a reviewer can see, rather than a guess.
+ZERO = Decimal("0.00")
+
 INTRASTATE_INVOICE = f"""\
 MUMBAI HARDWARE SUPPLIES
 GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
@@ -673,6 +677,39 @@ class TestTheInvoiceNumberSurvivesItsLabel:
     def test_nothing_is_invented_where_there_is_no_label(self, text):
         assert parse_heuristic(text).invoice_number is None
 
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            # How a business in its first months of trading numbers an invoice.
+            ("Invoice No: 7", "7"),
+            ("Invoice Number: 1", "1"),
+            ("Bill No: 5", "5"),
+            ("Invoice No.: A", "A"),
+            ("Invoice # 9", "9"),
+        ],
+    )
+    def test_a_one_character_number_is_a_number(self, line, expected):
+        """A series that has not reached double figures yet.
+
+        The value had a two-character floor, so every one of these came back
+        empty — silently, because there is nothing left to look at afterwards.
+        It is the same loss as a truncated number and it fails in the same
+        three places: ``inum: ""`` is a GSTR-1 the portal rejects, the supplier's
+        2B row matches nothing, and the natural key duplicate detection uses is
+        half missing.
+        """
+        assert self._number(line) == expected
+
+    def test_an_explicit_label_is_still_what_makes_one_character_safe(self):
+        """The floor only lifts behind a "no"/"number"/"#" token.
+
+        Without one there is no evidence a label was read at all, and a single
+        stray character after a full stop is noise rather than a document
+        number — which is the reading the whole pattern is built to refuse.
+        """
+        assert self._number("Invoice. X") is None
+        assert self._number("Invoice: 7") is None
+
 
 class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
     @staticmethod
@@ -714,3 +751,129 @@ class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
     def test_a_due_date_alone_is_still_read_rather_than_dropped(self):
         """The loose label stays a fallback: some documents only say "Date"."""
         assert self._date("TAX INVOICE\nDue Date: 15/05/2026\n") == date(2026, 5, 15)
+
+
+class TestOneLineThatNamesTwoTaxHeads:
+    """A line can name CGST and SGST at once, and the two ways it does are opposites.
+
+    Either it lays them out side by side, with a figure each, or it *combines*
+    them into one figure that is the total of both. Read a head at a time —
+    which is how tax has to be read, because the label, the rate and the amount
+    share a line — the second shape put the whole combined figure onto each
+    head and doubled the tax on the invoice at the moment of extraction.
+
+    Doubled tax is not a display problem in either direction: on a purchase it
+    doubles the credit claimed, and on a sale it doubles what the business is
+    told to pay. Nothing downstream re-derives the arithmetic on the invoice,
+    so every screen agreed with every other one.
+    """
+
+    @staticmethod
+    def _heads(text: str) -> tuple:
+        parsed = parse_heuristic(f"TAX INVOICE\nTaxable Value: 100000.00\n{text}\n")
+        return parsed.cgst, parsed.sgst, parsed.igst, parsed.cess
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Total Tax (CGST + SGST): 18000.00",
+            "CGST + SGST: 18000.00",
+            "CGST & SGST @ 18%: 18000.00",
+            "Add: CGST/SGST 18000.00",
+        ],
+    )
+    def test_a_combined_figure_is_not_given_to_both_heads(self, line):
+        # One figure for two heads is the total of both. Split, it is doubled;
+        # halved, it is a guess. Left unread, it is a blank a reviewer can see
+        # and `validate_period` complains that the invoice does not foot.
+        assert self._heads(line) == (ZERO, ZERO, ZERO, ZERO)
+
+    def test_heads_laid_out_side_by_side_are_both_read(self):
+        # The opposite shape, and the reason a combined line cannot simply be
+        # detected by "two labels on one line".
+        assert self._heads("CGST 9% 9000.00 SGST 9% 9000.00") == (
+            Decimal("9000.00"),
+            Decimal("9000.00"),
+            ZERO,
+            ZERO,
+        )
+
+    def test_each_head_is_read_from_its_own_column(self):
+        # Taking the last number on the line for both heads is right only by
+        # the accident that CGST and SGST are equal. Nothing enforces that here
+        # — a mis-keyed register is exactly when a reviewer needs to see the
+        # two figures differ rather than have one silently overwrite the other.
+        assert self._heads("CGST 9% 9000.00 SGST 9% 8000.00") == (
+            Decimal("9000.00"),
+            Decimal("8000.00"),
+            ZERO,
+            ZERO,
+        )
+
+    def test_a_rate_printed_without_a_percent_sign_is_not_read_as_the_amount(self):
+        # The column search must still prefer the last figure inside its own
+        # column, because "9" here is a rate with no percent sign to strip.
+        assert self._heads("CGST 9 9000.00 SGST 9 9000.00") == (
+            Decimal("9000.00"),
+            Decimal("9000.00"),
+            ZERO,
+            ZERO,
+        )
+
+    def test_three_heads_on_one_line_are_each_read(self):
+        assert self._heads("IGST 18% 18000.00 CESS 12% 12000.00") == (
+            ZERO,
+            ZERO,
+            Decimal("18000.00"),
+            Decimal("12000.00"),
+        )
+
+    def test_a_heading_row_with_no_figures_reads_nothing(self):
+        # A table header naming both heads carries no amounts at all, so there
+        # is nothing to attribute and nothing is invented.
+        assert self._heads("Particulars      CGST      SGST") == (ZERO, ZERO, ZERO, ZERO)
+
+    def test_a_combined_line_does_not_double_the_rate_either(self):
+        # The rate is read per head from the first percentage on the line, and
+        # an intra-state rate is reported as the sum of its two halves — so a
+        # combined line offers one 18% and would be doubled to 36% by the same
+        # reasoning that doubled the tax. 36 is not a slab, so `normalize_rate`
+        # already refuses it; asserted here so that stays true if the slab list
+        # ever grows.
+        parsed = parse_heuristic(
+            "TAX INVOICE\nTaxable Value: 100000.00\nCGST & SGST @ 18%: 18000.00\n"
+        )
+        assert parsed.tax_rate is None
+
+    def test_the_rate_is_still_the_sum_of_both_halves_when_read_properly(self):
+        # An 18% invoice prints as 9% + 9%. Reporting 9 would understate every
+        # intra-state invoice by half, so the guard above must not have cost us
+        # the ordinary case.
+        parsed = parse_heuristic(
+            "TAX INVOICE\nTaxable Value: 100000.00\n"
+            "CGST @ 9%: 9000.00\nSGST @ 9%: 9000.00\n"
+        )
+        assert parsed.tax_rate == 18
+
+
+class TestOneTaxHeadOnALineStillReadsAsBefore:
+    """The single-head line is the ordinary case and must not have moved."""
+
+    @staticmethod
+    def _igst(text: str) -> Decimal:
+        return parse_heuristic(f"TAX INVOICE\n{text}\n").igst
+
+    def test_the_amount_after_the_label_is_taken(self):
+        assert self._igst("IGST @ 18%: 81000.00") == Decimal("81000.00")
+
+    def test_the_rate_is_not_mistaken_for_the_amount(self):
+        assert self._igst("IGST @ 18% 81000.00") == Decimal("81000.00")
+
+    def test_an_amount_printed_before_the_label_is_still_found(self):
+        # A column layout can put the figure first. There is nothing after the
+        # label to read, so the whole line is searched rather than giving up.
+        assert self._igst("81000.00 IGST") == Decimal("81000.00")
+
+    def test_the_last_figure_on_the_line_wins(self):
+        # Invoices put the amount last, after the rate and any quantity.
+        assert self._igst("IGST 18 % on 450000.00 = 81000.00") == Decimal("81000.00")

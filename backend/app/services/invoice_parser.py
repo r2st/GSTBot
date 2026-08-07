@@ -396,12 +396,42 @@ def normalize_rate(value: object) -> Decimal | None:
 # one, "INV-001" standing alone in the text no longer parses as the number
 # "001" — it does not parse, and an empty field with a warning on it is a
 # reviewable state in a way that a plausible wrong number is not.
+#
+# That same token is what makes a *one-character* number safe, and the two
+# branches below differ only in whether they allow one. "Invoice No: 7" is how
+# a business in its first month of trading prints an invoice, and a single
+# minimum length of two characters dropped the number from every one of them —
+# silently, because there is nothing to see afterwards. A missing invoice
+# number is not a cosmetic loss: it files into GSTR-1 as ``inum: ""``, which
+# the portal rejects; it is what reconciliation matches a GSTR-2B row on; and
+# it is half the natural key duplicate detection uses. All three fail
+# separately.
+#
+# The bare-separator branch keeps the two-character floor, because there the
+# label was never confirmed and a single stray character after a full stop is
+# noise rather than a document number.
 _INVOICE_NO_PATTERN = re.compile(
     r"(?:tax\s+invoice|invoice|inv|bill)[\s.]*"
-    r"(?:(?:no|number|num|#)[\s:.\-#]*|[:.#][\s:.\-#]*)"
-    r"([A-Za-z0-9][A-Za-z0-9\-/]{1,29})",
+    r"(?:"
+    r"(?:no|number|num|#)[\s:.\-#]*([A-Za-z0-9][A-Za-z0-9\-/]{0,29})"
+    r"|"
+    r"[:.#][\s:.\-#]*([A-Za-z0-9][A-Za-z0-9\-/]{1,29})"
+    r")",
     re.IGNORECASE,
 )
+
+
+def _invoice_number_in(text: str) -> str | None:
+    """The document number the text labels, or ``None``.
+
+    The pattern has two value groups — see :data:`_INVOICE_NO_PATTERN` — and
+    exactly one of them is filled on any match, so the caller should not have
+    to know which branch fired.
+    """
+    match = _INVOICE_NO_PATTERN.search(text)
+    if match is None:
+        return None
+    return _clean_str(match.group(1) or match.group(2), 64)
 # A date, in any of the shapes :func:`to_date` knows how to read.
 _DATE_VALUE = r"(\d{1,4}[-/.\s][A-Za-z0-9]{1,9}[-/.\s]\d{2,4})"
 
@@ -492,15 +522,82 @@ _REVERSE_CHARGE_PATTERN = re.compile(
 )
 
 
-def _amount_on_line(line: str) -> Decimal | None:
+def _amount_on_line(line: str, *, after: int = 0) -> Decimal | None:
     """The monetary amount on a tax line, ignoring any rate printed on it.
 
     Invoices put the amount last — ``IGST @ 18%    81,000.00`` — so the last
     number wins, and percentages are removed first so an 18 cannot stand in
     for an 81,000.
+
+    *after* narrows the search to the part of the line beyond a column, which
+    is what lets one line carry two heads: see :func:`_tax_amounts_on_line`.
+    A column with no number beyond it falls back to the whole line, because
+    ``9,000.00 CGST`` prints the amount first and is still one head's figure.
     """
-    numbers = _NUMBER_PATTERN.findall(_PERCENT_PATTERN.sub(" ", line))
-    return to_money(numbers[-1], default=None) if numbers else None
+    stripped = _PERCENT_PATTERN.sub(" ", line)
+    for candidate in (stripped[after:], stripped) if after else (stripped,):
+        numbers = _NUMBER_PATTERN.findall(candidate)
+        if numbers:
+            return to_money(numbers[-1], default=None)
+    return None
+
+
+def _tax_amounts_on_line(line: str) -> dict[str, Decimal]:
+    """Which tax head each figure on one line belongs to.
+
+    Tax is read a line at a time because the label, the rate and the amount sit
+    on one line and only their order tells them apart. What that missed is that
+    a line can name *two* heads, and the two ways it does are opposites.
+
+    A line may lay the heads out side by side — ``CGST 9% 9,000.00  SGST 9%
+    9,000.00`` — where each head has its own figure and both should be read.
+    Reading each head from its own column is what makes that work; taking the
+    last number on the line for both is right only by the accident that CGST
+    and SGST are always equal.
+
+    Or a line may *combine* them: ``Total Tax (CGST + SGST): 18,000.00``, the
+    ordinary way an invoice summarises an intra-state supply. There is one
+    figure and it is the total of both heads. Read per label, that ₹18,000
+    became ₹18,000 of CGST *and* ₹18,000 of SGST — the tax on the invoice
+    doubled, silently, at the moment of extraction.
+
+    Doubled tax is not a display problem in either direction. On a purchase it
+    doubles the credit claimed, which is over-claimed ITC with interest and a
+    penalty on it. On a sale it doubles the output tax the business is told to
+    pay. And it survives review, because every screen shows the same doubled
+    figure and the arithmetic on the invoice is not re-derived anywhere a
+    reviewer looks.
+
+    The two are told apart by counting: as many figures as heads means a figure
+    per head, and fewer means the figure is a combined one that belongs to no
+    single head. A combined line is therefore left unread rather than split —
+    the split would be a guess, and this module prefers an empty field a
+    reviewer can see to a plausible wrong one. What it leaves behind is
+    visible: ``validate_period`` reports the total against taxable value plus
+    tax and says the figures do not foot.
+    """
+    found = [
+        (match.start(), attr)
+        for attr, label in _TAX_LABELS.items()
+        if (match := label.search(line))
+    ]
+    if not found:
+        return {}
+
+    stripped = _PERCENT_PATTERN.sub(" ", line)
+    if len(_NUMBER_PATTERN.findall(stripped)) < len(found):
+        return {}
+
+    found.sort()
+    amounts: dict[str, Decimal] = {}
+    for index, (start, attr) in enumerate(found):
+        # Up to the next head's label, so a column cannot reach past its own
+        # into the neighbouring one's figure.
+        end = found[index + 1][0] if index + 1 < len(found) else len(line)
+        amount = _amount_on_line(line[:end], after=start)
+        if amount is not None:
+            amounts[attr] = amount
+    return amounts
 
 
 def _rate_on_line(line: str) -> Decimal | None:
@@ -522,8 +619,7 @@ def parse_heuristic(text: str) -> ParsedInvoice:
         if len(gstins) > 1:
             result.buyer_gstin = gstins[1]
 
-    if match := _INVOICE_NO_PATTERN.search(text):
-        result.invoice_number = _clean_str(match.group(1), 64)
+    result.invoice_number = _invoice_number_in(text)
     if match := (_DATE_PATTERN.search(text) or _LOOSE_DATE_PATTERN.search(text)):
         result.invoice_date = to_date(match.group(1))
     if match := _HSN_PATTERN.search(text):
@@ -533,10 +629,11 @@ def parse_heuristic(text: str) -> ParsedInvoice:
     # amount all sit on one line and only their order distinguishes them.
     rates: dict[str, Decimal] = {}
     for line in text.splitlines():
+        amounts = _tax_amounts_on_line(line)
         for attr, label in _TAX_LABELS.items():
             if not label.search(line):
                 continue
-            amount = _amount_on_line(line)
+            amount = amounts.get(attr)
             if amount is not None and not getattr(result, attr):
                 setattr(result, attr, amount)
             rate = _rate_on_line(line)
