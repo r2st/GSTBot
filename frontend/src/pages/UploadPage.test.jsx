@@ -456,3 +456,71 @@ describe("running out of the monthly allowance mid-batch", () => {
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("the invoice type while a batch is running", () => {
+  /** An upload that stays in flight until the returned callback is called. */
+  function heldUpload() {
+    const pending = [];
+    global.fetch = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          pending.push(() => resolve(jsonResponse(invoiceResponse())));
+        }),
+    );
+    return pending;
+  }
+
+  it("locks the picker so the screen cannot disagree with what is being sent", async () => {
+    // `uploadFiles` reads the type once and the loop under it is sequential,
+    // so a forty-file batch goes on sending the type it started with for
+    // minutes. Left live, the radio moved and the uploads did not: the screen
+    // said Sales while the rest of the batch was still booked as purchases.
+    //
+    // Which is the expensive direction. A sales invoice booked as a purchase
+    // claims credit against the business's own output tax, and no screen
+    // downstream re-reads the document to catch it.
+    const user = userEvent.setup();
+    const pending = heldUpload();
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+    await waitFor(() => expect(pending).toHaveLength(1));
+
+    expect(screen.getByLabelText("Sales (feeds GSTR-1)")).toBeDisabled();
+    expect(screen.getByLabelText("Purchase (claim ITC)")).toBeDisabled();
+  });
+
+  it("unlocks it once the batch is done", async () => {
+    const user = userEvent.setup();
+    const pending = heldUpload();
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), file("a.txt"));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => pending[0]());
+    await screen.findByText("INV-2026-0042");
+
+    expect(screen.getByLabelText("Sales (feeds GSTR-1)")).toBeEnabled();
+  });
+
+  it("keeps the whole batch on the type it was started with", async () => {
+    // The batch is the honest unit: splitting one drop across two types by
+    // how fast someone clicked is not a thing anyone can predict.
+    const user = userEvent.setup();
+    const pending = heldUpload();
+
+    renderPage();
+    await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
+    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+
+    await waitFor(() => expect(pending).toHaveLength(1));
+    await act(async () => pending[0]());
+    await waitFor(() => expect(pending).toHaveLength(2));
+    await act(async () => pending[1]());
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    for (const call of global.fetch.mock.calls) {
+      expect(call[1].body.get("invoice_type")).toBe("sales");
+    }
+  });
+});

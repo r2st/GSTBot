@@ -182,8 +182,29 @@ export default function UploadPage() {
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
 
-      <fieldset className="type-toggle">
-        <legend>Invoice type</legend>
+      {/* Locked while a batch runs, like the file picker beside it.
+          `uploadFiles` reads the type once, at the top, and the loop under it
+          is deliberately sequential — so a batch is uploaded under the type it
+          was started with, and forty invoices take minutes to get through.
+          Left live, the radio moved while the loop went on sending the old
+          value: the screen said Sales and the remaining thirty files were still
+          being booked as purchases.
+
+          Which is the direction that costs money. A sales invoice booked as a
+          purchase claims input credit on the business's own output tax — an
+          over-claim with interest and a penalty on it — and nothing downstream
+          re-reads the document to catch it, because every screen shows the type
+          that was stored.
+
+          Disabled rather than made to take effect mid-batch: splitting one drop
+          across two types by how fast the user clicked is not a thing anyone
+          can predict, and the honest unit here is the batch. The legend says so
+          while it is held. */}
+      <fieldset className="type-toggle" disabled={busy}>
+        <legend>
+          Invoice type
+          {busy && <span className="muted small"> · locked until the batch finishes</span>}
+        </legend>
         {[
           { value: "purchase", label: "Purchase (claim ITC)" },
           { value: "sales", label: "Sales (feeds GSTR-1)" },
