@@ -10,6 +10,7 @@ from app.services import filing as filing_service
 from app.services import gst_calendar, invoice_parser
 from app.services.invoice_parser import (
     ParsedInvoice,
+    _from_model_payload,
     parse_heuristic,
     parse_invoice,
     to_date,
@@ -1091,3 +1092,172 @@ class TestADateWrittenWithDotsIsNotAnAmount:
             ZERO,
             ZERO,
         )
+
+
+class TestAMinusSignIsNotPunctuation:
+    """The separator before an amount and a negative sign are one character.
+
+    ``Total - 5,000.00`` is printed, so the label patterns let a hyphen stand
+    between the label and the figure. That is the same hyphen a negative amount
+    begins with, and with nothing to tell them apart the separator ate the
+    sign: ``Taxable Value -5,000.00`` handed back 5,000.00 — the figure with
+    its sign removed rather than the figure.
+
+    Of the three readings available, that one is the worst. ``-5,000`` is a
+    credit note this product does not model, and shows as a negative on every
+    screen. Nothing read is an empty box a reviewer can see. ``+5,000`` is an
+    ordinary-looking invoice stating the opposite of the paper, and no step
+    downstream re-derives it: booked as a supply it overstates turnover in
+    GSTR-1, and on the purchase side it claims the credit the note was raised
+    to take back.
+
+    So an amount may not be preceded by a minus attached to it, and the two
+    spellings part company on the space.
+    """
+
+    @staticmethod
+    def _figures(line: str) -> tuple[Decimal, Decimal]:
+        parsed = parse_heuristic(f"TAX INVOICE\n{line}\n")
+        return parsed.taxable_value, parsed.total_value
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Taxable Value -5,000.00",
+            "Taxable Amount -5,000.00",
+            "Sub-Total -5,000.00",
+            "Net Amount -5,000.00",
+            "Grand Total -5,000.00",
+            "Total Value -5,000.00",
+            "Amount Payable -5,000.00",
+            "Invoice Total -5,000.00",
+            # A currency marker between the label and the sign does not
+            # detach it: the minus is still the character before the figure.
+            "Taxable Value: Rs. -5,000.00",
+            "Grand Total ₹-5,000.00",
+        ],
+    )
+    def test_an_attached_minus_leaves_the_field_empty(self, line):
+        # Empty rather than positive, which is this module's standing trade
+        # everywhere else: a blank a reviewer can see beats a plausible wrong
+        # figure nobody re-checks.
+        assert self._figures(line) == (ZERO, ZERO)
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            # The reason the hyphen is allowed at all — unchanged.
+            ("Taxable Value - 5,000.00", (Decimal("5000.00"), ZERO)),
+            ("Grand Total - 5,000.00", (ZERO, Decimal("5000.00"))),
+            # And the ordinary separators, which never involved a hyphen.
+            ("Taxable Value: 5,000.00", (Decimal("5000.00"), ZERO)),
+            ("Grand Total 5,000.00", (ZERO, Decimal("5000.00"))),
+            ("Net Amount Rs. 5,000.00", (Decimal("5000.00"), ZERO)),
+            # The label's own hyphen is not the separator and never was.
+            ("Sub-Total 5,000.00", (Decimal("5000.00"), ZERO)),
+        ],
+    )
+    def test_a_hyphen_that_is_a_separator_still_reads_the_amount(self, line, expected):
+        assert self._figures(line) == expected
+
+    def test_the_space_is_the_whole_difference(self):
+        # Same eight characters of label, same figure, one space apart — and
+        # the pair is what the fix is: one is a separator, one is a sign.
+        assert self._figures("Grand Total - 5,000.00") == (ZERO, Decimal("5000.00"))
+        assert self._figures("Grand Total -5,000.00") == (ZERO, ZERO)
+
+
+class TestANegativeAmountNeverReachesTheRow:
+    """Extraction is the one door into this product that would take a negative.
+
+    Every other door refuses it: ``InvoiceUpdate`` carries ``ge=0`` on all six
+    money fields, and a GSTR-2B states a credit note as positive figures with
+    the sign carried by ``document_type`` rather than by the money. But
+    ``apply_parsed`` writes what the extractors produced straight onto the row,
+    past all of that — so a tax line reading ``IGST @ 18% -9,000.00`` stored
+    igst = -9000.00 and the dashboard reported input tax credit of *minus* nine
+    thousand rupees, with nothing on the invoice to say so.
+
+    Both extractors reach it by ordinary means, which is why the guard sits in
+    ``validate`` where the two paths meet rather than in either one of them.
+
+    Zeroed rather than kept, because a credit note is not a thing this product
+    models: with no document type to carry the sign, a negative row is not a
+    credit note that got in, it is an invoice whose figures are wrong.
+    """
+
+    FIELDS = ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value")
+
+    @pytest.mark.parametrize("attr", FIELDS)
+    def test_a_negative_is_zeroed_and_named(self, attr):
+        parsed = ParsedInvoice()
+        setattr(parsed, attr, Decimal("-9000.00"))
+        validate(parsed)
+
+        assert getattr(parsed, attr) == ZERO
+        assert f"Discarded a negative {attr.replace('_', ' ')}: -9000.00" in parsed.warnings
+
+    def test_a_positive_amount_is_left_alone(self):
+        parsed = validate(ParsedInvoice(taxable_value=Decimal("50000.00"), igst=Decimal("9000.00")))
+
+        assert parsed.taxable_value == Decimal("50000.00")
+        assert parsed.igst == Decimal("9000.00")
+        assert not any(w.startswith("Discarded a negative") for w in parsed.warnings)
+
+    def test_the_heuristic_path_cannot_store_a_negative_tax(self):
+        # The tax-line reader takes its sign from _MONEY_FIGURE, which begins
+        # "-?" — a discount summarised under a tax head is enough to produce
+        # one. Read before validate, this is -9000.00.
+        raw = parse_heuristic("TAX INVOICE\nTaxable Value: 50,000.00\nIGST @ 18% -9,000.00\n")
+        assert raw.igst == Decimal("-9000.00")
+
+        assert validate(raw).igst == ZERO
+
+    def test_the_model_path_cannot_store_a_negative_tax(self):
+        # to_money bounds a model's magnitude but not its sign, so a payload
+        # saying -9000 arrives verbatim.
+        raw = _from_model_payload({"igst": -9000, "taxable_value": -50000}, "", "m")
+        assert (raw.igst, raw.taxable_value) == (Decimal("-9000"), Decimal("-50000"))
+
+        parsed = validate(raw)
+        assert (parsed.igst, parsed.taxable_value) == (ZERO, ZERO)
+
+    def test_the_clamp_runs_before_the_footing_check(self):
+        # Ordering, which is the reason the loop is at the top of validate:
+        # the total reported as not footing has to be stated against the
+        # figures actually stored, not the ones that were thrown away.
+        parsed = validate(
+            ParsedInvoice(
+                taxable_value=Decimal("50000.00"),
+                igst=Decimal("-9000.00"),
+                total_value=Decimal("41000.00"),
+            )
+        )
+        assert "Total 41000.00 does not equal taxable value + tax (50000.00)" in parsed.warnings
+
+    def test_a_discarded_negative_costs_confidence(self):
+        # What routes the document to a reviewer: the warning is worth 0.1 of
+        # confidence, the same as every other unresolved inconsistency.
+        parsed = ParsedInvoice(igst=Decimal("-9000.00"))
+        parsed.confidence = 0.9
+        parsed.supplier_gstin, parsed.invoice_number = SUPPLIER_GSTIN_SAME_STATE, "X/1"
+        parsed.invoice_date = date(2026, 5, 2)
+
+        assert validate(parsed).confidence == 0.8
+
+    def test_a_whole_invoice_with_a_negative_tax_line_is_kept_and_flagged(self):
+        # End to end, because the promise is that the invoice still arrives:
+        # a flagged invoice can be corrected, a rejected one is retyped from
+        # paper.
+        parsed = parse_invoice(
+            text=(
+                f"TAX INVOICE\nGSTIN: {SUPPLIER_GSTIN_SAME_STATE}\n"
+                "Invoice No: MH/2026/119\nInvoice Date: 02/05/2026\n"
+                "Taxable Value: 50,000.00\nIGST @ 18% -9,000.00\n"
+                "Grand Total: 41,000.00\n"
+            )
+        )
+
+        assert parsed.invoice_number == "MH/2026/119"
+        assert parsed.igst == ZERO
+        assert "Discarded a negative igst: -9000.00" in parsed.warnings

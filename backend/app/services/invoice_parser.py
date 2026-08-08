@@ -524,7 +524,28 @@ _LOOSE_DATE_PATTERN = re.compile(
     r"(?:dated|date)[\s:.\-]*" + _DATE_VALUE,
     re.IGNORECASE,
 )
-_AMOUNT = r"([0-9][0-9,]*\.?\d{0,2})"
+# The separator before an amount admits a hyphen, because "Total - 5,000.00" is
+# printed — and that is the same character a negative amount begins with. With
+# nothing to tell them apart the separator ate the sign: "Taxable Value
+# -5,000.00" matched with the hyphen as punctuation and handed back 5,000.00,
+# the figure with its sign removed rather than the figure.
+#
+# A flipped sign is the worst of the three outcomes available here. Read as
+# -5,000 it is a credit note this product does not model and every screen shows
+# a negative; left unread it is an empty box a reviewer can see; read as +5,000
+# it is an ordinary-looking invoice that states the opposite of the paper, and
+# nothing downstream re-derives it. A credit note booked as a supply overstates
+# turnover in GSTR-1 and, on the purchase side, claims credit the note was
+# issued to take back.
+#
+# So the sign may not be consumed as punctuation: the amount must not be
+# preceded by a minus attached to it. A hyphen with a space after it is still a
+# separator — "Total - 5,000.00" reads as before — and "Total -5,000.00" now
+# matches nothing at all, which is this module's standing preference for an
+# empty field over a plausible wrong one. The negative forms never parsed to a
+# negative *here* in any case: ``_AMOUNT`` has no sign to capture, so the only
+# readings ever available were "positive" and "nothing".
+_AMOUNT = r"(?<!-)([0-9][0-9,]*\.?\d{0,2})"
 # Whole-word labels, matched per line. Anchored on ``\b`` so "GSTIN" can never
 # be read as a tax line, and kept separate from the amount so that the rate in
 # "IGST @ 18%: 81000.00" cannot be mistaken for the amount — which is what
@@ -920,6 +941,41 @@ def validate(parsed: ParsedInvoice) -> ParsedInvoice:
     can see the invoice, and a number they can correct beats a document the
     product refused to accept.
     """
+    # Extraction is the only door into this product that would take a negative
+    # amount, and it took one silently.
+    #
+    # Every other door refuses it: ``InvoiceUpdate`` carries ``ge=0`` on all six
+    # money fields, the review form refuses one before it is sent, and a
+    # GSTR-2B states a credit note as positive figures with the sign carried by
+    # ``document_type`` rather than by the money. ``apply_parsed`` writes what
+    # the extractors produced straight onto the row, past all of that — so a
+    # tax line reading ``IGST @ 18% -9,000.00`` stored igst = -9000.00 and the
+    # dashboard reported input tax credit of *minus* nine thousand rupees, with
+    # nothing on the invoice to say anything had happened.
+    #
+    # Both extractors reach it by ordinary means. ``_MONEY_FIGURE`` begins
+    # ``-?``, so the heuristic reads the sign off a credit note or off a
+    # discount line summarised under a tax head; ``to_money`` bounds a model's
+    # magnitude but not its sign, so ``{"igst": -9000}`` is taken verbatim.
+    #
+    # Zeroed with the field named rather than kept, because a credit note is
+    # not a thing this product models — there is no document type to carry the
+    # sign, so a negative row is not a credit note that got in, it is an
+    # invoice whose figures are wrong. The zero is a box a reviewer can see is
+    # empty and the warning says which one and what it held, which is the trade
+    # this module makes everywhere else. It also costs the extraction 0.1 of
+    # confidence below, which is what routes the document to review.
+    #
+    # Done here, before the footing check reads these fields, so that check
+    # reports the total against the figures actually stored.
+    for attr in ("taxable_value", "cgst", "sgst", "igst", "cess", "total_value"):
+        amount = getattr(parsed, attr)
+        if amount is not None and amount < 0:
+            parsed.warnings.append(
+                f"Discarded a negative {attr.replace('_', ' ')}: {amount}"
+            )
+            setattr(parsed, attr, Decimal("0.00"))
+
     if not parsed.supplier_gstin:
         parsed.warnings.append("No valid supplier GSTIN found")
     if not parsed.invoice_number:
