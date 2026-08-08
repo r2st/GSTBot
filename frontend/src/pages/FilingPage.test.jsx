@@ -601,6 +601,37 @@ describe("FilingPage", () => {
       expect(within(table).getByText("Overdue by 4d")).toBeInTheDocument();
     });
 
+    it("counts down a return that is still inside its deadline", async () => {
+      // The standing every return has for most of its life, and the only one
+      // no test rendered: each case above either filed the return or let it go
+      // overdue, so the chip a user actually sees on the filing screen most
+      // days was the one branch of `standingChip` nothing executed.
+      mockApi({
+        filingStatus: filingStatus([standing({ days_until_due: 5 })]),
+      });
+      renderPage();
+
+      const table = await screen.findByRole("region", { name: "Filing status by period" });
+      expect(within(table).getByText("Due in 5d")).toBeInTheDocument();
+      expect(within(table).queryByText(/Overdue/)).not.toBeInTheDocument();
+    });
+
+    it("does not call a return overdue on the day it is due", async () => {
+      // The boundary between the two unfiled chips. A return due today is
+      // still filable today — the portal accepts it until midnight — so
+      // rounding zero into the overdue branch would tell a business it had
+      // already missed a deadline it has hours left to meet, and the late fee
+      // it implies is ₹50 a day it does not yet owe.
+      mockApi({
+        filingStatus: filingStatus([standing({ days_until_due: 0 })]),
+      });
+      renderPage();
+
+      const table = await screen.findByRole("region", { name: "Filing status by period" });
+      expect(within(table).getByText("Due in 0d")).toBeInTheDocument();
+      expect(within(table).queryByText(/Overdue/)).not.toBeInTheDocument();
+    });
+
     it("marks a return filed after its due date as late rather than on time", async () => {
       mockApi({
         filingStatus: filingStatus([
