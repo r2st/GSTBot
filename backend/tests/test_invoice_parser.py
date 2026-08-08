@@ -1261,3 +1261,66 @@ class TestANegativeAmountNeverReachesTheRow:
         assert parsed.invoice_number == "MH/2026/119"
         assert parsed.igst == ZERO
         assert "Discarded a negative igst: -9000.00" in parsed.warnings
+
+
+class TestAMonthFirstDateIsReadRatherThanRefused:
+    """Preferring day-first is not the same as refusing month-first.
+
+    Every format tried was day-first, so ``12/31/2024`` matched none of them and
+    the invoice came back with no date at all. That is the more expensive of the
+    two readings: a date read a month out files the invoice in the neighbouring
+    return, a date not read at all takes it out of *every* return — off the
+    register, off the dashboard, out of the GSTR-1, with nothing downstream left
+    to notice.
+    """
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("12/31/2024", date(2024, 12, 31)),
+            ("12-31-2024", date(2024, 12, 31)),
+            ("12.31.2024", date(2024, 12, 31)),
+            ("Jan 5, 2026", date(2026, 1, 5)),
+            ("January 5 2026", date(2026, 1, 5)),
+        ],
+    )
+    def test_a_date_with_only_one_reading_gets_it(self, raw, expected):
+        assert to_date(raw) == expected
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("03/04/2026", date(2026, 4, 3)),
+            ("01/02/2026", date(2026, 2, 1)),
+            ("05-06-2026", date(2026, 6, 5)),
+            ("01/02/26", date(2026, 2, 1)),
+        ],
+    )
+    def test_an_ambiguous_date_is_still_read_day_first(self, raw, expected):
+        """The fallback costs nothing in ambiguity.
+
+        A two-part numeric date only reaches month-first when the day-first
+        reading was *invalid*, and a first field above 12 means it was never a
+        month. These all match in the first pass and never reach it.
+        """
+        assert to_date(raw) == expected
+
+    def test_a_two_digit_year_is_not_read_as_the_year_24(self):
+        # "%d-%m-%Y" is tried before "%d-%m-%y" and "%m/%d/%Y" before
+        # "%m/%d/%y", so the ordering has to not let %Y swallow a two-digit
+        # year — a date in the year 24 AD fails the plausibility check below
+        # and leaves the invoice with no date at all.
+        assert to_date("31-12-24") == date(2024, 12, 31)
+        assert to_date("12/31/24") == date(2024, 12, 31)
+
+    def test_nonsense_in_either_order_is_still_refused(self):
+        assert to_date("13/13/2024") is None
+        assert to_date("00/00/0000") is None
+        assert to_date("nonsense") is None
+
+    def test_the_invoice_reaches_a_filing_period(self):
+        # Why the field matters: it alone decides which return the invoice
+        # appears in, and an invoice in no period leaves every screen at once.
+        parsed = parse_invoice(text=INTRASTATE_INVOICE.replace("02/05/2026", "12/31/2024"))
+
+        assert parsed.invoice_date == date(2024, 12, 31)

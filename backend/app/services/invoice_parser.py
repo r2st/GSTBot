@@ -376,6 +376,23 @@ def to_date(value: object) -> date | None:
     read day-first. It is the right call more often here, and the day-vs-month
     ambiguity only ever shifts the filing period by a month rather than
     corrupting the amount.
+
+    Preferring day-first is not the same as refusing month-first, and for a
+    while this read it as such: every format tried was day-first, so
+    ``12/31/2024`` matched none of them and the invoice came back with no date
+    at all. That is the more expensive outcome of the two. A date read a month
+    out files the invoice in the neighbouring return; a date not read at all
+    takes the invoice out of *every* return, and :func:`validate` says as much
+    — the field alone decides which period the invoice appears in, and an
+    invoice in no period leaves the register, the dashboard and the GSTR-1
+    together with nothing downstream left to notice.
+
+    So the day-first formats are tried first and month-first is the fallback,
+    which costs nothing in ambiguity: a two-part numeric date only reaches the
+    fallback when the day-first reading was *invalid*, and the first field
+    being above 12 means it was never a month. ``12/31/2024`` has exactly one
+    reading and now gets it, while ``03/04/2026`` still matches day-first in
+    the first pass and never reaches here.
     """
     # datetime subclasses date, so it has to be narrowed first — the other
     # order makes this branch unreachable and returns the datetime unchanged,
@@ -388,12 +405,17 @@ def to_date(value: object) -> date | None:
     if not value:
         return None
     text = str(value).strip()
-    formats = (
+    day_first = (
         "%Y-%m-%d", "%d-%m-%Y", "%d/%m/%Y", "%d.%m.%Y",
         "%d-%m-%y", "%d/%m/%y", "%d-%b-%Y", "%d %b %Y", "%d %B %Y",
         "%Y/%m/%d",
     )
-    for fmt in formats:
+    month_first = (
+        "%m/%d/%Y", "%m-%d-%Y", "%m.%d.%Y",
+        "%m/%d/%y", "%m-%d-%y",
+        "%b %d %Y", "%B %d %Y", "%b %d, %Y", "%B %d, %Y",
+    )
+    for fmt in day_first + month_first:
         try:
             return datetime.strptime(text, fmt).date()
         except ValueError:
