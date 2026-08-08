@@ -650,3 +650,251 @@ class TestScoringDoesNotQueryPerSupplier:
         monkeypatch.setattr(reconciliation, "_SUPPLIER_LOOKUP_CHUNK", 10)
         seen = self.run_with(db_session, business, 25, monkeypatch)
         assert len(seen) == 3
+
+
+# ---------------------------------------------------------------------------
+# What a run writes onto the supplier
+# ---------------------------------------------------------------------------
+
+class TestTheObservationARunRecords:
+    """The tally `_score_suppliers` writes, and what it deliberately leaves out.
+
+    Two tests asserted the *score* this produces and none asserted the record
+    it is computed from, which is the wrong way round: the score is a weighted
+    number that moves for a dozen reasons, and the counters under it are the
+    facts. A mutation run bore that out — the tally increments, the
+    missing-in-books exclusion, the earliest-filing-date rule, the lateness
+    threshold and the re-run replacement could all be inverted with the whole
+    suite still green.
+
+    None of these is cosmetic. `total_invoices`, `matched_invoices`,
+    `mismatched_invoices`, `missing_invoices` and `late_filings` are the entire
+    evidence base `supplier_score` weighs, and what it produces is the
+    provision a business is advised to hold against a supplier's credit. A
+    counter that is quietly one out moves real money on the strength of a
+    number nobody re-derives.
+    """
+
+    def _supplier(self, db_session, business, **kwargs):
+        supplier = Supplier(business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE, **kwargs)
+        db_session.add(supplier)
+        db_session.commit()
+        return supplier
+
+    def _reload(self, db_session):
+        db_session.expire_all()
+        return db_session.query(Supplier).filter_by(gstin=SUPPLIER_GSTIN_OTHER_STATE).one()
+
+    def test_the_period_s_observation_counts_each_outcome_separately(
+        self, db_session, business
+    ):
+        self._supplier(db_session, business)
+        save(db_session, business.id, invoice_number="M-1")
+        save(db_session, business.id, invoice_number="X-1", taxable_value=Decimal("1.00"))
+        save(db_session, business.id, invoice_number="G-1")
+        import_2b(
+            db_session,
+            business.id,
+            [portal(invoice_number="M-1"), portal(invoice_number="X-1")],
+        )
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        observation = self._reload(db_session).filing_history[-1]
+        assert observation["period"] == PERIOD
+        assert observation["matched"] == 1
+        assert observation["mismatched"] == 1
+        assert observation["missing"] == 1
+
+    def test_an_invoice_only_the_supplier_declared_is_not_evidence_against_them(
+        self, db_session, business
+    ):
+        # MISSING_IN_BOOKS is the buyer not having booked what the supplier
+        # filed. The supplier did their part, so counting it would mark them
+        # down for the buyer's omission — and it is the one category excluded
+        # from the tally before `total` is incremented.
+        self._supplier(db_session, business)
+        import_2b(db_session, business.id, [portal(invoice_number="ONLY-2B")])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        observation = self._reload(db_session).filing_history[-1]
+        assert observation == {"period": PERIOD, "matched": 0, "mismatched": 0, "missing": 0}
+
+    def test_the_counters_total_the_whole_history_not_just_this_period(
+        self, db_session, business
+    ):
+        # The counters are re-derived from the stored history on every run,
+        # which is what stops a re-run compounding them.
+        self._supplier(
+            db_session,
+            business,
+            filing_history=[
+                {"period": "2026-02", "matched": 2, "mismatched": 1, "missing": 3},
+            ],
+        )
+        save(db_session, business.id, invoice_number="M-1")
+        import_2b(db_session, business.id, [portal(invoice_number="M-1")])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        supplier = self._reload(db_session)
+        assert supplier.matched_invoices == 3
+        assert supplier.mismatched_invoices == 1
+        assert supplier.missing_invoices == 3
+        # Total is the three outcomes added, not a fourth stored number.
+        assert supplier.total_invoices == 7
+
+    def test_re_running_a_period_replaces_its_observation(self, db_session, business):
+        # Periods are reconciled repeatedly as suppliers file late. Appending
+        # rather than replacing would count the same invoices once per run and
+        # let a supplier's evidence base grow by re-reading one statement.
+        self._supplier(db_session, business)
+        save(db_session, business.id, invoice_number="M-1")
+        import_2b(db_session, business.id, [portal(invoice_number="M-1")])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        supplier = self._reload(db_session)
+        assert [entry["period"] for entry in supplier.filing_history] == [PERIOD]
+        assert supplier.matched_invoices == 1
+        assert supplier.total_invoices == 1
+
+    def test_the_history_is_bounded_at_three_years(self, db_session, business):
+        # An audit trail for the score, not a ledger. 36 monthly observations
+        # is the window the score weighs; the oldest fall off the front.
+        self._supplier(
+            db_session,
+            business,
+            filing_history=[
+                {"period": f"{year}-{month:02d}", "matched": 1, "mismatched": 0, "missing": 0}
+                for year in (2020, 2021, 2022, 2023)
+                for month in range(1, 13)
+            ],
+        )
+        save(db_session, business.id, invoice_number="M-1")
+        import_2b(db_session, business.id, [portal(invoice_number="M-1")])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        history = self._reload(db_session).filing_history
+        assert len(history) == 36
+        # Sorted by period, so it is the oldest that were dropped and this
+        # period that survived.
+        assert history[-1]["period"] == PERIOD
+        assert history[0]["period"] == "2021-02"
+
+    def test_a_supplier_with_no_row_of_their_own_is_skipped_not_created(
+        self, db_session, business
+    ):
+        # `_score_suppliers` scores suppliers the business already has a row
+        # for. A GSTIN seen only in a statement is not silently promoted.
+        save(db_session, business.id, invoice_number="M-1")
+        import_2b(db_session, business.id, [portal(invoice_number="M-1")])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert db_session.query(Supplier).filter_by(gstin=SUPPLIER_GSTIN_OTHER_STATE).count() == 0
+
+
+class TestWhenTheSupplierFiled:
+    """The filing date, the delay derived from it, and what counts as late.
+
+    GSTR-1 for a period is due on the 11th of the following month, so for
+    2026-04 that is 2026-05-11. The delay is what `supplier_score` weighs as
+    timeliness, and it is signed: a supplier who filed early must not be
+    recorded as having filed late by the same number of days.
+    """
+
+    DUE = date(2026, 5, 11)
+
+    def _supplier(self, db_session, business):
+        supplier = Supplier(business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE)
+        db_session.add(supplier)
+        db_session.commit()
+        return supplier
+
+    def _reload(self, db_session):
+        db_session.expire_all()
+        return db_session.query(Supplier).filter_by(gstin=SUPPLIER_GSTIN_OTHER_STATE).one()
+
+    def _run_with_filing_date(self, db_session, business, *filing_dates):
+        for index in range(len(filing_dates)):
+            save(db_session, business.id, invoice_number=f"F-{index}")
+        import_2b(
+            db_session,
+            business.id,
+            [
+                portal(invoice_number=f"F-{index}", supplier_filing_date=filed_on)
+                for index, filed_on in enumerate(filing_dates)
+            ],
+        )
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        return self._reload(db_session)
+
+    def test_filing_after_the_due_date_is_a_positive_delay(self, db_session, business):
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(db_session, business, date(2026, 5, 18))
+
+        assert supplier.filing_history[-1]["filing_delay_days"] == 7
+        assert supplier.filing_history[-1]["filed_on"] == "2026-05-18"
+        assert supplier.late_filings == 1
+
+    def test_filing_early_is_a_negative_delay_and_not_a_late_filing(
+        self, db_session, business
+    ):
+        # Flipping the subtraction would turn a supplier who filed a week early
+        # into one who filed a week late, and mark down the score of the most
+        # reliable suppliers a business has.
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(db_session, business, date(2026, 5, 4))
+
+        assert supplier.filing_history[-1]["filing_delay_days"] == -7
+        assert supplier.late_filings == 0
+
+    def test_filing_on_the_due_date_itself_is_not_late(self, db_session, business):
+        # The boundary. A return filed on the 11th is filed on time; `> 0` is
+        # what says so, and `>= 0` would make every punctual supplier late.
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(db_session, business, self.DUE)
+
+        assert supplier.filing_history[-1]["filing_delay_days"] == 0
+        assert supplier.late_filings == 0
+
+    def test_the_earliest_date_in_the_statement_is_the_one_kept(
+        self, db_session, business
+    ):
+        # A statement carries one filing date per supplier, but rows are read
+        # one at a time and a supplier appears on many. The earliest is the one
+        # the buyer's claim depends on — that is when the credit became
+        # available — so it wins regardless of the order the rows arrive in.
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(
+            db_session, business, date(2026, 5, 20), date(2026, 5, 13), date(2026, 5, 25)
+        )
+
+        assert supplier.filing_history[-1]["filed_on"] == "2026-05-13"
+        assert supplier.filing_history[-1]["filing_delay_days"] == 2
+
+    def test_a_statement_with_no_filing_date_records_no_delay(self, db_session, business):
+        # Nothing is guessed from its absence: no delay recorded, and the
+        # supplier is not marked late for a date the portal did not state.
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(db_session, business, None)
+
+        assert "filing_delay_days" not in supplier.filing_history[-1]
+        assert "filed_on" not in supplier.filing_history[-1]
+        assert supplier.late_filings == 0
+        assert supplier.last_seen_at is None
+
+    def test_the_filing_date_becomes_when_the_supplier_was_last_seen(
+        self, db_session, business
+    ):
+        # The suppliers screen falls back to this when a supplier has never
+        # filed within the window the score covers.
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(db_session, business, date(2026, 5, 18))
+
+        assert supplier.last_seen_at == date(2026, 5, 18)
+        assert supplier.last_filed_period == PERIOD
