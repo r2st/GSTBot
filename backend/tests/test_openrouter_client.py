@@ -649,6 +649,90 @@ class TestRetryAfter:
 
         assert chat_completion(MESSAGES) == "ok"
 
+    def test_a_date_in_the_obsolete_asctime_format_is_read_as_utc(
+        self, configured, scripted, no_real_sleeping
+    ):
+        # HTTP-date has three legal spellings and `parsedate_to_datetime`
+        # returns *naive* for the asctime one — the other two carry GMT and
+        # come back aware. Subtracting a naive from an aware datetime raises
+        # TypeError, so without the UTC stamp this whole branch would fall
+        # through to the backoff and quietly ignore a provider that had
+        # answered precisely.
+        when = datetime.now(UTC) + timedelta(seconds=12)
+        # asctime: "Sun Nov  6 08:49:37 1994", no zone at the end.
+        asctime = when.strftime("%a %b %d %H:%M:%S %Y")
+        scripted["queue"].append(
+            _FakeResponse(
+                status_code=429, payload={"error": "x"}, headers={"retry-after": asctime}
+            )
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping, "fell back to the backoff instead of reading the date"
+        assert 10 <= no_real_sleeping[0] <= 13
+
+    def test_an_obsolete_format_date_in_the_past_is_not_a_negative_sleep(
+        self, configured, scripted, no_real_sleeping
+    ):
+        # The naive branch has to clamp for the same reason the aware one does.
+        when = datetime.now(UTC) - timedelta(seconds=60)
+        scripted["queue"].append(
+            _FakeResponse(
+                status_code=429,
+                payload={"error": "x"},
+                headers={"retry-after": when.strftime("%a %b %d %H:%M:%S %Y")},
+            )
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [0.0]
+
+    def test_a_date_that_parses_to_nothing_falls_back_to_the_backoff(
+        self, configured, scripted, monkeypatch, no_real_sleeping
+    ):
+        # `parsedate_to_datetime` raises on bad input in current Python and
+        # returned None in older ones. The guard stays because the fallback
+        # this protects is the difference between waiting and hammering: a
+        # `None` reaching the arithmetic below would be a TypeError inside the
+        # retry path, not a graceful backoff.
+        monkeypatch.setattr(openrouter_client, "parsedate_to_datetime", lambda raw: None)
+        scripted["queue"].append(
+            _FakeResponse(
+                status_code=429,
+                payload={"error": "x"},
+                headers={"retry-after": "Sun, 06 Nov 1994 08:49:37 GMT"},
+            )
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [1.0], "did not fall back to its own backoff"
+
+    def test_a_date_too_far_out_to_subtract_falls_back_to_the_backoff(
+        self, configured, scripted, monkeypatch, no_real_sleeping
+    ):
+        # A year that overflows the subtraction. Falling back to zero here
+        # would hammer a provider that had just asked to be left alone, which
+        # is the one outcome this function must never produce.
+        class _Overflowing:
+            tzinfo = UTC
+
+            def __sub__(self, other):
+                raise OverflowError("date value out of range")
+
+        monkeypatch.setattr(
+            openrouter_client, "parsedate_to_datetime", lambda raw: _Overflowing()
+        )
+        scripted["queue"].append(
+            _FakeResponse(
+                status_code=429,
+                payload={"error": "x"},
+                headers={"retry-after": "Sun, 06 Nov 9999 08:49:37 GMT"},
+            )
+        )
+
+        chat_completion(MESSAGES)
+        assert no_real_sleeping == [1.0]
+
 
 class TestTheWaitingBudget:
     """Extraction runs inline in the upload request when Celery is off, so time
