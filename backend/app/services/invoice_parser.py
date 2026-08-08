@@ -93,6 +93,47 @@ _NUMBER_PATTERN = re.compile(r"-?\d[\d,]*(?:\.\d{1,2})?")
 # ``validate_period`` reports as figures that do not foot.
 _MONEY_FIGURE = re.compile(r"-?\d[\d,]*\.\d{1,2}|-?\d{1,3}(?:,\d{2,3})+")
 
+# A separator that joins such a match to a further run of digits, which means
+# the match is a piece of a longer thing rather than an amount in its own right.
+#
+# Requiring a money *shape* stops a bare integer being read as tax, but a date
+# written with dots is money-shaped for as long as the pattern looks at it:
+# ``22.09.2024`` offers ``22.09`` — two digits, a point, two more — and nothing
+# about those five characters says they are a day and a month. The pattern stops
+# there because a third group is not part of any amount, so the figure it hands
+# back is the front of the date with the year left behind.
+#
+# That is the same failure the shape test was added to close, reached by the
+# other date format. ``IGST is not applicable as per Section 8 dated 22.09.2024``
+# read as ₹22.09 of IGST, and because a head is only read once, the real
+# ``IGST @ 18% 81,000.00`` below it was then discarded — an invoice whose tax was
+# out by ₹80,977 with nothing on the screen to say so.
+#
+# DD.MM.YYYY is ordinary on an Indian invoice, so this is not an exotic layout.
+# The slash form never reached here — ``22/09/2024`` holds no point and no
+# grouping, so it is not money-shaped to begin with — which is why the first
+# pass missed it: the footer that prompted the fix happened to use slashes.
+#
+# Refused rather than trimmed, in the same spirit as :data:`_EXPONENT_SUFFIX`
+# below: what follows the point is a year, not decimals, so there is no amount
+# here to recover. Leaving the head empty is what lets ``validate_period`` say
+# the figures do not foot, where ₹22.09 is a number nobody re-checks.
+_JOINED_TO_DIGITS = re.compile(r"[./]\d")
+
+
+def _money_figures_in(text: str) -> list[str]:
+    """The money-shaped figures in *text*, minus the ones inside a date.
+
+    See :data:`_MONEY_FIGURE` for what counts as money-shaped and
+    :data:`_JOINED_TO_DIGITS` for what disqualifies a match that is.
+    """
+    return [
+        match.group()
+        for match in _MONEY_FIGURE.finditer(text)
+        if not _JOINED_TO_DIGITS.match(text, match.end())
+    ]
+
+
 # An exponent immediately after such a match, which means the match is only the
 # mantissa of a number the pattern above cannot express.
 #
@@ -572,12 +613,13 @@ def _amount_on_line(line: str, *, after: int = 0) -> Decimal | None:
     ``3,`` and the head was read as ₹333.33 rather than ₹3,333.33, an order of
     magnitude of cess, silently, on a line that parses perfectly otherwise.
 
-    The figure must be money-shaped — see :data:`_MONEY_FIGURE`. A head's label
-    appears in prose and in page furniture that carry no amount at all, and the
-    last bare number on such a line is a section number or half a date.
+    The figure must be money-shaped and must not be part of a date — see
+    :func:`_money_figures_in`. A head's label appears in prose and in page
+    furniture that carry no amount at all, and the last number on such a line is
+    a section number or half a date.
     """
     for candidate in (line[after:], line) if after else (line,):
-        numbers = _MONEY_FIGURE.findall(_PERCENT_PATTERN.sub(" ", candidate))
+        numbers = _money_figures_in(_PERCENT_PATTERN.sub(" ", candidate))
         if numbers:
             return to_money(numbers[-1], default=None)
     return None
@@ -625,13 +667,15 @@ def _tax_amounts_on_line(line: str) -> dict[str, Decimal]:
     if not found:
         return {}
 
-    # Money-shaped figures only, on both sides of the count. Counting every
-    # number instead let a combined line reach the split it is meant to escape:
-    # ``Total Tax (CGST + SGST) 18,000.00 as on 22/09/2024`` carries one amount
-    # and two heads, but four numbers once the date is counted, so the guard saw
-    # enough to go around and handed the combined ₹18,000 to SGST alone.
+    # Money-shaped figures only, on both sides of the count, and a date is not
+    # one of them however it is punctuated. Counting every number instead let a
+    # combined line reach the split it is meant to escape: ``Total Tax (CGST +
+    # SGST) 18,000.00 as on 22/09/2024`` carries one amount and two heads, but
+    # four numbers once the date is counted, so the guard saw enough to go
+    # around and handed the combined ₹18,000 to SGST alone. The dotted form of
+    # the same date makes up the shortfall by itself.
     stripped = _PERCENT_PATTERN.sub(" ", line)
-    if len(_MONEY_FIGURE.findall(stripped)) < len(found):
+    if len(_money_figures_in(stripped)) < len(found):
         return {}
 
     found.sort()

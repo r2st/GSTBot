@@ -1002,3 +1002,92 @@ class TestALineThatOnlySaysTheWordIsNotATaxLine:
     def test_a_money_shaped_figure_is_still_read(self, line, expected):
         # Decimals or digit grouping, on either side of the label.
         assert self._heads(line)[2] == expected
+
+
+class TestADateWrittenWithDotsIsNotAnAmount:
+    """``22.09.2024`` is money-shaped for exactly as long as the pattern looks.
+
+    Requiring a money shape is what stops a bare integer — a section number, a
+    page count — being read as tax. A dotted date defeats that test rather than
+    failing it: ``22.09`` is two digits, a point and two more, and nothing about
+    those five characters says they are a day and a month. The reader stops
+    there, because a third group belongs to no amount, and hands back the front
+    of the date with the year left behind.
+
+    So this is the same failure the shape test closed, arriving by the other
+    date format — and the damaging half is unchanged. A head is read once, so a
+    dotted date anywhere above the tax block takes the head and the real figure
+    below it is discarded rather than preferred.
+
+    DD.MM.YYYY is ordinary on an Indian invoice. The slash form never reached
+    this code at all — ``22/09/2024`` carries no point and no grouping, so it is
+    not money-shaped to begin with — which is precisely why the first pass at
+    this missed it.
+    """
+
+    REAL_TAX_BLOCK = "IGST @ 18% 81,000.00"
+
+    @staticmethod
+    def _heads(text: str) -> tuple:
+        parsed = parse_heuristic(f"TAX INVOICE\nTaxable Value: 450000.00\n{text}\n")
+        return parsed.cgst, parsed.sgst, parsed.igst, parsed.cess
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Note: IGST is not applicable as per Section 8 dated 22.09.2024",
+            "IGST reverse charge declaration signed 01.05.2024",
+            # The year first, which is the other way round and matches the same.
+            "IGST not applicable — see circular of 2024.09.22",
+            # A day and month that need no padding still make five characters.
+            "IGST not applicable as on 1.5.2024",
+        ],
+    )
+    def test_a_dotted_date_declares_no_tax(self, line):
+        assert self._heads(line) == (ZERO, ZERO, ZERO, ZERO)
+
+    def test_a_dotted_date_does_not_beat_the_tax_block_below_it(self):
+        # The whole of the bug: read in document order the date was the IGST,
+        # and the real block below could not correct it. Tax on this invoice
+        # read 22.09 of 81,000.00 — out by ₹80,977, with nothing to say so.
+        assert self._heads(
+            f"Note: IGST is not applicable as per Section 8 dated 22.09.2024\n"
+            f"{self.REAL_TAX_BLOCK}"
+        ) == (ZERO, ZERO, Decimal("81000.00"), ZERO)
+
+    def test_a_dotted_date_cannot_make_up_a_combined_line_shortfall(self):
+        # The guard that leaves a combined line unread counts figures against
+        # heads. A dotted date supplies the missing figure by itself, so a line
+        # with one amount and two heads looked like a line with a figure each
+        # and handed the combined ₹18,000 to SGST alone.
+        assert self._heads("Total Tax (CGST + SGST) 18,000.00 as on 22.09.2024") == (
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+        )
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            # A real amount sharing the line with the date it was raised on.
+            ("IGST @ 18% 81,000.00 dated 22.09.2024", Decimal("81000.00")),
+            # And with the date first, where the amount is still the last figure.
+            ("22.09.2024 IGST @ 18% 81,000.00", Decimal("81000.00")),
+            # A point that joins nothing is an ordinary decimal.
+            ("IGST @ 18% 81000.50", Decimal("81000.50")),
+            # A point preceded by a letter is an abbreviation, not a separator.
+            ("IGST Rs.81,000.00", Decimal("81000.00")),
+        ],
+    )
+    def test_an_amount_beside_a_date_is_still_read(self, line, expected):
+        assert self._heads(line)[2] == expected
+
+    def test_both_heads_are_still_read_beside_a_dotted_date(self):
+        # Two heads, a figure each, and a date that must count for neither.
+        assert self._heads("CGST @ 9% 9,000.00 SGST @ 9% 9,000.00 on 22.09.2024") == (
+            Decimal("9000.00"),
+            Decimal("9000.00"),
+            ZERO,
+            ZERO,
+        )
