@@ -913,3 +913,92 @@ class TestOneTaxHeadOnALineStillReadsAsBefore:
     def test_the_last_figure_on_the_line_wins(self):
         # Invoices put the amount last, after the rate and any quantity.
         assert self._igst("IGST 18 % on 450000.00 = 81000.00") == Decimal("81000.00")
+
+
+class TestALineThatOnlySaysTheWordIsNotATaxLine:
+    """Naming a head is not declaring one, and the first reading of a head wins.
+
+    Tax is read a line at a time, so any line carrying the letters ``CGST`` was
+    treated as that head's line and the last number on it became the amount.
+    The letters turn up in plenty of places that carry no tax at all — the rule
+    46 footer every invoice prints, the page furniture of a multi-page one — and
+    what the reader found there was a section number, a page count, or a piece
+    of a date.
+
+    The damage is not confined to the junk figure, because a head is only read
+    once: page furniture near the top of the document is reached before the real
+    tax block below it, so the true amount is discarded in favour of the page
+    number rather than merely competing with it. That is the difference between
+    a field that looks odd and an invoice whose tax is wrong on every screen
+    that shows it.
+
+    The figure must therefore be money-shaped — decimals, digit grouping, or
+    both. A date, a section number and a page count are all bare integers, which
+    is what makes the distinction hold on layouts nobody has seen yet.
+    """
+
+    REAL_TAX_BLOCK = "CGST @ 9% 9,000.00\nSGST @ 9% 9,000.00"
+
+    @staticmethod
+    def _heads(text: str) -> tuple:
+        parsed = parse_heuristic(f"TAX INVOICE\nTaxable Value: 100000.00\n{text}\n")
+        return parsed.cgst, parsed.sgst, parsed.igst, parsed.cess
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            # Rule 46(p) is printed on the face of essentially every invoice.
+            "Note: IGST is not applicable on intra-state supply as per Section 8.",
+            "Tax payable on reverse charge under IGST Section 9(3): 0",
+            # Page furniture on a multi-page invoice.
+            "Page 1 of 2 - CGST/SGST summary continued on 22/09/2024",
+            # The heads named in a table's column headings, with no row under.
+            "Rate    CGST    SGST    Total",
+            # An identifier that happens to contain a head's letters.
+            "Invoice No: IGST/9    Invoice Date: 05/05/2024",
+        ],
+    )
+    def test_prose_and_page_furniture_declare_no_tax(self, line):
+        assert self._heads(line) == (ZERO, ZERO, ZERO, ZERO)
+
+    def test_a_footer_does_not_beat_the_tax_block_below_it(self):
+        # The whole of the bug: read in document order, the footer's page number
+        # and date were CGST and SGST, and the real block two lines down could
+        # not correct them. Tax on this invoice read 2,026.00 of 18,000.00.
+        cgst, sgst, igst, cess = self._heads(
+            f"Page 1 of 2 - CGST/SGST summary continued on 22/09/2024\n{self.REAL_TAX_BLOCK}"
+        )
+        assert (cgst, sgst) == (Decimal("9000.00"), Decimal("9000.00"))
+        assert (igst, cess) == (ZERO, ZERO)
+
+    def test_a_section_number_is_not_an_igst_amount(self):
+        # "Section 8" became ₹8 of IGST on an invoice that had none, which
+        # `validate_period` then reports as an inter-state supply taxed as both.
+        assert self._heads(
+            f"{self.REAL_TAX_BLOCK}\nNote: IGST is not applicable as per Section 8."
+        ) == (Decimal("9000.00"), Decimal("9000.00"), ZERO, ZERO)
+
+    def test_a_combined_figure_survives_a_date_on_the_same_line(self):
+        # The guard that leaves a combined line unread counts figures against
+        # heads. Counting every number let the date make up the shortfall, so a
+        # line with one amount and two heads looked like a line with a figure
+        # each and handed the combined ₹18,000 to SGST alone.
+        assert self._heads("Total Tax (CGST + SGST) 18,000.00 as on 22/09/2024") == (
+            ZERO,
+            ZERO,
+            ZERO,
+            ZERO,
+        )
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("IGST @ 18%: 81000.00", Decimal("81000.00")),
+            ("IGST @ 18% 81,000.00", Decimal("81000.00")),
+            ("IGST 18,000", Decimal("18000")),
+            ("81,000.00 IGST", Decimal("81000.00")),
+        ],
+    )
+    def test_a_money_shaped_figure_is_still_read(self, line, expected):
+        # Decimals or digit grouping, on either side of the label.
+        assert self._heads(line)[2] == expected

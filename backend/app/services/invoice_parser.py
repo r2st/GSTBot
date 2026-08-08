@@ -66,6 +66,33 @@ VALID_TAX_RATES = (
 # A number with optional Indian digit grouping and up to two decimals.
 _NUMBER_PATTERN = re.compile(r"-?\d[\d,]*(?:\.\d{1,2})?")
 
+# The same, narrowed to figures an invoice prints as *money*: a decimal part, or
+# digit grouping, or both. A bare run of digits is not one.
+#
+# This is what tells a tax line from a line that merely says the word. Tax is
+# read a line at a time (see :func:`_tax_amounts_on_line`), and a head's label
+# turns up in plenty of prose that carries no tax at all: the rule 46 footer
+# "IGST is not applicable on intra-state supply as per Section 8", or the page
+# footer "Page 1 of 2 - CGST/SGST summary continued on 22/09/2024". Matched with
+# :data:`_NUMBER_PATTERN`, those lines are read as tax lines and the last number
+# on them becomes the head's amount — the section number, or a fragment of a
+# date. That footer put ₹2 of CGST and ₹2,024 of SGST on the invoice.
+#
+# And it is not merely noise, because the first reading of a head wins: the
+# figures above are set before the real ``CGST @ 9% 9,000.00`` two lines down is
+# ever reached, so the true amount is discarded in favour of the page number.
+# Tax on the invoice read 2,026.00 instead of 18,000.00, on a document that
+# parses perfectly otherwise.
+#
+# Requiring the shape rather than the position is what makes the distinction
+# survive layouts this module has not seen: a date, a section number, a page
+# count and a serial are all bare integers, and none of them can be mistaken for
+# ₹9,000.00. The cost is an invoice printing a whole-rupee amount with neither
+# separator nor decimals — "IGST 18000" — whose tax now reads empty rather than
+# wrong, which is the trade this module makes everywhere else and the one
+# ``validate_period`` reports as figures that do not foot.
+_MONEY_FIGURE = re.compile(r"-?\d[\d,]*\.\d{1,2}|-?\d{1,3}(?:,\d{2,3})+")
+
 # An exponent immediately after such a match, which means the match is only the
 # mantissa of a number the pattern above cannot express.
 #
@@ -544,9 +571,13 @@ def _amount_on_line(line: str, *, after: int = 0) -> Decimal | None:
     to land inside the figure rather than before it — the cut fell after the
     ``3,`` and the head was read as ₹333.33 rather than ₹3,333.33, an order of
     magnitude of cess, silently, on a line that parses perfectly otherwise.
+
+    The figure must be money-shaped — see :data:`_MONEY_FIGURE`. A head's label
+    appears in prose and in page furniture that carry no amount at all, and the
+    last bare number on such a line is a section number or half a date.
     """
     for candidate in (line[after:], line) if after else (line,):
-        numbers = _NUMBER_PATTERN.findall(_PERCENT_PATTERN.sub(" ", candidate))
+        numbers = _MONEY_FIGURE.findall(_PERCENT_PATTERN.sub(" ", candidate))
         if numbers:
             return to_money(numbers[-1], default=None)
     return None
@@ -594,8 +625,13 @@ def _tax_amounts_on_line(line: str) -> dict[str, Decimal]:
     if not found:
         return {}
 
+    # Money-shaped figures only, on both sides of the count. Counting every
+    # number instead let a combined line reach the split it is meant to escape:
+    # ``Total Tax (CGST + SGST) 18,000.00 as on 22/09/2024`` carries one amount
+    # and two heads, but four numbers once the date is counted, so the guard saw
+    # enough to go around and handed the combined ₹18,000 to SGST alone.
     stripped = _PERCENT_PATTERN.sub(" ", line)
-    if len(_NUMBER_PATTERN.findall(stripped)) < len(found):
+    if len(_MONEY_FIGURE.findall(stripped)) < len(found):
         return {}
 
     found.sort()
