@@ -500,13 +500,89 @@ def normalize_rate(value: object) -> Decimal | None:
 # The bare-separator branch keeps the two-character floor, because there the
 # label was never confirmed and a single stray character after a full stop is
 # noise rather than a document number.
+#
+# Every gap in the pattern is horizontal space, so the label, its separator and
+# the value stay on one line. Written with a plain ``\s`` the separator run
+# crossed the line break and took the first word of the *next* line as the
+# number, which is how a document that prints its label with no value beside it
+# — a column heading, or a wrapped line — came out with an invoice number of
+# "Date", "Bill", "Total" or "of":
+#
+#     Invoice No.                 ->  "Date"
+#     Date: 02/05/2026
+#
+#     TAX INVOICE                 ->  "of"
+#     No. of Packages: 12
+#
+# Both are the silently-wrong number this pattern exists to prevent, and worse
+# than the reading it was written to stop, because "of" is not even a document
+# number: it files into GSTR-1 as ``inum``, it is what reconciliation matches a
+# GSTR-2B row on, and it is half the key duplicate detection uses.
+#
+# The cost of the restriction is a layout that prints the heading and the value
+# on separate rows, which now reads no number at all. That layout was never read
+# correctly anyway — a header row carries the *next* label, not the value, so
+# "Invoice No.  Invoice Date" over "MH/2026/118  02/05/2026" returned the word
+# "Invoice" — and a blank a reviewer can see beats a word that looks like data.
+_SAME_LINE_SPACE = r"[^\S\r\n]"
+
 _INVOICE_NO_PATTERN = re.compile(
-    r"(?:tax\s+invoice|invoice|inv|bill)[\s.]*"
+    rf"(?:tax{_SAME_LINE_SPACE}+invoice|invoice|inv|bill)(?:{_SAME_LINE_SPACE}|\.)*"
     r"(?:"
-    r"(?:no|number|num|#)[\s:.\-#]*([A-Za-z0-9][A-Za-z0-9\-/]{0,29})"
+    rf"(?:no|number|num|#)(?:{_SAME_LINE_SPACE}|[:.\-#])*([A-Za-z0-9][A-Za-z0-9\-/]{{0,29}})"
     r"|"
-    r"[:.#][\s:.\-#]*([A-Za-z0-9][A-Za-z0-9\-/]{1,29})"
+    rf"[:.#](?:{_SAME_LINE_SPACE}|[:.\-#])*([A-Za-z0-9][A-Za-z0-9\-/]{{1,29}})"
     r")",
+    re.IGNORECASE,
+)
+
+
+# Wording that marks the number after it as *another* document's.
+#
+# An invoice cites other invoices. A credit or debit note must carry the
+# original invoice's number to be valid at all under rule 53, a revised invoice
+# names the one it replaces, and an ordinary invoice for continuing work often
+# opens "Against our Invoice No: ...". Every one of those prints a second, older
+# document number *above* the document's own — and :func:`_invoice_number_in`
+# took the leftmost match, so on all of them the number stored was the one being
+# referred to rather than the one being read.
+#
+# That is the failure :data:`_INVOICE_NO_PATTERN` above calls the one that
+# cannot be caught downstream, reached by a different route. Worse here than a
+# missing number, because the value is not merely wrong but is a real invoice
+# number belonging to a real earlier document: reconciliation matches it against
+# that document's GSTR-2B row, duplicate detection sees the earlier invoice
+# already filed under it, and GSTR-1 files two different supplies under one
+# ``inum``. Nothing in that chain has any reason to look twice.
+#
+# The marker has to sit immediately before the label — reference word, at most a
+# "to" and an "our"/"your"/"the", then the label itself. Scanning the whole line
+# instead would read the triplicate marking every Indian invoice is printed with,
+# "ORIGINAL FOR RECIPIENT", as a reference to an original *invoice*, and drop
+# the document's own number from a layout that puts that marking in the same
+# band as the number. Requiring adjacency tells "Original Invoice No: 41" from
+# "ORIGINAL FOR RECIPIENT    Invoice No: 41", which no window of characters can.
+#
+# "Revised" is deliberately *not* in the list, though it names the same relation
+# as the rest. Rule 53(1) has the revised document headed "Revised Invoice" and
+# carrying its own serial, with the document it replaces named separately as the
+# original — so on a revised invoice "Revised Invoice No: R-9" is the number
+# being read, not a reference, and skipping it would take the number off every
+# revised invoice to save a reference that is spelt "Original Invoice No" anyway.
+#
+# A document whose only number is a referenced one is left with none, in the
+# same spirit as the rest of this module: an empty field a reviewer can see
+# beats a plausible number belonging to something else.
+_REFERENCE_PREFIX = re.compile(
+    r"(?:"
+    # "w.r.t.", "w r t", "wrt" — spelled out rather than folded into the word
+    # list below because the trailing \b would fall after a full stop.
+    r"\bw\.?\s*r\.?\s*t\.?"
+    r"|\b(?:against|ref|refer(?:ence|ring)?|original|orig|previous|prev|vide)\b"
+    r")"
+    # "with reference to your Invoice No." is how the wording is actually
+    # printed as often as the bare form, so the optional "to" is not a nicety.
+    r"[\s:.\-]*(?:to\b)?[\s:.\-]*(?:our|your|the)?[\s:.\-]*$",
     re.IGNORECASE,
 )
 
@@ -517,11 +593,39 @@ def _invoice_number_in(text: str) -> str | None:
     The pattern has two value groups — see :data:`_INVOICE_NO_PATTERN` — and
     exactly one of them is filled on any match, so the caller should not have
     to know which branch fired.
+
+    Matches introduced as a reference to another document are passed over; see
+    :data:`_REFERENCE_PREFIX` for what counts as one and why the test is
+    anchored to the text immediately before the label.
+
+    A word is passed over too — two or more characters with no digit among
+    them. What such a candidate actually is, on every document that produced
+    one, is the next label on a line that printed its own label with nothing
+    beside it: a tabular layout heading its columns ``Invoice No.   Invoice
+    Date`` yielded the number "Invoice", and the same shape yields "Date",
+    "Total", "E-Way" or "of". Each is a plausible-looking string in the one
+    field nothing downstream can check, so none is worth having over an empty
+    field a reviewer can see. Placeholders — "NA", "TBD" — go the same way, and
+    should: rule 46(b) makes the number a consecutive serial and neither is one.
+
+    A *single* character is kept even when it is a letter, because it can only
+    have come through the branch that confirmed a "No"/"#" token before it —
+    see :data:`_INVOICE_NO_PATTERN` — and one letter standing in the value
+    position of a confirmed label is a first-year series, not a column heading.
     """
-    match = _INVOICE_NO_PATTERN.search(text)
-    if match is None:
-        return None
-    return _clean_str(match.group(1) or match.group(2), 64)
+    for match in _INVOICE_NO_PATTERN.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        if _REFERENCE_PREFIX.search(text, line_start, match.start()):
+            continue
+        value = _clean_str(match.group(1) or match.group(2), 64)
+        if value is None:
+            continue
+        if len(value) > 1 and not any(char.isdigit() for char in value):
+            continue
+        return value
+    return None
+
+
 # A date, in any of the shapes :func:`to_date` knows how to read.
 _DATE_VALUE = r"(\d{1,4}[-/.\s][A-Za-z0-9]{1,9}[-/.\s]\d{2,4})"
 
@@ -707,9 +811,37 @@ def _labelled_amount(pattern: re.Pattern[str], text: str) -> tuple[Decimal | Non
 # also picks up the affirmatives the old pattern could not reach: "Reverse
 # Charge (Y/N): Y" required a separator it had no room for, so an invoice that
 # genuinely was reverse charge read as one that was not.
+#
+# "RCM" is the other half of the vocabulary. It is not a rare abbreviation of
+# the phrase — on a large share of invoices it is the *only* wording printed,
+# because the label has to fit a box on a pre-printed form: "Tax payable under
+# RCM: Yes", "RCM Applicable: No", "Whether tax is payable under RCM (Y/N): Y".
+# None of those contain the words "reverse charge", so none of them matched, and
+# every one of them came back ``False`` — the field's default, indistinguishable
+# from an invoice that says the answer is no.
+#
+# A missed "yes" is the same error :func:`to_flag` exists to prevent, taken from
+# the other side, and it costs more than the false positive does. Reverse charge
+# means the recipient pays the tax, so an invoice wrongly read as ordinary is
+# marked creditable — see :meth:`app.models.invoice.Invoice.creditable`, which
+# is ``itc_eligible and not reverse_charge`` — and the business claims credit for
+# tax it never paid and still owes. On a sale the same miss prints ``rchrg: "N"``
+# into GSTR-1, telling the customer's GSTR-2B they need not account for it, so
+# the liability is dropped by both parties at once.
+#
+# The answer is still required, so the acronym cannot fire on its own. That is
+# what keeps a supplier with "RCM" in its trade name from flagging every invoice
+# it issues: the word after it is the rest of the name, which is not an answer,
+# and a label with no answer matches nothing here by design.
+#
+# The two spellings also appear together, because a form that has room for the
+# phrase still glosses it: "Whether GST is payable under reverse charge (RCM):
+# Yes". The bracket there sits exactly where the "(Y/N)" box does, so it is
+# admitted in the same place — without it the label ends at "charge", the ")"
+# is not a separator, and the answer standing right beside it is not read.
 _REVERSE_CHARGE_PATTERN = re.compile(
-    r"reverse\s*charge"
-    r"(?:\s*\(\s*y\s*/\s*n\s*\))?+"  # "Reverse Charge (Y/N)"
+    r"(?:reverse\s*charge|rcm)"
+    r"(?:\s*\(\s*(?:y\s*/\s*n|rcm|reverse\s*charge)\s*\))?+"  # "(Y/N)", "(RCM)"
     r"(?:\s+(?:is\s+)?applicable|\s+basis)?+"  # label words, never the answer
     r"\s*[:\-]?\s*"
     r"(not\s+applicable|n\s*/\s*a|yes|no|true|false|applicable|y|n)\b",

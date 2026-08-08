@@ -392,6 +392,69 @@ Grand Total: 1,180.00
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
     Layout(
+        name="rule 46(p) answered as 'RCM' on a pre-printed form",
+        text=f"""\
+NANDED GOODS CARRIERS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: NGC-11
+Invoice Date: 11/09/2026
+Whether tax is payable under RCM (Y/N): Y
+Taxable Value: 2,000.00
+Grand Total: 2,000.00
+""",
+        invoice_number="NGC-11",
+        invoice_date=date(2026, 9, 11),
+        taxable_value=money("2000.00"),
+        total_value=money("2000.00"),
+        # A goods transport agency's invoice carries no tax because the
+        # recipient pays it. Read as an ordinary invoice it is marked
+        # creditable, and the business claims credit for tax it never paid.
+        reverse_charge=True,
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="rule 46(p) glossing the phrase with the acronym",
+        text=f"""\
+PARBHANI ADVOCATES
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: PA-4
+Invoice Date: 12/09/2026
+Whether GST is payable under reverse charge (RCM): Yes
+Taxable Value: 25,000.00
+Grand Total: 25,000.00
+""",
+        invoice_number="PA-4",
+        invoice_date=date(2026, 9, 12),
+        taxable_value=money("25000.00"),
+        total_value=money("25000.00"),
+        reverse_charge=True,
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="a supplier whose trade name contains the acronym",
+        text=f"""\
+RCM STEEL TRADERS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: RST-2
+Invoice Date: 13/09/2026
+Taxable Value: 1,000.00
+CGST @ 9% 90.00
+SGST @ 9% 90.00
+Grand Total: 1,180.00
+""",
+        invoice_number="RST-2",
+        invoice_date=date(2026, 9, 13),
+        taxable_value=money("1000.00"),
+        total_value=money("1180.00"),
+        cgst=money("90.00"),
+        sgst=money("90.00"),
+        tax_rate=Decimal("18"),
+        # The letters are the supplier's name, not an answer, and the invoice
+        # charges tax in the ordinary way.
+        reverse_charge=False,
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
         name="rule 46(p) answered 'Y' in a (Y/N) box",
         text=f"""\
 AKOLA TRANSPORT
@@ -479,6 +542,55 @@ Grand Total: 1,000.00
         invoice_date=date(2026, 7, 7),
         taxable_value=money("1000.00"),
         total_value=money("1000.00"),
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="an invoice citing the earlier one it continues from",
+        text=f"""\
+JALNA ENGINEERING WORKS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Tax Invoice
+Against our Invoice No: JEW/2025/077 dated 04/04/2025
+Invoice No: JEW/2026/214
+Invoice Date: 10/10/2026
+Taxable Value: 50,000.00
+CGST @ 9% 4,500.00
+SGST @ 9% 4,500.00
+Grand Total: 59,000.00
+""",
+        # The cited number belongs to a real earlier document, so storing it
+        # matches this supply to that invoice's GSTR-2B row and files two
+        # supplies under one `inum`. Nothing downstream looks twice at it.
+        invoice_number="JEW/2026/214",
+        invoice_date=date(2026, 10, 10),
+        taxable_value=money("50000.00"),
+        total_value=money("59000.00"),
+        cgst=money("4500.00"),
+        sgst=money("4500.00"),
+        tax_rate=Decimal("18"),
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="the triplicate marking printed beside the number",
+        text=f"""\
+HINGOLI PAPER MILLS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+ORIGINAL FOR RECIPIENT    Invoice No: HPM-31
+Invoice Date: 11/10/2026
+Taxable Value: 10,000.00
+CGST @ 9% 900.00
+SGST @ 9% 900.00
+Grand Total: 11,800.00
+""",
+        # "ORIGINAL" here marks the copy, not an earlier invoice. Treated as a
+        # citation it takes the number off every document printed this way.
+        invoice_number="HPM-31",
+        invoice_date=date(2026, 10, 11),
+        taxable_value=money("10000.00"),
+        total_value=money("11800.00"),
+        cgst=money("900.00"),
+        sgst=money("900.00"),
+        tax_rate=Decimal("18"),
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
     Layout(

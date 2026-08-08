@@ -1444,3 +1444,257 @@ class TestAMonthFirstDateIsReadRatherThanRefused:
         parsed = parse_invoice(text=INTRASTATE_INVOICE.replace("02/05/2026", "12/31/2024"))
 
         assert parsed.invoice_date == date(2024, 12, 31)
+
+
+class TestANumberQuotedFromAnotherDocumentIsNotThisOne:
+    """A cited invoice number is somebody else's, and it was taken as this one.
+
+    Documents quote each other constantly: a credit note has to name the
+    original invoice to be valid under rule 53, and an invoice for continuing
+    work opens "Against our Invoice No: ...". Both print the older number
+    *above* the document's own, and the leftmost match won.
+
+    That is worse than reading nothing. The value is not noise — it is a real
+    number belonging to a real earlier document, so reconciliation matches it to
+    that document's GSTR-2B row, duplicate detection sees the earlier invoice
+    already filed under it, and GSTR-1 files two supplies under one ``inum``.
+    Nothing downstream has a reason to look twice.
+    """
+
+    @pytest.mark.parametrize(
+        "reference",
+        [
+            "Against our Invoice No: OLD-100",
+            "Against Invoice No. OLD-100",
+            "Ref: Invoice No 1001",
+            "Reference Invoice No: OLD-100",
+            "With reference to your Invoice No: OLD-100",
+            "Referring to our Invoice No. OLD-100",
+            "Original Invoice No: OLD-100",
+            "Orig. Invoice No: OLD-100",
+            "Previous Invoice No: OLD-100",
+            "Prev Invoice No 1001",
+            "vide Invoice No 1001",
+            "w.r.t. Invoice No. OLD-100",
+            "wrt Invoice No OLD-100",
+        ],
+    )
+    def test_the_document_s_own_number_is_read_past_the_one_it_cites(self, reference):
+        text = f"CREDIT NOTE\n{reference}\nInvoice No: MINE-205\nGrand Total: 1,180.00\n"
+
+        assert parse_heuristic(text).invoice_number == "MINE-205"
+
+    def test_a_cited_number_is_dropped_rather_than_stored_when_it_is_the_only_one(self):
+        # The choice the module makes everywhere else: an empty field a reviewer
+        # can see beats a plausible number belonging to something else.
+        text = "CREDIT NOTE\nAgainst our Invoice No: OLD-100\nGrand Total: 1,180.00\n"
+
+        assert parse_heuristic(text).invoice_number is None
+
+    def test_the_empty_field_is_said_out_loud(self):
+        # What makes the blank a reviewable state rather than a quiet loss.
+        text = "CREDIT NOTE\nAgainst our Invoice No: OLD-100\nGrand Total: 1,180.00\n"
+
+        parsed = parse_invoice(text=text)
+
+        assert parsed.invoice_number is None
+        assert any("invoice number" in warning.lower() for warning in parsed.warnings)
+
+    def test_the_reference_word_has_to_be_next_to_the_label(self):
+        # Every Indian invoice is printed in triplicate and says so. Read
+        # "ORIGINAL" anywhere on the line as a reference to an original
+        # *invoice* and the number comes off every document laid out this way.
+        text = "ORIGINAL FOR RECIPIENT    Invoice No: MINE-41\n"
+
+        assert parse_heuristic(text).invoice_number == "MINE-41"
+
+    def test_a_reference_on_the_line_above_does_not_reach_down_to_this_one(self):
+        text = "Against our Invoice No.\nInvoice No: MINE-41\n"
+
+        assert parse_heuristic(text).invoice_number == "MINE-41"
+
+    def test_a_revised_invoice_keeps_its_own_number(self):
+        # Rule 53(1) heads the document "Revised Invoice" and gives it its own
+        # serial; the document it replaces is named separately as the original.
+        # So "Revised" introduces the number being read, not a citation.
+        text = "REVISED INVOICE\nOriginal Invoice No: OLD-1\nRevised Invoice No: R-9\n"
+
+        assert parse_heuristic(text).invoice_number == "R-9"
+
+    def test_an_ordinary_invoice_with_nothing_to_cite_is_untouched(self):
+        assert parse_heuristic(INTRASTATE_INVOICE).invoice_number == "MH/2026/118"
+
+    def test_the_wrong_number_would_have_reached_the_stored_invoice(self):
+        # Why it matters at all: the field is not cosmetic, it is what the
+        # register, reconciliation and duplicate detection all key on.
+        text = INTRASTATE_INVOICE.replace(
+            "Invoice No: MH/2026/118",
+            "Against our Invoice No: MH/2025/004\nInvoice No: MH/2026/118",
+        )
+
+        assert parse_invoice(text=text).invoice_number == "MH/2026/118"
+
+
+class TestALabelWithNothingBesideItReadsNoNumber:
+    """The separator ran past the end of the line and took the next word.
+
+    A document does not always print the value beside the label. A tabular
+    layout heads its columns and puts the values on the row below; a wrapped
+    line leaves the label alone at the end of one. The separator between label
+    and value was any run of whitespace, and whitespace includes the line break,
+    so the pattern carried on to the next line and returned the first word it
+    found there.
+
+    What came back was never nothing — it was "Date", "Bill", "Total", "of":
+    strings that look like data in the one field nothing downstream can check.
+    It files into GSTR-1 as ``inum``, reconciliation matches a GSTR-2B row on
+    it, and duplicate detection keys on it.
+    """
+
+    @pytest.mark.parametrize(
+        ("text", "was"),
+        [
+            ("Invoice No.\nDate: 02/05/2026\n", "Date"),
+            ("Invoice No :\nBill To: ACME TRADERS\n", "Bill"),
+            ("Bill No.\nTotal: 500.00\n", "Total"),
+            ("TAX INVOICE\nNo. of Packages: 12\n", "of"),
+            ("Tax Invoice No\nDated 02/05/2026\n", "Dated"),
+        ],
+    )
+    def test_the_word_on_the_next_line_is_not_this_document_s_number(self, text, was):
+        parsed = parse_heuristic(text)
+
+        assert parsed.invoice_number != was
+        assert parsed.invoice_number is None
+
+    def test_a_column_heading_does_not_hand_back_the_heading_beside_it(self):
+        # Same failure without a line break in it: the value position holds the
+        # next column's label, and the value row is nowhere near it.
+        text = "Invoice No.   Invoice Date\nMH/2026/118   02/05/2026\n"
+
+        assert parse_heuristic(text).invoice_number is None
+
+    @pytest.mark.parametrize(
+        "placeholder",
+        ["Invoice No: NA\n", "Invoice No: TBD\n", "Invoice No: None\n"],
+    )
+    def test_a_word_with_no_digit_in_it_is_not_a_serial(self, placeholder):
+        # Rule 46(b) makes the number a consecutive serial, and a placeholder
+        # is not one — it would key duplicate detection for every document the
+        # supplier ever sends with the box left unfilled.
+        assert parse_heuristic(placeholder).invoice_number is None
+
+    def test_one_letter_after_a_confirmed_label_is_still_a_number(self):
+        # A first-year series. It reaches here only through the branch that
+        # saw a "No" token, which a column heading's neighbour does not.
+        assert parse_heuristic("Invoice No.: A\n").invoice_number == "A"
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            ("Invoice No: MH/2026/118", "MH/2026/118"),
+            ("Invoice No.: INV-001", "INV-001"),
+            ("Invoice No :- 5", "5"),
+            ("Bill No. 42", "42"),
+            ("Tax Invoice No: CD/99", "CD/99"),
+            ("Invoice #A-9", "A-9"),
+            ("Invoice No\tMH-3", "MH-3"),
+            ("Invoice No.: MH-1", "MH-1"),
+        ],
+    )
+    def test_a_value_printed_beside_its_label_is_read_as_before(self, line, expected):
+        # Including the non-breaking space a PDF extractor emits, which is why
+        # the restriction is "not a line break" rather than "a space or a tab".
+        assert parse_heuristic(f"{line}\n").invoice_number == expected
+
+    def test_the_document_below_a_lone_label_is_still_read(self):
+        # The label with nothing beside it must not take the real number out of
+        # the rest of the page either.
+        text = "Invoice No.\nDate: 02/05/2026\nInvoice No: MH-7\n"
+
+        assert parse_heuristic(text).invoice_number == "MH-7"
+
+    def test_the_whole_invoice_is_unaffected(self):
+        assert parse_heuristic(INTRASTATE_INVOICE).invoice_number == "MH/2026/118"
+
+    def test_the_reviewer_is_told_the_number_is_missing(self):
+        # The trade this makes only holds if the blank is visible: nothing is
+        # gained by refusing "Date" and then filing the invoice silently.
+        parsed = parse_invoice(text="Invoice No.\nDate: 02/05/2026\nGrand Total: 500.00\n")
+
+        assert parsed.invoice_number is None
+        assert any("invoice number" in warning.lower() for warning in parsed.warnings)
+
+
+class TestRCMIsTheSameQuestionAsReverseCharge:
+    """The acronym is often the only wording on the page, and it read as "no".
+
+    Rule 46(p) requires the answer on the face of every tax invoice, but not the
+    words: pre-printed forms have a box to fit, so "Tax payable under RCM: Yes"
+    is as common as the phrase spelt out. None of those contained "reverse
+    charge", so they matched nothing and fell to the field's default — ``False``,
+    indistinguishable from an invoice that says the answer is no.
+
+    A missed yes is the expensive direction. The invoice is then marked
+    creditable (``itc_eligible and not reverse_charge``) and the business claims
+    credit for tax it never paid and still owes; on a sale it prints
+    ``rchrg: "N"`` into the customer's GSTR-2B, so both parties drop the same
+    liability at once.
+    """
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Tax payable under RCM: Yes",
+            "RCM Applicable: Yes",
+            "RCM Applicable - Y",
+            "Whether tax is payable under RCM (Y/N): Y",
+            "RCM: Y",
+            "Whether GST is payable under reverse charge (RCM): Yes",
+            "Reverse Charge (RCM): Yes",
+        ],
+    )
+    def test_an_answer_of_yes_flags_the_invoice_however_it_is_spelt(self, line):
+        assert parse_heuristic(f"Invoice No: A-1\n{line}\n").reverse_charge is True
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Tax payable under RCM: No",
+            "RCM Applicable: No",
+            "Whether tax is payable under RCM (Y/N): N",
+            "RCM: Not Applicable",
+            "Whether GST is payable under reverse charge (RCM): No",
+        ],
+    )
+    def test_an_answer_of_no_still_leaves_the_invoice_ordinary(self, line):
+        assert parse_heuristic(f"Invoice No: A-1\n{line}\n").reverse_charge is False
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "RCM ENTERPRISES PRIVATE LIMITED",
+            "Sold By: RCM Yarn Traders",
+            "Bank: RCM Co-operative Bank, Latur",
+        ],
+    )
+    def test_the_letters_in_a_trade_name_declare_nothing(self, line):
+        # The acronym cannot fire on its own: what follows a name is more name,
+        # which is not an answer, and a label with no answer matches nothing.
+        assert parse_heuristic(f"{line}\nInvoice No: A-1\n").reverse_charge is False
+
+    def test_the_phrase_spelt_out_is_unchanged(self):
+        assert parse_heuristic("Reverse Charge (Y/N): Y\n").reverse_charge is True
+        assert parse_heuristic("Whether Reverse Charge Applicable: No\n").reverse_charge is False
+
+    def test_an_invoice_that_says_nothing_is_still_ordinary(self):
+        assert parse_heuristic(INTRASTATE_INVOICE).reverse_charge is False
+
+    def test_the_flag_reaches_the_stored_invoice(self):
+        # Why the field matters: it is what takes the invoice's tax out of the
+        # credit pool and puts it into 3.1(d) as a liability to settle in cash.
+        text = INTRASTATE_INVOICE.replace(
+            "TAX INVOICE", "TAX INVOICE\nWhether tax is payable under RCM (Y/N): Y"
+        )
+
+        assert parse_invoice(text=text).reverse_charge is True
