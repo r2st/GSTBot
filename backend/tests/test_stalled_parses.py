@@ -21,6 +21,7 @@ about, while not one rupee of any return moves.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
@@ -30,6 +31,10 @@ from app.models.business import Business
 from app.models.invoice import UNREADABLE_STATUSES, Invoice, InvoiceStatus, InvoiceType
 from app.services import invoice_service
 from app.services.invoice_service import STALLED_PARSE_MESSAGE, reap_stalled_parses
+
+
+class _SweepRetry(Exception):
+    """Stands in for celery.exceptions.Retry, which is what ``.retry()`` raises."""
 
 
 def _invoice(db_session, business, *, status, age_seconds=0, **overrides) -> Invoice:
@@ -356,3 +361,168 @@ class TestTheScheduledTask:
         assert invoice_tasks.reap_stalled_parses_task() == {"reaped": 1}
         # A leaked connection in a long-lived worker never comes back.
         assert closed == [True]
+
+
+class TestTheSweepFailingAltogether:
+    """What happens when the sweep itself cannot run.
+
+    The sweep is the only thing that notices a stranded row, so its own failure
+    is the failure that makes the invisibility above permanent. Its sibling
+    ``parse_invoice_task`` has a class each for the retry boundary and the
+    session lifecycle (see :mod:`tests.test_invoice_tasks`); this one had only
+    its happy path, so the ``except`` that decides between "retried" and
+    "swallowed" was running in production having never run here.
+
+    The distinction matters more for the sweep than for the parse. A parse that
+    gives up leaves a row saying ``failed``, which is on the dashboard's
+    needs-review count and in the register with a red chip. A sweep that gives
+    up leaves nothing at all — the stranded rows keep saying "Processing", and
+    the next hourly run is the only thing between them and forever.
+    """
+
+    @pytest.fixture()
+    def task(self, monkeypatch):
+        """Record ``self.retry()`` on the real registered task.
+
+        Celery binds ``self`` itself, so there is no fake to hand in; patching
+        retry on the registered object is what makes the decision observable
+        without a broker, and keeps the code under test the object the worker
+        actually runs.
+        """
+        from app.tasks import invoice_tasks
+
+        retries: list[BaseException | None] = []
+
+        def fake_retry(exc=None, **kwargs):
+            retries.append(exc)
+            raise _SweepRetry
+
+        monkeypatch.setattr(invoice_tasks.reap_stalled_parses_task, "retry", fake_retry)
+        return SimpleNamespace(retries=retries)
+
+    @pytest.fixture()
+    def sessions(self, monkeypatch, db_session):
+        """Count the sessions the task opens and closes."""
+        from app.tasks import invoice_tasks
+
+        counts = {"opened": 0, "closed": 0}
+
+        class _Handle:
+            def __init__(self):
+                counts["opened"] += 1
+
+            def __getattr__(self, name):
+                return getattr(db_session, name)
+
+            def close(self):
+                counts["closed"] += 1
+
+        monkeypatch.setattr(invoice_tasks, "SessionLocal", _Handle)
+        return counts
+
+    def test_an_unreachable_database_is_retried_rather_than_swallowed(
+        self, monkeypatch, task, sessions
+    ):
+        # The case the retry is actually for. Swallowed, the beat schedule's
+        # next run is an hour away and this hour's stranded rows stay invisible
+        # for two; retried, they are picked up five minutes later.
+        from app.tasks import invoice_tasks
+
+        boom = OSError("could not connect to the database")
+        monkeypatch.setattr(
+            invoice_service,
+            "reap_stalled_parses",
+            lambda db: (_ for _ in ()).throw(boom),
+        )
+
+        with pytest.raises(_SweepRetry):
+            invoice_tasks.reap_stalled_parses_task()
+        assert task.retries == [boom]
+
+    def test_the_original_exception_is_handed_to_the_retry(
+        self, monkeypatch, task, sessions
+    ):
+        # Celery reads it to decide whether the failure is retryable at all,
+        # and to record the traceback on the final attempt.
+        from app.tasks import invoice_tasks
+
+        boom = ValueError("something specific")
+        monkeypatch.setattr(
+            invoice_service,
+            "reap_stalled_parses",
+            lambda db: (_ for _ in ()).throw(boom),
+        )
+
+        with pytest.raises(_SweepRetry):
+            invoice_tasks.reap_stalled_parses_task()
+        assert task.retries[0] is boom
+
+    def test_the_failure_is_logged_with_a_traceback(self, monkeypatch, task, sessions, caplog):
+        # Nobody is waiting on this task, so the log is the only place its
+        # failure is ever stated.
+        from app.tasks import invoice_tasks
+
+        monkeypatch.setattr(
+            invoice_service,
+            "reap_stalled_parses",
+            lambda db: (_ for _ in ()).throw(RuntimeError("boom")),
+        )
+        with caplog.at_level("ERROR"), pytest.raises(_SweepRetry):
+            invoice_tasks.reap_stalled_parses_task()
+        assert "reap_stalled_parses_task failed" in caplog.text
+        assert "RuntimeError" in caplog.text
+
+    def test_the_session_is_closed_when_the_sweep_retries(self, monkeypatch, task, sessions):
+        # The path most likely to leak: the exception leaves through a raise,
+        # so only the finally block can close the session. This task runs every
+        # hour forever, so a connection leaked here is leaked on a timer.
+        from app.tasks import invoice_tasks
+
+        monkeypatch.setattr(
+            invoice_service,
+            "reap_stalled_parses",
+            lambda db: (_ for _ in ()).throw(OSError("gone")),
+        )
+        with pytest.raises(_SweepRetry):
+            invoice_tasks.reap_stalled_parses_task()
+        assert sessions == {"opened": 1, "closed": 1}
+
+    def test_each_run_opens_exactly_one_session(self, monkeypatch, task, sessions):
+        from app.tasks import invoice_tasks
+
+        monkeypatch.setattr(invoice_service, "reap_stalled_parses", lambda db: 0)
+        invoice_tasks.reap_stalled_parses_task()
+        invoice_tasks.reap_stalled_parses_task()
+        assert sessions == {"opened": 2, "closed": 2}
+
+
+class TestTheSweepsRegistration:
+    """The wiring that decides whether the sweep runs at all."""
+
+    def test_it_is_registered_under_the_name_the_beat_schedule_sends(self):
+        # The schedule enqueues "invoices.reap_stalled" by name; a rename on
+        # either side leaves the sweep never running, and the symptom is
+        # invisible by construction — stranded rows simply stay stranded.
+        from app.tasks import invoice_tasks
+
+        assert "invoices.reap_stalled" in invoice_tasks.celery_app.tasks
+
+    def test_it_is_bound_so_self_carries_the_retry(self):
+        # bind=True is what makes self.retry() available inside the task;
+        # without it the except above raises AttributeError instead.
+        from app.tasks import invoice_tasks
+
+        registered = invoice_tasks.celery_app.tasks["invoices.reap_stalled"]
+        assert registered.run.__self__ is registered
+
+    def test_the_retry_budget_is_finite_and_shorter_than_the_schedule(self):
+        # An unbounded retry against a database that is down is a worker stuck
+        # in a loop. The budget also has to expire well inside the hourly
+        # schedule: the sweep is idempotent and runs again anyway, so retrying
+        # past the next run would have two sweeps going at once.
+        from app.tasks import invoice_tasks
+
+        registered = invoice_tasks.celery_app.tasks["invoices.reap_stalled"]
+        assert registered.max_retries == 2
+        assert registered.default_retry_delay == 300
+        assert registered.max_retries * registered.default_retry_delay < 3600
