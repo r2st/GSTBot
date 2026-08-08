@@ -340,7 +340,7 @@ class TestPerAccountLoginThrottle:
         ]
 
     def test_one_account_is_capped_however_many_addresses_attack_it(
-        self, client, auth_client, rate_limited, monkeypatch
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
     ):
         from app.core.config import settings
 
@@ -353,7 +353,7 @@ class TestPerAccountLoginThrottle:
         assert statuses[10:] == [429] * 4
 
     def test_the_refusal_says_when_to_come_back(
-        self, client, auth_client, rate_limited, monkeypatch
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
     ):
         from app.core.config import settings
 
@@ -371,7 +371,7 @@ class TestPerAccountLoginThrottle:
         assert blocked.json()["error"]["code"] == "rate_limited"
 
     def test_a_blocked_attempt_is_refused_before_any_hashing(
-        self, client, auth_client, rate_limited, monkeypatch
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
     ):
         """The work per attempt is what a stuffing run is buying. Checking the
         budget after the bcrypt round would still refuse the attacker and still
@@ -394,7 +394,7 @@ class TestPerAccountLoginThrottle:
         assert calls == []
 
     def test_the_right_password_hands_the_budget_back(
-        self, client, auth_client, rate_limited, monkeypatch
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
     ):
         """Without this refund the counter is a lockout weapon: anyone who
         knows an email address could spend its owner's budget on their behalf
@@ -413,7 +413,7 @@ class TestPerAccountLoginThrottle:
         assert statuses == [401] * 10
 
     def test_a_deactivated_account_still_gets_its_budget_back(
-        self, client, auth_client, db_session, rate_limited, monkeypatch
+        self, client, auth_client, db_session, rate_limited, pinned_window, monkeypatch
     ):
         """The 403 is about what the account may do, not about whether the
         caller is who they say. Withholding the refund here would leave exactly
@@ -432,7 +432,7 @@ class TestPerAccountLoginThrottle:
         assert statuses == [401] * 10
 
     def test_changing_the_case_of_the_address_does_not_mint_a_new_budget(
-        self, client, auth_client, rate_limited, monkeypatch
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
     ):
         """The lookup folds the address to lower case, so the counter has to
         fold it the same way — otherwise the budget is bypassed by typing the
@@ -446,7 +446,7 @@ class TestPerAccountLoginThrottle:
         assert self._login(client, f"  {TEST_EMAIL}  ", "wrong-password").status_code == 429
 
     def test_an_address_with_no_account_is_throttled_the_same_way(
-        self, client, rate_limited, monkeypatch
+        self, client, rate_limited, pinned_window, monkeypatch
     ):
         """Otherwise the throttle is itself the enumeration oracle the
         identical 401 body exists to close: guess eleven times, and whether the
@@ -461,7 +461,7 @@ class TestPerAccountLoginThrottle:
         assert statuses == [401] * 10 + [429] * 2
 
     def test_two_accounts_have_two_budgets(
-        self, client, auth_client, other_tenant, rate_limited, monkeypatch
+        self, client, auth_client, other_tenant, rate_limited, pinned_window, monkeypatch
     ):
         """One shared pool would mean any user could lock out every other."""
         from app.core.config import settings
@@ -472,7 +472,7 @@ class TestPerAccountLoginThrottle:
         assert self._login(client, "rival@example.com", "wrong-password").status_code == 401
 
     def test_the_budget_is_tunable_without_a_deploy(
-        self, client, auth_client, rate_limited, monkeypatch
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
     ):
         """An operator watching a stuffing run needs to be able to tighten this
         from the environment, under the name the limiter registers it as."""
@@ -483,6 +483,56 @@ class TestPerAccountLoginThrottle:
 
         statuses = [r.status_code for r in self._fail_from_many_addresses(client, TEST_EMAIL, 4)]
         assert statuses == [401, 401, 429, 429]
+
+    def test_the_budget_comes_back_when_the_window_rolls(
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
+    ):
+        """A lockout that never lifted would be a denial-of-service anyone
+        could aim at any address they knew.
+
+        This is also the property that made every other test in this class
+        flaky before the clock was pinned: the window is fifteen minutes cut
+        against the wall clock, not fifteen minutes from the first attempt, so
+        a burst that happens to straddle a boundary gets its budget refilled
+        halfway through and the tail of it comes back 401 instead of 429.
+        """
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "trust_proxy_headers", True)
+        self._fail_from_many_addresses(client, TEST_EMAIL, 11)
+        assert self._login(client, TEST_EMAIL, "wrong-password").status_code == 429
+
+        pinned_window(15 * 60)
+
+        # A whole fresh budget, and the correct password works again.
+        statuses = [r.status_code for r in self._fail_from_many_addresses(client, TEST_EMAIL, 10)]
+        assert statuses == [401] * 10
+
+    def test_a_burst_across_a_boundary_gets_two_budgets(
+        self, client, auth_client, rate_limited, pinned_window, monkeypatch
+    ):
+        """The known cost of a fixed window, recorded rather than discovered.
+
+        An attacker who lines a run up with the boundary gets twenty guesses in
+        quick succession, not ten — ten at the end of one window and ten at the
+        start of the next. That is the tradeoff the module docstring takes
+        deliberately (a sliding window costs a Lua script), so it belongs in a
+        test: if someone later swaps the implementation, this is the assertion
+        that tells them the burst behaviour changed.
+        """
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "trust_proxy_headers", True)
+
+        pinned_window(15 * 60 - 1)  # One second before the roll.
+        spent = [r.status_code for r in self._fail_from_many_addresses(client, TEST_EMAIL, 10)]
+        pinned_window(1)  # Over it.
+        refilled = [r.status_code for r in self._fail_from_many_addresses(client, TEST_EMAIL, 10)]
+
+        assert spent == [401] * 10
+        assert refilled == [401] * 10
+        # And the eleventh in the new window is still refused.
+        assert self._login(client, TEST_EMAIL, "wrong-password").status_code == 429
 
     def test_turning_rate_limiting_off_turns_this_off_too(
         self, client, auth_client, monkeypatch

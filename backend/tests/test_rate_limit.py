@@ -11,34 +11,8 @@ import pytest
 
 from app.core.ratespec import Rate, parse_rate
 
-
-@pytest.fixture
-def pinned_window(monkeypatch):
-    """Stop the clock just after a window opens, and hand back a way to move it.
-
-    The windows are fixed and aligned to the wall clock, so a burst that takes
-    real seconds can straddle a boundary and have its budget refilled halfway
-    through — the assertion then fails for the calendar rather than for the
-    limiter. That went from theoretical to routine once a login against an
-    unknown address started paying a full bcrypt round, which is deliberate and
-    makes a twenty-five request burst take about five seconds.
-
-    Returns ``advance(seconds)`` so a test can also step *over* a boundary on
-    purpose, which is the only way to assert a rollover without sleeping for a
-    minute.
-    """
-    from app.core import rate_limit
-
-    # An exact multiple of 86400, and so of every window the parser can
-    # produce, which means every rate starts a fresh window at this instant
-    # rather than landing partway through one.
-    now = [1_799_971_200.0]
-    monkeypatch.setattr(rate_limit, "_clock", lambda: now[0])
-
-    def advance(seconds: float) -> None:
-        now[0] += seconds
-
-    return advance
+# ``pinned_window`` lives in conftest.py: the login tests in test_auth.py need
+# the same clock pinned for the same reason.
 
 
 class TestParseRate:

@@ -162,6 +162,41 @@ def rate_limited(monkeypatch):
 
 
 @pytest.fixture()
+def pinned_window(monkeypatch):
+    """Stop the clock just after a window opens, and hand back a way to move it.
+
+    The windows are fixed and aligned to the wall clock, so a burst that takes
+    real seconds can straddle a boundary and have its budget refilled halfway
+    through — the assertion then fails for the calendar rather than for the
+    limiter. That went from theoretical to routine once a login against an
+    unknown address started paying a full bcrypt round, which is deliberate and
+    makes a twenty-five request burst take about five seconds.
+
+    Returns ``advance(seconds)`` so a test can also step *over* a boundary on
+    purpose, which is the only way to assert a rollover without sleeping for a
+    minute.
+
+    Lives here rather than beside the limiter's own tests because the burst
+    that made this necessary is a *login* burst: the per-account budget is
+    ``10/15m``, so anything asserting on an exact sequence of 401s and 429s is
+    betting the whole burst lands inside one fifteen-minute window. It does,
+    about 997 times in 1000.
+    """
+    from app.core import rate_limit
+
+    # An exact multiple of 86400, and so of every window the parser can
+    # produce, which means every rate starts a fresh window at this instant
+    # rather than landing partway through one.
+    now = [1_799_971_200.0]
+    monkeypatch.setattr(rate_limit, "_clock", lambda: now[0])
+
+    def advance(seconds: float) -> None:
+        now[0] += seconds
+
+    return advance
+
+
+@pytest.fixture()
 def auth_client(client):
     """A registered, logged-in client with the Authorization header set."""
     response = client.post(
