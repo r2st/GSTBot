@@ -106,6 +106,7 @@ function mockApi({
   filingStatusStatus = 200,
   onRecordFiled,
   recordFailure,
+  exportFailure,
 } = {}) {
   global.fetch = vi.fn(async (url, options) => {
     const href = String(url);
@@ -129,6 +130,14 @@ function mockApi({
       };
     }
     if (href.includes("/filing/export/")) {
+      if (exportFailure) {
+        return {
+          ok: false,
+          status: exportFailure.status ?? 500,
+          statusText: "Error",
+          text: async () => JSON.stringify(exportFailure.body ?? {}),
+        };
+      }
       return {
         ok: true,
         status: 200,
@@ -376,6 +385,38 @@ describe("FilingPage", () => {
     expect(URL.createObjectURL).toHaveBeenCalled();
     // The object URL is released rather than leaked once the click is done.
     expect(URL.revokeObjectURL).toHaveBeenCalled();
+  });
+
+  it("says so when the export cannot be produced", async () => {
+    // The download is the point of this screen: the JSON is what gets uploaded
+    // to the portal, and a business that believes it has the file stops
+    // looking for it. A failure that leaves the button enabled and the page
+    // silent is indistinguishable from a browser that saved the file quietly —
+    // right up to the deadline.
+    const user = userEvent.setup();
+    mockApi({ exportFailure: { status: 409, body: { detail: "Period is not yet complete" } } });
+    renderPage();
+
+    await loaded();
+    await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
+
+    expect(await screen.findByText("Period is not yet complete")).toBeInTheDocument();
+    // Nothing was handed to the browser to save.
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("lets the download be retried after one fails", async () => {
+    // `busy` gates every button on the panel, so a failure that skipped the
+    // reset would leave the screen with no way to try again short of a reload.
+    const user = userEvent.setup();
+    mockApi({ exportFailure: { status: 500, body: { detail: "Export failed" } } });
+    renderPage();
+
+    await loaded();
+    await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
+
+    expect(await screen.findByText("Export failed")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Download GSTR-1 JSON/i })).toBeEnabled();
   });
 
   it("asks for CSV separately from JSON", async () => {
