@@ -277,3 +277,114 @@ describe("AlertsPage", () => {
     expect(await screen.findByRole("button", { name: /Open \(2\)/ })).toBeInTheDocument();
   });
 });
+
+describe("an action that outlives the tab it was started on", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** A fetch whose *dismiss* call is held open until the test releases it. */
+  function heldDismiss({ openList, closedList }) {
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    const fetch = vi.fn(async (url, options) => {
+      const body = (data) => ({
+        ok: true,
+        status: 200,
+        statusText: "",
+        text: async () => JSON.stringify(data),
+      });
+      if (options?.method === "POST" || String(url).includes("/dismiss")) {
+        await held;
+        return body(alert({ id: 1, status: "dismissed" }));
+      }
+      return body(String(url).includes("scope=closed") ? closedList : openList);
+    });
+    global.fetch = fetch;
+    return { fetch, release: () => release() };
+  }
+
+  it("does not pull the row out of the tab it now belongs to", async () => {
+    // Dismissing under "Open" and stepping to "Closed" while the request is
+    // still going: the answer describes the open list, which is gone. Applied
+    // to the closed list it removed the very alert that had just earned its
+    // place there.
+    const { fetch, release } = heldDismiss({
+      openList: page([alert({ id: 1 })]),
+      closedList: page([alert({ id: 1, status: "dismissed" })]),
+    });
+    renderPage();
+
+    await screen.findByText(/is overdue/);
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await userEvent.click(screen.getByRole("button", { name: "Closed" }));
+    await waitFor(() => expect(fetch.mock.calls.at(-1)[0]).toContain("scope=closed"));
+
+    release();
+
+    // The closed tab keeps the alert the server says is closed.
+    expect(await screen.findByText("Dismissed")).toBeInTheDocument();
+  });
+
+  it("does not take the same alert off the open count twice", async () => {
+    // The reload for the new tab already set `open_total` from the server, so
+    // a late decrement on top of it takes off one that had already gone — and
+    // the badge then under-reports the backlog until the next load.
+    const { fetch, release } = heldDismiss({
+      openList: page([alert({ id: 1 }), alert({ id: 2 }), alert({ id: 3 })]),
+      closedList: page([alert({ id: 1, status: "dismissed" })], { open_total: 2 }),
+    });
+    renderPage();
+
+    await screen.findByRole("button", { name: /Open \(3\)/ });
+    await userEvent.click(screen.getAllByRole("button", { name: "Dismiss" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: "Closed" }));
+    await waitFor(() => expect(fetch.mock.calls.at(-1)[0]).toContain("scope=closed"));
+
+    release();
+    await screen.findByText("Dismissed");
+
+    // Two left open, not one.
+    expect(screen.getByRole("button", { name: /Open \(2\)/ })).toBeInTheDocument();
+  });
+
+  it("still says so when the action itself failed", async () => {
+    // Held until after the tab has changed, so the rejection lands in the same
+    // window the two tests above are about. Unlike a superseded load, this is
+    // something the user asked for — it failing is worth saying wherever they
+    // happen to be standing, so it is the one thing that outlives the tab.
+    let reject;
+    const held = new Promise((_resolve, r) => {
+      reject = r;
+    });
+    const fetch = vi.fn(async (url, options) => {
+      const body = (data, status = 200) => ({
+        ok: status < 300,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(data),
+      });
+      if (options?.method === "POST") {
+        await held;
+        return body({}, 500);
+      }
+      return body(String(url).includes("scope=closed") ? page([]) : page([alert({ id: 1 })]));
+    });
+    global.fetch = fetch;
+    renderPage();
+
+    await screen.findByText(/is overdue/);
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await userEvent.click(screen.getByRole("button", { name: "Closed" }));
+    await waitFor(() => expect(fetch.mock.calls.at(-1)[0]).toContain("scope=closed"));
+
+    reject(new Error("the network went away"));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/the network went away/);
+  });
+});

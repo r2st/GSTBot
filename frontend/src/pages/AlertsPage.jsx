@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonPanel } from "../components/Skeleton";
@@ -108,6 +108,11 @@ export default function AlertsPage() {
   // nine — clearing a backlog is one row at a time, and that is the whole
   // interaction this screen exists for.
   const [pending, setPending] = useState(null);
+  // Which scope the list on screen is showing, readable from a callback that
+  // has been waiting on the network. The tabs stay live while an action is in
+  // flight, so `scope` closed over at click time is the tab the action was
+  // *started* from — the one thing the answer must not assume is still up.
+  const shownScope = useRef(scope);
 
   const load = useCallback(async (target, { signal } = {}) => {
     setLoading(true);
@@ -131,6 +136,7 @@ export default function AlertsPage() {
   // leave closed alerts under an "Open" tab.
   useEffect(() => {
     const controller = new AbortController();
+    shownScope.current = scope;
     load(scope, { signal: controller.signal });
     return () => controller.abort();
   }, [load, scope]);
@@ -145,15 +151,35 @@ export default function AlertsPage() {
    * "Dismissed" — losing exactly the distinction the two statuses exist for.
    */
   async function apply(id, action) {
+    const target = scope;
     setPending(id);
     setError("");
     try {
       const updated = await action(id);
+
+      // Both edits below describe the list this action was started over. If
+      // the user has since changed tab, that list is gone and a fresh one has
+      // been fetched — so neither edit has anywhere honest to land.
+      //
+      // The row edit would land on the wrong list: dismissing under "Open"
+      // and stepping to "Closed" mid-flight removed the alert from the closed
+      // list, which is the one tab it now belongs on. And the count edit
+      // would land twice, because the reload already set `open_total` from
+      // the server — so the badge lost one it had already lost and went on
+      // under-reporting the backlog until the next load.
+      //
+      // Dropped rather than reconciled. The action itself has been applied
+      // server-side and the freshly loaded list is what the server says, so
+      // what is on screen is merely a moment stale rather than wrong — and a
+      // stale list corrects itself on the next load, where a wrong count does
+      // not announce itself at all.
+      if (shownScope.current !== target) return;
+
       setItems((prev) =>
         // Under the open scope an alert that just closed no longer belongs in
         // the list it is sitting in, so it leaves rather than lingering as a
         // row the filters say should not be there.
-        scope === "open" && !["pending", "sent", "read", "failed"].includes(updated.status)
+        target === "open" && !["pending", "sent", "read", "failed"].includes(updated.status)
           ? prev.filter((alert) => alert.id !== id)
           : prev.map((alert) => (alert.id === id ? updated : alert)),
       );
@@ -166,6 +192,9 @@ export default function AlertsPage() {
           : Math.max(0, total - 1),
       );
     } catch (err) {
+      // Kept whatever tab is up, unlike the two edits above. This is not a
+      // superseded load whose view has gone — the user asked for this action
+      // and it failed, and that is worth saying wherever they are standing.
       setError(err.message);
     } finally {
       setPending(null);
