@@ -1535,6 +1535,51 @@ class TestANumberQuotedFromAnotherDocumentIsNotThisOne:
         assert parse_invoice(text=text).invoice_number == "MH/2026/118"
 
 
+class TestTheEWayBillNumberIsNotTheInvoiceNumber:
+    """The consignment's number is printed above the invoice's, and won.
+
+    An e-way bill is required for most consignments over ₹50,000 and its number
+    is printed at the top of the invoice it travels with, in the same block as
+    the IRN. "Bill" is one of the labels the number pattern reads and nothing
+    in it looked at what came before, so the invoice was stored under a
+    transport document's number.
+
+    Twelve digits are as plausible as any serial, so nothing downstream
+    objects: GSTR-1 files the supply under it, the supplier's real GSTR-2B row
+    matches nothing, and duplicate detection keys on a value that changes with
+    every consignment.
+    """
+
+    @pytest.mark.parametrize(
+        "spelling",
+        [
+            "E-Way Bill No: 123456789012",
+            "E Way Bill No: 123456789012",
+            "EWay Bill No. 123456789012",
+            "Way Bill No 123456789012",
+            "Waybill No: 123456789012",
+        ],
+    )
+    def test_the_invoice_s_own_number_is_read_past_it(self, spelling):
+        text = f"{spelling}\nInvoice No: MH/2026/118\nGrand Total: 59,000.00\n"
+
+        assert parse_heuristic(text).invoice_number == "MH/2026/118"
+
+    def test_a_consignment_number_alone_is_not_promoted_to_the_invoice(self):
+        text = "E-Way Bill No: 123456789012\nGrand Total: 59,000.00\n"
+
+        assert parse_heuristic(text).invoice_number is None
+
+    def test_a_bill_of_supply_still_carries_its_own_number(self):
+        # Rule 49: a composition dealer issues these and nothing else, so a
+        # pattern that cannot read one leaves every document they send unnumbered.
+        assert parse_heuristic("Bill of Supply No: 5\n").invoice_number == "5"
+        assert parse_heuristic("Bill of Supply No.: BOS/26/9\n").invoice_number == "BOS/26/9"
+
+    def test_a_plain_bill_number_is_unchanged(self):
+        assert parse_heuristic("Bill No. 42\n").invoice_number == "42"
+
+
 class TestALabelWithNothingBesideItReadsNoNumber:
     """The separator ran past the end of the line and took the next word.
 

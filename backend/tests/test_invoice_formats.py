@@ -571,6 +571,51 @@ Grand Total: 59,000.00
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
     Layout(
+        name="an e-way bill number in the block above the invoice number",
+        text=f"""\
+YAVATMAL COTTON TRADERS
+GSTIN: {SUPPLIER_GSTIN_OTHER_STATE}
+Tax Invoice
+E-Way Bill No: 123456789012   Date: 12/10/2026
+Invoice No: YCT/26/443
+Invoice Date: 12/10/2026
+Taxable Value: 5,00,000.00
+IGST @ 18% 90,000.00
+Total Invoice Value 5,90,000.00
+""",
+        # Twelve digits above the real number, on a label the pattern reads.
+        invoice_number="YCT/26/443",
+        invoice_date=date(2026, 10, 12),
+        taxable_value=money("500000.00"),
+        total_value=money("590000.00"),
+        igst=money("90000.00"),
+        tax_rate=Decimal("18"),
+        supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+    ),
+    Layout(
+        name="a composition dealer's bill of supply",
+        text=f"""\
+DHULE PROVISION STORES
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+BILL OF SUPPLY
+Bill of Supply No: BOS/26/118
+Invoice Date: 14/10/2026
+Taxable Value: 8,000.00
+Grand Total: 8,000.00
+Composition taxable person, not eligible to collect tax on supplies
+""",
+        # Rule 49 puts this in place of a tax invoice, and a dealer on the
+        # composition scheme issues nothing else — so a number pattern that
+        # cannot read one leaves every document they send unnumbered.
+        invoice_number="BOS/26/118",
+        invoice_date=date(2026, 10, 14),
+        taxable_value=money("8000.00"),
+        total_value=money("8000.00"),
+        # No tax is charged on a bill of supply, which is the point of it.
+        absent=("cgst", "sgst", "igst", "cess"),
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
         name="the triplicate marking printed beside the number",
         text=f"""\
 HINGOLI PAPER MILLS

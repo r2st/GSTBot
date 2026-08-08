@@ -526,13 +526,43 @@ def normalize_rate(value: object) -> Decimal | None:
 # "Invoice" — and a blank a reviewer can see beats a word that looks like data.
 _SAME_LINE_SPACE = r"[^\S\r\n]"
 
+# "Bill of Supply" is in the label because it is a document in its own right.
+# Rule 49 has it in place of a tax invoice for exempt supplies and for every
+# supply a composition dealer makes, so a business on the composition scheme
+# issues nothing else — and the words between "Bill" and "No" meant the number
+# was never found on any of them.
 _INVOICE_NO_PATTERN = re.compile(
-    rf"(?:tax{_SAME_LINE_SPACE}+invoice|invoice|inv|bill)(?:{_SAME_LINE_SPACE}|\.)*"
+    rf"(?:tax{_SAME_LINE_SPACE}+invoice|invoice|inv"
+    rf"|bill(?:{_SAME_LINE_SPACE}+of{_SAME_LINE_SPACE}+supply)?)(?:{_SAME_LINE_SPACE}|\.)*"
     r"(?:"
     rf"(?:no|number|num|#)(?:{_SAME_LINE_SPACE}|[:.\-#])*([A-Za-z0-9][A-Za-z0-9\-/]{{0,29}})"
     r"|"
     rf"[:.#](?:{_SAME_LINE_SPACE}|[:.\-#])*([A-Za-z0-9][A-Za-z0-9\-/]{{1,29}})"
     r")",
+    re.IGNORECASE,
+)
+
+
+# The other document that is printed on the face of an invoice and numbered
+# like one.
+#
+# An e-way bill is required for most consignments above ₹50,000, and its number
+# is printed at the top of the invoice it accompanies — usually above the
+# invoice's own number, in the same block as the IRN. "Bill" is one of the
+# labels :data:`_INVOICE_NO_PATTERN` reads, and nothing in it cared what came
+# before, so "E-Way Bill No: 123456789012" gave the invoice a number that
+# belongs to a transport document.
+#
+# That is the cited-number failure again with a different source, and it lands
+# the same way: a twelve-digit number is a plausible invoice number, so GSTR-1
+# files the supply under it, the supplier's real 2B row matches nothing, and
+# duplicate detection keys on a value that changes with every consignment.
+#
+# All five spellings appear in the wild, and one of them is closed up, so the
+# space between "way" and "bill" has to be optional — the pattern matches the
+# "bill" *inside* "Waybill" just as happily.
+_EWAY_PREFIX = re.compile(
+    rf"\b(?:e[\s.\-]*)?way(?:{_SAME_LINE_SPACE}|[.\-])*$",
     re.IGNORECASE,
 )
 
@@ -594,9 +624,10 @@ def _invoice_number_in(text: str) -> str | None:
     exactly one of them is filled on any match, so the caller should not have
     to know which branch fired.
 
-    Matches introduced as a reference to another document are passed over; see
-    :data:`_REFERENCE_PREFIX` for what counts as one and why the test is
-    anchored to the text immediately before the label.
+    Matches belonging to another document are passed over — one cited as a
+    reference, one carrying the consignment's e-way bill number. See
+    :data:`_REFERENCE_PREFIX` and :data:`_EWAY_PREFIX` for what counts as
+    either, and why both are anchored to the text immediately before the label.
 
     A word is passed over too — two or more characters with no digit among
     them. What such a candidate actually is, on every document that produced
@@ -615,7 +646,8 @@ def _invoice_number_in(text: str) -> str | None:
     """
     for match in _INVOICE_NO_PATTERN.finditer(text):
         line_start = text.rfind("\n", 0, match.start()) + 1
-        if _REFERENCE_PREFIX.search(text, line_start, match.start()):
+        before = (line_start, match.start())
+        if _REFERENCE_PREFIX.search(text, *before) or _EWAY_PREFIX.search(text, *before):
             continue
         value = _clean_str(match.group(1) or match.group(2), 64)
         if value is None:
