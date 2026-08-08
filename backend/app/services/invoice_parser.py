@@ -590,6 +590,90 @@ _TOTAL_PATTERN = re.compile(
 )
 _HSN_PATTERN = re.compile(r"\b(?:HSN|SAC)(?:\s*/\s*SAC)?\s*(?:code)?\s*[:.\-]?\s*(\d{4,8})\b",
                           re.IGNORECASE)
+
+# A figure carrying paise, which is the one shape that proves ``_AMOUNT``
+# matched an amount in full rather than stopping part-way through one.
+_COMPLETE_AMOUNT = re.compile(r"\d[\d,]*\.\d{2}")
+
+# The rest of a grouping something broke with a space rather than a comma — the
+# "000.00" of "1 000.00".
+#
+# It has to finish the figure and finish the line, because "a space and two or
+# three digits" on its own is far commoner as the *next* thing printed than as
+# the rest of this one. Matched loosely it read the page furniture below a
+# total as the total's own missing thousands: "Grand Total: 100000" followed by
+# a line beginning "18% GST included", or "22/09/2024", or "30 days credit" —
+# every one of which put a whole, correctly-read figure through the discard
+# below. That is this guard causing the failure it exists to prevent, from the
+# other side, and on documents far commoner than the ones it rescues.
+#
+# So the run may not cross a newline: a thousands separator misread as a space
+# is a space, never a line break. And it has to reach the end of its line,
+# optionally through paise and a trailing currency word, so that the remainder
+# of a figure ("1 000.00") is told apart from the start of the next column
+# ("5000  25 items").
+_SPACED_REMAINDER = re.compile(
+    r"(?:[ \t]\d{2,3})+(?:\.\d{2})?[ \t]*(?:INR|Rs\.?|₹)?[ \t]*$",
+    re.MULTILINE,
+)
+
+
+def _labelled_amount(pattern: re.Pattern[str], text: str) -> tuple[Decimal | None, str | None]:
+    """The amount *pattern* labels, and the text it was read from.
+
+    ``_AMOUNT`` spells a well-formed figure and stops at the first character
+    that is not part of one — but stopping is not the same as failing, and what
+    it hands back is a *prefix* rather than nothing. That is the same shape of
+    bug as :data:`_EXPONENT_SUFFIX`, reached from the other side: there the
+    mantissa of a number too wide to spell, here the front of a figure whose
+    middle the page could not spell either.
+
+    OCR is what produces them, constantly and in two ways. It reads a zero as
+    the letter O — ``1,OOO.00`` — and the pattern takes ``1,`` and leaves the
+    rest; and it reads a thousands comma as a space — ``1 000.00`` — and the
+    pattern takes ``1``. Both then pass :func:`to_money`, which is asked
+    whether the digits in hand are an amount and not whether they are the
+    *whole* amount, so a ₹1,000 invoice stores one rupee.
+
+    A tax head misread this way is at least survivable, because
+    :func:`validate` foots the total against taxable value plus tax and says so
+    when they disagree. These two fields are the ones that check is made *of*,
+    and it only runs when both are non-zero — so a document printing a grand
+    total and no taxable line, which is most receipts, stored ₹1 with no
+    warning raised and no confidence lost. Nothing anywhere downstream
+    re-derives it, and every screen then shows one rupee.
+
+    So a figure is refused unless it was read whole. It counts as whole if it
+    carries paise; failing that, it must not end mid-grouping on a comma, must
+    not run straight into a letter or digit that the pattern could not take,
+    and — when it has neither comma nor point to show it was ever grouped —
+    must not be followed by a space and the rest of its own grouping.
+
+    The caller gets the offending text back so it can say what was dropped,
+    because an empty box is only better than a wrong one when someone can tell
+    it was emptied on purpose.
+    """
+    match = pattern.search(text)
+    if match is None:
+        return None, None
+
+    figure = match.group(1)
+    tail = text[match.end():]
+    whole = _COMPLETE_AMOUNT.fullmatch(figure) is not None
+    truncated = (
+        figure.endswith(",")
+        or (not whole and tail[:1].isalnum())
+        or (
+            not whole
+            and "," not in figure
+            and _SPACED_REMAINDER.match(tail) is not None
+        )
+    )
+    if truncated:
+        # Enough of the line to show a reviewer what the page actually held.
+        seen = text[match.start(1):match.start(1) + 24].splitlines()[0].strip()
+        return None, seen
+    return to_money(figure, default=None), figure
 # "Whether the tax is payable on reverse charge basis" is required on the face
 # of every tax invoice by rule 46(p), so the answer is printed on essentially
 # all of them — and reading it backwards is expensive in both directions. A
@@ -773,10 +857,18 @@ def parse_heuristic(text: str) -> ParsedInvoice:
             if rate is not None and attr not in rates:
                 rates[attr] = rate
 
-    if match := _TAXABLE_PATTERN.search(text):
-        result.taxable_value = to_money(match.group(1)) or Decimal("0.00")
-    if match := _TOTAL_PATTERN.search(text):
-        result.total_value = to_money(match.group(1)) or Decimal("0.00")
+    # Refused rather than half-read — see :func:`_labelled_amount`. The zero
+    # left behind is said out loud, because this is the one field pair the
+    # footing check in :func:`validate` is made of and it cannot report a
+    # figure that was never stored.
+    for attr, pattern in (("taxable_value", _TAXABLE_PATTERN), ("total_value", _TOTAL_PATTERN)):
+        amount, seen = _labelled_amount(pattern, text)
+        if amount is not None:
+            setattr(result, attr, amount)
+        elif seen is not None:
+            result.warnings.append(
+                f"Discarded a partly-read {attr.replace('_', ' ')}: {seen}"
+            )
 
     # An 18% invoice is printed as 9% CGST + 9% SGST, so the invoice's rate is
     # the sum of the two halves — reporting 9 here would understate every

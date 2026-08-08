@@ -1263,6 +1263,126 @@ class TestANegativeAmountNeverReachesTheRow:
         assert "Discarded a negative igst: -9000.00" in parsed.warnings
 
 
+class TestAPartlyReadAmountIsNotStored:
+    """The ₹1,000 invoice that stored one rupee.
+
+    ``_AMOUNT`` spells a well-formed figure and stops at the first character
+    that is not part of one, and stopping is not failing: what it hands back is
+    the *front* of the figure rather than nothing. OCR supplies the broken
+    middles constantly — a zero read as the letter O, a thousands comma read as
+    a space — and ``to_money`` is asked only whether the digits in hand are an
+    amount, never whether they are the whole amount.
+
+    Taxable value and total are the two fields the footing check in ``validate``
+    is made *of*, and it only runs when both are non-zero. So a document
+    printing a grand total and no taxable line — most receipts — stored ₹1,
+    raised nothing, lost no confidence, and showed one rupee on every screen.
+    """
+
+    def _parse(self, line):
+        return parse_heuristic(f"TAX INVOICE\n{line}\n")
+
+    # The two shapes OCR actually produces, on both of the fields.
+    @pytest.mark.parametrize(
+        ("label", "attr"),
+        [("Grand Total", "total_value"), ("Taxable Value", "taxable_value")],
+    )
+    @pytest.mark.parametrize("figure", ["1,OOO.00", "1 000.00", "1O,000.00"])
+    def test_a_broken_grouping_is_refused_rather_than_truncated(self, label, attr, figure):
+        parsed = self._parse(f"{label}: {figure}")
+
+        assert getattr(parsed, attr) == ZERO
+        assert f"Discarded a partly-read {attr.replace('_', ' ')}: {figure}" in parsed.warnings
+
+    def test_the_rupee_is_the_whole_point(self):
+        # Named on its own because the number is the bug: not a wrong figure a
+        # reviewer would query, a plausible small one they would not.
+        assert self._parse("Grand Total: 1,OOO.00").total_value != Decimal("1")
+        assert self._parse("Grand Total: 1 000.00").total_value != Decimal("1")
+
+    @pytest.mark.parametrize(
+        ("line", "expected"),
+        [
+            # Whole figures, which are the overwhelming majority and must be
+            # untouched by the guard.
+            ("Grand Total: 118000.00", Decimal("118000.00")),
+            ("Grand Total: 1,18,000.00", Decimal("118000.00")),  # Indian grouping
+            ("Grand Total: 5,000", Decimal("5000")),
+            ("Grand Total: 118000", Decimal("118000")),
+            ("Grand Total Rs. 118000.00", Decimal("118000.00")),
+            ("Grand Total: 5000 INR", Decimal("5000")),
+            ("Invoice Total 45,000.00 as on 22/09/2024", Decimal("45000.00")),
+        ],
+    )
+    def test_a_figure_read_whole_is_stored_and_not_warned_about(self, line, expected):
+        parsed = self._parse(line)
+
+        assert parsed.total_value == expected
+        assert not [w for w in parsed.warnings if w.startswith("Discarded a partly-read")]
+
+    @pytest.mark.parametrize(
+        "next_line",
+        [
+            "18% GST included",  # a rate
+            "22/09/2024",  # a footer date
+            "30 days credit",  # payment terms
+            "24 Nos",  # a quantity column
+        ],
+    )
+    def test_the_line_below_is_not_this_figure_s_missing_thousands(self, next_line):
+        """The guard's own failure mode, which is the expensive one.
+
+        "A space and two or three digits" is far commoner as the next thing
+        printed than as the rest of this figure, so read loosely the guard
+        discarded whole, correctly-read totals on documents much commoner than
+        the ones it rescues — this bug, caused by its own fix.
+        """
+        parsed = self._parse(f"Grand Total: 100000\n{next_line}")
+
+        assert parsed.total_value == Decimal("100000")
+        assert not [w for w in parsed.warnings if w.startswith("Discarded a partly-read")]
+
+    def test_a_second_column_on_the_same_line_is_not_the_missing_thousands_either(self):
+        parsed = self._parse("Grand Total: 5000  25 items")
+
+        assert parsed.total_value == Decimal("5000")
+
+    def test_the_warning_quotes_what_the_page_actually_held(self):
+        # An empty box beats a wrong one only when someone can tell it was
+        # emptied on purpose, so the discarded text is named.
+        parsed = self._parse("Grand Total: 1,OOO.00")
+
+        assert parsed.warnings == ["Discarded a partly-read total value: 1,OOO.00"]
+
+    def test_a_missing_label_is_still_silent(self):
+        # No match at all is not a discard: an invoice that never printed a
+        # taxable line has nothing to warn about.
+        parsed = self._parse("Grand Total: 118000.00")
+
+        assert parsed.taxable_value == ZERO
+        assert parsed.warnings == []
+
+    def test_the_discard_costs_confidence_and_routes_to_review(self):
+        # What the silent version cost: the ₹1 kept its field non-empty, so
+        # coverage counted it as found and the warning that would have lowered
+        # confidence was never raised.
+        good = parse_invoice(text=INTRASTATE_INVOICE)
+        broken = parse_invoice(text=INTRASTATE_INVOICE.replace("118000.00", "1 18 000.00"))
+
+        assert broken.total_value == ZERO
+        assert broken.confidence < good.confidence
+
+    def test_the_invoice_still_arrives(self):
+        # End to end: a flagged invoice can be corrected, a rejected one is
+        # retyped from paper.
+        parsed = parse_invoice(text=INTRASTATE_INVOICE.replace("118000.00", "1,18,OOO.00"))
+
+        assert parsed.invoice_number == "MH/2026/118"
+        assert parsed.supplier_gstin == SUPPLIER_GSTIN_SAME_STATE
+        assert parsed.taxable_value == Decimal("100000.00")
+        assert "Discarded a partly-read total value: 1,18,OOO.00" in parsed.warnings
+
+
 class TestAMonthFirstDateIsReadRatherThanRefused:
     """Preferring day-first is not the same as refusing month-first.
 
