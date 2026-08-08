@@ -334,12 +334,34 @@ def _record_from_document(
             document.get("inum") or document.get("nt_num") or document.get("ntnum") or ""
         ).strip()
         or None,
-        invoice_date=to_date(document.get("dt") or document.get("nt_dt")),
+        # ``dt`` on an invoice; a note dates itself, and the exports disagree
+        # about the underscore exactly as they do on the number beside it.
+        # Reading only ``nt_dt`` left a note carrying ``ntdt`` with no date at
+        # all, so :func:`_period_of` fell back to the statement it arrived in —
+        # and a note is in the statement for the month the supplier filed it,
+        # which for a late filing is not the month it was issued. The document
+        # then reversed credit in the wrong period.
+        invoice_date=to_date(
+            document.get("dt") or document.get("nt_dt") or document.get("ntdt")
+        ),
         place_of_supply=str(document.get("pos") or "").strip()[:2] or None,
         total_value=_money(document.get("val")),
         itc_available=_flag(document.get("itcavl"), default=True),
         reverse_charge=_flag(document.get("rev"), default=False),
-        document_type=str(document.get("typ") or ("C" if is_note else "R")).strip().upper() or "R",
+        # ``ntty`` is what the note sections carry in the exports built off the
+        # GSTR-1 schema; ``typ`` is what the 2B download writes. Read only
+        # ``typ``, a note declaring itself in ``ntty`` arrived with no type and
+        # fell to the "C" default below — so a *debit* note, which raises the
+        # supplier's charge and the buyer's credit with it, was read as a credit
+        # note and taken off the pool instead of added to it. The tax moves
+        # twice, in the wrong direction, on a document the portal was explicit
+        # about.
+        document_type=str(
+            document.get("typ")
+            or document.get("ntty")
+            or document.get("nt_typ")
+            or ("C" if is_note else "R")
+        ).strip().upper() or "R",
         supplier_filing_date=to_date(supplier.get("supfildt")),
         supplier_filing_period=period_from_portal(supplier.get("supprd")),
         statement_period=fallback_period,
@@ -475,6 +497,26 @@ def _squash(heading: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (heading or "").lower())
 
 
+def _document_class(declared_type: str) -> str:
+    """Which of the three registers a document type belongs to.
+
+    One letter decides it, because the column carries whatever the export
+    wrote — "C", "Credit note", "CRED" — and the class has to be the same for
+    every rate line of one document however the wording drifts down the file.
+
+    "Deemed exports" also begins with a D and so lands with the debit notes.
+    That is harmless: the class is a grouping key, never a direction — only
+    :attr:`GSTR2BRecord.is_credit_note` decides which way money moves — and it
+    would take a supplier numbering a deemed-export invoice and a debit note
+    alike for the two to meet at all.
+    """
+    if declared_type.startswith("C"):
+        return "C"
+    if declared_type.startswith("D"):
+        return "D"
+    return "R"
+
+
 def _find_header_row(rows: list[list[str]]) -> int:
     """Index of the header row.
 
@@ -509,10 +551,30 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
             "'GSTIN of supplier' column."
         )
 
-    # Rate-wise rows of one invoice are merged, keyed the way the portal
-    # identifies a document: supplier plus document number.
-    merged: dict[tuple[str, str], GSTR2BRecord] = {}
-    order: list[tuple[str, str]] = []
+    # Rate-wise rows of one document are merged, keyed the way the portal
+    # identifies one: supplier, document number — and whether the document
+    # *grants* credit or takes it away.
+    #
+    # That third part was missing, and the two series it separates collide
+    # constantly: an invoice register and a credit-note register both restart at
+    # 1 each year, so one supplier's invoice 001 and credit note 001 are the
+    # ordinary case rather than a contrived one. Merged into a single record,
+    # the note's figures were *added* to the invoice's — and the merged row kept
+    # the type of whichever came first, so with the invoice in front it was no
+    # longer a credit note at all. Reconciliation then counted the reversal as
+    # extra supply: the eligible pool came out over by twice the note's tax,
+    # once for the credit that should have gone and once for the credit that
+    # should never have arrived. This CSV reader has always been expected to
+    # carry notes — ``notenumber``, ``notedate`` and ``notetype`` are in the
+    # column map above.
+    merged: dict[tuple[str, str, str], GSTR2BRecord] = {}
+    order: list[tuple[str, str, str]] = []
+    # The key each document number is currently open under, so a continuation
+    # rate line whose type cell is blank joins the document it belongs to rather
+    # than starting a second one. Exports vary on whether the type is repeated
+    # down the rate lines of one document, and a file with no type column at all
+    # — which is most of them — must go on merging exactly as it did before.
+    open_under: dict[tuple[str, str], tuple[str, str, str]] = {}
 
     for row in rows[header_index + 1 :]:
         values: dict[str, str] = {}
@@ -525,7 +587,22 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
         if not supplier_gstin and not invoice_number:
             continue  # A total row, or trailing notes under the table.
 
-        key = (supplier_gstin or "", invoice_number or "")
+        # Only the class of document goes in the key, not the spelling: "C",
+        # "Credit note" and "CRED" are one class, and splitting on the wording
+        # would put two rate lines of one note in two records. Debit notes are
+        # their own class rather than being folded in with invoices — both add
+        # to the statement, so the totals would survive the merge, but the
+        # merged row carries one document's date and value and reconciliation
+        # then reports the book invoice as disagreeing with a portal row that is
+        # two documents added together.
+        declared_type = (values.get("document_type") or "").strip().upper()[:4]
+        number_key = (supplier_gstin or "", invoice_number or "")
+        if declared_type:
+            key = (*number_key, _document_class(declared_type))
+        else:
+            key = open_under.get(number_key) or (*number_key, "R")
+        open_under[number_key] = key
+
         record = merged.get(key)
         if record is None:
             record = GSTR2BRecord(
@@ -536,7 +613,7 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
                 place_of_supply=(values.get("place_of_supply") or "").strip()[:2] or None,
                 total_value=_money(values.get("total_value")),
                 reverse_charge=_flag(values.get("reverse_charge")),
-                document_type=(values.get("document_type") or "R").strip().upper()[:4] or "R",
+                document_type=declared_type or "R",
                 supplier_filing_date=to_date(values.get("supplier_filing_date")),
                 supplier_filing_period=period_from_portal(values.get("supplier_filing_period")),
             )
