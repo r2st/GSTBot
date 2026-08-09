@@ -611,6 +611,68 @@ describe("InvoiceDetailPage", () => {
       expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
       expect(screen.queryByDisplayValue("Reparsed Name")).not.toBeInTheDocument();
     });
+
+    // Delete is the only write on this page that can move the user, so a
+    // superseded one lands harder than a superseded save: it does not put the
+    // wrong values on screen, it takes the screen away.
+    it("does not pull the user off the invoice opened after the one being deleted", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      await waitFor(() => expect(pending).toHaveLength(2));
+      expect(pending[1].method).toBe("DELETE");
+      expect(pending[1].url).toContain("/invoices/42");
+
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      pending[2].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+      await retype(user, "Counterparty name", "Half-typed correction");
+
+      // 42's delete lands now. Leaving for the list is right for 42 and wrong
+      // for whoever is mid-correction on 43.
+      pending[1].answer({}, { status: 204 });
+
+      await waitFor(() =>
+        expect(screen.getByText("INV-2026-0043")).toBeInTheDocument(),
+      );
+      expect(screen.getByLabelText("Counterparty GSTIN")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("Half-typed correction")).toBeInTheDocument();
+    });
+
+    it("does not banner a superseded delete's refusal over the invoice opened after it", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      pending[2].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+
+      // The refusal is about invoice 42. Over invoice 43 it reads as 43 being
+      // the one that is part of a filed return and cannot be removed.
+      pending[1].answer({ detail: "Invoice 42 is part of a filed return" }, { status: 409 });
+
+      await waitFor(() =>
+        expect(screen.getByText("INV-2026-0043")).toBeInTheDocument(),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
   });
   describe("the facts that decide what the credit is worth", () => {
     // Rule 37 reverses the whole of an invoice's credit once it is 180 days

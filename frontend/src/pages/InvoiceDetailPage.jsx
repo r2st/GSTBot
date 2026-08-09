@@ -312,10 +312,30 @@ export default function InvoiceDetailPage() {
 
   async function handleDelete() {
     if (!window.confirm("Remove this invoice from your books?")) return;
+    // The invoice this delete is for, like the two writes above it. This is the
+    // only one of the three that can move the user, which makes landing it on
+    // the wrong invoice the worst of the three rather than the mildest.
+    const target = id;
     try {
-      await api.deleteInvoice(id);
+      await api.deleteInvoice(target);
+      // Not a redirect off whatever is on screen now. Leaving the detail page
+      // is how a deleted invoice stops showing a form whose every save 404s —
+      // it is about `target`, and it is only right while `target` is what the
+      // page is showing. Someone who deleted one invoice, moved to the next and
+      // started correcting it would otherwise be pulled to the list mid-edit,
+      // by an answer to a click they made on a different invoice, losing
+      // whatever they had typed.
+      //
+      // Nothing is said in its place. The delete has been applied server-side
+      // and the list will show it gone; a notice about `target` on the invoice
+      // opened since is the same misattribution one line down.
+      if (shownId.current !== target) return;
       navigate("/invoices");
     } catch (err) {
+      // A refusal belongs to the invoice it was for. "Invoice is part of a
+      // filed return" banners over the invoice opened since, which reads as
+      // that invoice being the one that cannot be removed.
+      if (shownId.current !== target) return;
       setError(err.message);
     }
   }
