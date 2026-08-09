@@ -212,6 +212,34 @@ describe("AlertsPage", () => {
     renderPage();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Database unreachable/);
+    // And does not also say the backlog is clear. "Nothing outstanding" is the
+    // one wrong answer this screen can give, because it is the answer a
+    // business acts on by doing nothing.
+    expect(screen.queryByText(/Nothing outstanding/)).not.toBeInTheDocument();
+  });
+
+  it("does not leave one tab's alerts under another tab", async () => {
+    // The same fault the abort guard on this load exists to stop — closed
+    // alerts under an "Open" tab — reached by the other road. A scope whose
+    // load fails has no list of its own, and the rows left sitting there are
+    // the tab the user just left: open alerts, with their Dismiss buttons
+    // live, under a tab that says Closed.
+    mockFetch(page([alert()]));
+    renderPage();
+    await screen.findByText(/GSTR-3B for 2026-04 is overdue/);
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      statusText: "",
+      text: async () => JSON.stringify({ detail: "Database unreachable" }),
+    });
+    await userEvent.click(screen.getByRole("button", { name: /^Closed$/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Database unreachable/);
+    expect(
+      screen.queryByText(/GSTR-3B for 2026-04 is overdue/),
+    ).not.toBeInTheDocument();
   });
 
   it("leaves the row alone when the action fails", async () => {

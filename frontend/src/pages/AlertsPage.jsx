@@ -103,6 +103,11 @@ export default function AlertsPage() {
   const [scope, setScope] = useState("open");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  // Whether the list on screen failed to load, as opposed to loading and
+  // coming back empty. `error` cannot answer that: a row action that fails
+  // fills the same banner while the list behind it is perfectly good, so
+  // reading the banner would blank a list that has nothing wrong with it.
+  const [loadFailed, setLoadFailed] = useState(false);
   // Which alerts have an action in flight. Per-id rather than one page-wide
   // flag so dismissing the third alert does not disable the buttons on the
   // other nine — clearing a backlog is one row at a time, and that is the whole
@@ -130,11 +135,24 @@ export default function AlertsPage() {
       const data = await api.listAlerts({ scope: target }, { signal });
       setItems(data.items);
       setOpenTotal(data.open_total);
+      setLoadFailed(false);
     } catch (err) {
       // A superseded request has been replaced by a newer one that owns the
       // list, the banner and the spinner from here on.
       if (isAbortError(err)) return;
       setError(err.message);
+      // The rows on screen belong to the scope that was up before this one was
+      // asked for, and no answer is coming to replace them. That is the fault
+      // the abort guard above exists to stop — closed alerts under an "Open"
+      // tab — reached by the other road, and the worse way round: the tab a
+      // failed load leaves showing is the one the user navigated *away* from,
+      // with its Dismiss buttons live under a heading that disowns them.
+      //
+      // `open_total` is deliberately kept. It counts open alerts whatever tab
+      // is up, so it is not a figure this scope captions, and the badge going
+      // to zero would read as a cleared backlog.
+      setItems([]);
+      setLoadFailed(true);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -250,6 +268,15 @@ export default function AlertsPage() {
       <section className="panel">
         {loading ? (
           <SkeletonPanel lines={5} label="Loading alerts" />
+        ) : loadFailed ? (
+          // Nothing, rather than the empty state below it. Every one of those
+          // sentences asserts something about the backlog — that there is none
+          // outstanding, that nothing has been closed — and a load that failed
+          // establishes none of them. "Nothing outstanding" over a list that
+          // could not be fetched is the one wrong answer this screen can give,
+          // because it is the answer a business acts on by doing nothing. The
+          // banner above says what happened.
+          null
         ) : items.length === 0 ? (
           <p className="muted">
             {scope === "open"

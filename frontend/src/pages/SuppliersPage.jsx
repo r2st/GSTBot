@@ -175,6 +175,11 @@ export default function SuppliersPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Whether the register on screen failed to load, as opposed to loading and
+  // coming back empty. `error` cannot answer that: opening a breakdown or
+  // rescoring fills the same banner while the list behind it is perfectly
+  // good, so reading the banner would blank a list with nothing wrong with it.
+  const [loadFailed, setLoadFailed] = useState(false);
   // Bumped to refetch under the filters already selected. A rescore changes no
   // state the load effect depends on, so without this there is nothing for it
   // to react to.
@@ -191,12 +196,22 @@ export default function SuppliersPage() {
       const data = await api.listSuppliers(params, { signal });
       setItems(data.items);
       setTotal(data.total);
+      setLoadFailed(false);
     } catch (err) {
       // A superseded request has already been replaced by a newer one, which
       // owns the list, the banner and the spinner from here on. Returning
       // before `finally` would skip the reset, so the check is repeated there.
       if (isAbortError(err)) return;
       setError(err.message);
+      // The rows on screen were fetched under the previous search term and
+      // risk chip, and no answer is coming to replace them. Left up, they are
+      // asserted to match a term they were never tested against — and the
+      // heading above them says how many suppliers matched it. That is the
+      // out-of-order fault the abort guard exists to stop, reached by the
+      // other road.
+      setItems([]);
+      setTotal(0);
+      setLoadFailed(true);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -327,9 +342,22 @@ export default function SuppliersPage() {
       {selected && <SupplierDetail supplier={selected} onClose={closeDetail} />}
 
       <section className="panel">
-        <h2>{total} supplier{total === 1 ? "" : "s"}</h2>
+        {/* Counted only when the count was fetched. "0 suppliers" over a load
+            that failed is the same false finding as the empty state below it,
+            and the more emphatic of the two for being a heading. */}
+        <h2>
+          {loadFailed ? "Suppliers" : `${total} supplier${total === 1 ? "" : "s"}`}
+        </h2>
         {loading ? (
           <SkeletonTable rows={6} columns={5} label="Loading suppliers" />
+        ) : loadFailed ? (
+          // Nothing, rather than either empty state below. Both are findings
+          // about the register — that no supplier matches these filters, or
+          // that there are none at all — and a load that failed establishes
+          // neither. Saying so would answer the search on the strength of
+          // never having run it, which is the same fault the sentence below
+          // was split in two to avoid.
+          null
         ) : items.length === 0 && (risk || search) ? (
           // Not "no suppliers yet". That sentence also explains why the list is
           // empty — none parsed, none reconciled — and both halves are false

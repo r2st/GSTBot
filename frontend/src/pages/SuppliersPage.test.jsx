@@ -561,6 +561,37 @@ describe("SuppliersPage", () => {
       });
     }
 
+    it("does not leave the old rows under a search they do not match", async () => {
+      // The register is captioned by the search box and the risk chip alone,
+      // so rows that survive a failed search are being asserted to match a
+      // term they were never tested against — and the count above them says
+      // how many suppliers matched it.
+      const user = userEvent.setup();
+      mockApiFailing((url) => url.includes("search="), {
+        status: 500,
+        message: "Search is unavailable",
+      });
+      renderPage();
+      await loaded();
+
+      await user.type(screen.getByRole("searchbox"), "Northwind");
+
+      expect(await screen.findByText("Search is unavailable")).toBeInTheDocument();
+      expect(screen.queryByText(/Northwind Supplies Pvt Ltd/)).not.toBeInTheDocument();
+      // Nor does it answer the search on the strength of never having run it.
+      // "No suppliers match these filters" is a finding about the register, and
+      // a failed search establishes nothing about who is in it.
+      expect(
+        screen.queryByText("No suppliers match these filters."),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/No suppliers yet/i)).not.toBeInTheDocument();
+      // Nor in the heading, which is the more emphatic place to say it.
+      expect(
+        screen.queryByRole("heading", { name: /^0 suppliers$/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Suppliers", level: 2 })).toBeInTheDocument();
+    });
+
     it("keeps the list when one supplier's detail cannot be opened", async () => {
       const user = userEvent.setup();
       mockApiFailing((url) => /\/suppliers\/\d+/.test(url), {
