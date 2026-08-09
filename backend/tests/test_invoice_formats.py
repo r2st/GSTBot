@@ -263,6 +263,78 @@ Grand Total: 1,180.00
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
     Layout(
+        name="e-invoice header block, where three documents are dated before this one",
+        # The block an e-invoice is printed with, in the order the portal
+        # returns it: the IRN and its acknowledgement, then the consignment's
+        # e-way bill, then the invoice's own number and date. Everything above
+        # the last two lines belongs to another document, and this layout
+        # labels the invoice's own date with the bare "Date:" that most
+        # suppliers use — so nothing but the marking tells them apart.
+        #
+        # "E-Way Bill Date" is the one that reaches furthest: it ends in "Bill
+        # Date", which is an invoice-date label, so preferring the explicit
+        # label over the loose one selected the transport document's date.
+        text=f"""\
+KOCHI MARINE EXPORTS
+GSTIN: {SUPPLIER_GSTIN_OTHER_STATE}
+TAX INVOICE
+IRN: 8f3c1a0dbe45cc2f9a1d7e6b0c4f28d3ae95b1470f6d8c3a2b9e5d1c7f0a4b6e
+Ack No: 112610000123456
+Ack Date: 16-Apr-2026
+E-Way Bill No: 391004567812
+E-Way Bill Date: 16-Apr-2026
+Invoice No: KME-2026-77
+Date: 15-Apr-2026
+Bill To: UMANG TRADERS  GSTIN: {BUSINESS_GSTIN}
+Taxable Value: 50,000.00
+IGST @ 18%: 9,000.00
+Grand Total: 59,000.00
+""",
+        invoice_number="KME-2026-77",
+        invoice_date=date(2026, 4, 15),
+        taxable_value=money("50000.00"),
+        total_value=money("59000.00"),
+        igst=money("9000.00"),
+        tax_rate=Decimal("18"),
+        supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+        buyer_gstin=BUSINESS_GSTIN,
+    ),
+    Layout(
+        name="order and challan dates in the same band as the invoice's own",
+        # The purchase order is the dangerous one. A due date is a month out
+        # and an e-way bill a day; an order placed against a quarterly schedule
+        # is three months out, which files the supply in a return that closed
+        # long before the invoice was raised.
+        #
+        # Both are printed two-up with their document numbers, so the marking
+        # sits mid-line rather than at the start of it.
+        text=f"""\
+PUNE FASTENERS PVT LTD
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+TAX INVOICE
+P.O. No: PO-8891      P.O. Date: 02/01/2026
+Delivery Challan No: DC-441    Challan Date: 14/04/2026
+Invoice No: PF-2026-310
+Date: 15/04/2026
+Bill To: UMANG TRADERS  GSTIN: {BUSINESS_GSTIN}
+HSN: 73181600
+Taxable Value: 20,000.00
+CGST @ 9%: 1,800.00
+SGST @ 9%: 1,800.00
+Grand Total: 23,600.00
+""",
+        invoice_number="PF-2026-310",
+        invoice_date=date(2026, 4, 15),
+        taxable_value=money("20000.00"),
+        total_value=money("23600.00"),
+        cgst=money("1800.00"),
+        sgst=money("1800.00"),
+        tax_rate=Decimal("18"),
+        hsn_code="73181600",
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        buyer_gstin=BUSINESS_GSTIN,
+    ),
+    Layout(
         name="month-first date, which only one reading can be",
         text=f"""\
 NAGPUR IMPORTS

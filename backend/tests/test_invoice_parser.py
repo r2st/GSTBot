@@ -753,6 +753,113 @@ class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
         """The loose label stays a fallback: some documents only say "Date"."""
         assert self._date("TAX INVOICE\nDue Date: 15/05/2026\n") == date(2026, 5, 15)
 
+    def test_a_due_date_does_not_beat_the_bare_label_the_document_uses(self):
+        """Ordering the two patterns only answers this when the explicit one matches.
+
+        The document above prints "Invoice Date" and so is decided by which
+        label wins. Most do not: they label their own date "Date:", which is
+        the case the loose pattern exists for, and against that the due date
+        was still printed first and still won on being leftmost. The period is
+        derived from this field, so it filed one month late — the same wrong
+        return the explicit label was added to prevent, on the commoner layout.
+        """
+        parsed = parse_heuristic(
+            "TAX INVOICE\n"
+            "Due Date: 15/05/2026\n"
+            "Date: 15/04/2026\n"
+        )
+        assert parsed.invoice_date == date(2026, 4, 15)
+        assert parsed.period == "2026-04"
+
+    @pytest.mark.parametrize(
+        ("label", "printed"),
+        [
+            # The e-invoice acknowledgement, which follows the invoice.
+            ("Ack Date", "16/04/2026"),
+            ("Acknowledgement Date", "16/04/2026"),
+            # The consignment's own paperwork, printed in the same block.
+            ("E-Way Bill Date", "16/04/2026"),
+            ("LR Date", "16/04/2026"),
+            ("Transport Date", "16/04/2026"),
+            # Documents that predate the supply, by a quarter on a slow order.
+            ("PO Date", "02/01/2026"),
+            ("P.O. Date", "02/01/2026"),
+            ("Order Date", "02/01/2026"),
+            ("Challan Date", "14/04/2026"),
+            ("Delivery Date", "17/04/2026"),
+            # Rule 47 gives thirty days to invoice a supply, so these differ.
+            ("Supply Date", "31/03/2026"),
+            # And the two ends of the money.
+            ("Due Date", "15/05/2026"),
+            ("Payment Date", "20/05/2026"),
+        ],
+    )
+    def test_another_dates_label_does_not_take_the_bare_one(self, label, printed):
+        """An invoice prints several dates and only the date of issue is this field.
+
+        Each of these is printed on the face of an ordinary invoice, above the
+        document's own date as often as not, and each was read as the invoice
+        date by whichever pattern reached it first. They are wrong by days or
+        by months depending on the label, and a month is a wrong return.
+        """
+        assert self._date(f"TAX INVOICE\n{label}: {printed}\nDate: 15/04/2026\n") == date(
+            2026, 4, 15
+        )
+
+    def test_the_e_way_bills_date_does_not_beat_an_explicit_invoice_date(self):
+        """"E-Way Bill Date" ends in "Bill Date", which is an invoice-date label.
+
+        So this one was not a case of the loose pattern reaching too far: the
+        explicit pattern matched the transport document's date itself, and
+        preferring the explicit label picked the wrong date faster.
+        """
+        parsed = parse_heuristic(
+            "TAX INVOICE\n"
+            "E-Way Bill Date: 16/04/2026\n"
+            "Invoice Date: 15/04/2026\n"
+        )
+        assert parsed.invoice_date == date(2026, 4, 15)
+
+    @pytest.mark.parametrize(
+        "citation",
+        [
+            "Original Invoice Date: 02/01/2026",
+            "Against our Invoice Date: 02/01/2026",
+            "Ref: Invoice Date: 02/01/2026",
+            "w.r.t. Invoice Date: 02/01/2026",
+            "Vide Bill Date: 02/01/2026",
+        ],
+    )
+    def test_a_cited_documents_date_does_not_become_this_ones(self, citation):
+        """A credit note carries the original invoice's date under rule 53.
+
+        Which puts a second, older date above the note's own — the same shape
+        as the cited *number* this module already passes over, and it lands the
+        same way. The cited date is a real date belonging to a real earlier
+        document, so nothing downstream has reason to look twice at a note
+        filed in the period the invoice it cancels was issued in.
+        """
+        assert self._date(f"CREDIT NOTE\n{citation}\nDate: 15/04/2026\n") == date(2026, 4, 15)
+
+    def test_a_marked_date_is_still_read_when_it_is_the_only_one(self):
+        """Passing over a marked date decides precedence, not admissibility.
+
+        A document whose only date is marked still gets one — dropping it would
+        trade a date that is probably a month out for no date at all, and the
+        loose label exists because some documents are printed that carelessly.
+        """
+        assert self._date("TAX INVOICE\nPO Date: 02/01/2026\n") == date(2026, 1, 2)
+
+    def test_a_value_that_does_not_parse_does_not_blank_the_field(self):
+        """The pattern matches a date-shaped string, which is not the same as a date.
+
+        Taking the first match and stopping meant one unreadable value left the
+        field empty with the real date printed two lines below it.
+        """
+        assert self._date("TAX INVOICE\nDate: 12/ABC/34\nInvoice Date: 15/04/2026\n") == date(
+            2026, 4, 15
+        )
+
 
 class TestOneLineThatNamesTwoTaxHeads:
     """A line can name CGST and SGST at once, and the two ways it does are opposites.

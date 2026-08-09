@@ -561,8 +561,14 @@ _INVOICE_NO_PATTERN = re.compile(
 # All five spellings appear in the wild, and one of them is closed up, so the
 # space between "way" and "bill" has to be optional — the pattern matches the
 # "bill" *inside* "Waybill" just as happily.
+# The trailing "bill" is optional because this guard is used before two
+# different labels. The number is read from "E-Way Bill No", where "Bill" is
+# the label itself and the text before it ends at "Way"; the date is read from
+# "E-Way Bill Date", where "Bill Date" is the label and the text before it ends
+# at "Way Bill". Without it the date pattern walked straight through the guard
+# — see :func:`_invoice_date_in`.
 _EWAY_PREFIX = re.compile(
-    rf"\b(?:e[\s.\-]*)?way(?:{_SAME_LINE_SPACE}|[.\-])*$",
+    rf"\b(?:e[\s.\-]*)?way(?:{_SAME_LINE_SPACE}|[.\-])*(?:bill(?:{_SAME_LINE_SPACE}|[.\-])*)?$",
     re.IGNORECASE,
 )
 
@@ -612,7 +618,15 @@ _REFERENCE_PREFIX = re.compile(
     r")"
     # "with reference to your Invoice No." is how the wording is actually
     # printed as often as the bare form, so the optional "to" is not a nicety.
-    r"[\s:.\-]*(?:to\b)?[\s:.\-]*(?:our|your|the)?[\s:.\-]*$",
+    r"[\s:.\-]*(?:to\b)?[\s:.\-]*(?:our|your|the)?[\s:.\-]*"
+    # The document being cited may be named between the marker and the label,
+    # which happens whenever the label does not name it itself. The number is
+    # read from "Original Invoice No", where the noun belongs to the label and
+    # the text before it ends at "Original"; the date is read from "Original
+    # Invoice Date", where the loose label is the bare "Date" and the noun is
+    # left in the text before it. Optional, so both windows still match.
+    r"(?:(?:tax|credit|debit|delivery)?[\s.\-]*(?:invoice|inv|bill|note|challan)\b)?"
+    r"[\s:.\-]*$",
     re.IGNORECASE,
 )
 
@@ -674,6 +688,12 @@ _DATE_VALUE = r"(\d{1,4}[-/.\s][A-Za-z0-9]{1,9}[-/.\s]\d{2,4})"
 # the loose label is the fallback for documents that only say "Date:". The
 # separator is a run for the same reason as in the invoice number above —
 # "Date.:" and "DATE. : " are both printed.
+#
+# Ordering the two is necessary and not sufficient: it settles which label wins
+# only on a document that prints the explicit one. Which of several *matches*
+# is the invoice's own is decided in :func:`_invoice_date_in`, and the explicit
+# pattern needs that as much as the loose one — "E-Way Bill Date" ends in one
+# of the labels here, and "Original Invoice Date" in another.
 _DATE_PATTERN = re.compile(
     r"(?:invoice\s*date|date\s+of\s+invoice|bill\s*date)[\s:.\-]*" + _DATE_VALUE,
     re.IGNORECASE,
@@ -682,6 +702,84 @@ _LOOSE_DATE_PATTERN = re.compile(
     r"(?:dated|date)[\s:.\-]*" + _DATE_VALUE,
     re.IGNORECASE,
 )
+
+
+# Wording that marks the date after it as something other than the date of
+# issue — another document's date, or another event in this one's life.
+#
+# Ordering the two patterns above answers "Due Date" only on a document that
+# also prints an explicit invoice-date label. On one that labels its own date
+# "Date:" — which is the common case the loose pattern exists for — the due
+# date is still printed first, still matches, and still wins on being leftmost.
+# So the invoice files under the month it must be *paid* in: one period late,
+# in a return already filed by the time anyone reconciles it.
+#
+# The same holds for every other date an invoice prints beside its own. A
+# purchase order and a delivery challan predate the supply, an e-invoice
+# acknowledgement and a lorry receipt follow it, and each is printed in the
+# same block. All of them are the wrong month often enough to matter, and one
+# is wrong in the expensive direction: a PO date can sit a quarter earlier,
+# in a period whose return is long filed.
+#
+# Anchored immediately before the label, for the reason given at
+# :data:`_REFERENCE_PREFIX` — a marker loose on the line reads the wrong one.
+# "Supply" is here because rule 47 allows an invoice to be issued up to thirty
+# days after the supply it bills, so the two dates are not the same date and
+# the difference crosses a month whenever the supply falls near its end.
+_OTHER_DATE_PREFIX = re.compile(
+    r"(?:"
+    # "P.O." and "L.R." are spelled out rather than folded into the word list
+    # below because the trailing \b would fall after a full stop.
+    r"\bp\.?\s*o\.?"
+    r"|\bl\.?\s*r\.?"
+    r"|\b(?:due|ack(?:nowledge?ment)?|challan|delivery|deliver(?:ed)?"
+    r"|dispatch|despatch|order|payment|receipt|supply|transport|irn)\b"
+    r")"
+    r"[\s:.\-]*$",
+    re.IGNORECASE,
+)
+
+
+def _invoice_date_in(text: str) -> date | None:
+    """The date of issue the text labels, or ``None``.
+
+    Four things are tried in order, and the first that yields a date wins: an
+    explicit invoice-date label, a loose one, then — only if neither produced a
+    usable date — the same two again allowing labels that mark the date as
+    another document's.
+
+    That last tier is why a marked date is passed over rather than refused. A
+    document whose *only* date is a due date still gets one, which is the
+    behaviour the loose pattern was added for; what changes is that such a date
+    can no longer beat the document's own date to being read, which is what
+    being leftmost used to buy it. See :data:`_OTHER_DATE_PREFIX`, and
+    :data:`_REFERENCE_PREFIX` and :data:`_EWAY_PREFIX` for the two markers this
+    shares with the invoice number — a credit note carries the original
+    invoice's date under rule 53, and the e-way bill prints its own beside it.
+
+    A match whose value does not parse is passed over too. ``_DATE_VALUE``
+    matches a shape rather than a date, so "12/ABC/34" can match and yield
+    nothing; taking it and stopping would blank a field that a real date
+    further down the page would have filled.
+    """
+    marked: list[re.Match[str]] = []
+    for pattern in (_DATE_PATTERN, _LOOSE_DATE_PATTERN):
+        for match in pattern.finditer(text):
+            line_start = text.rfind("\n", 0, match.start()) + 1
+            before = (line_start, match.start())
+            if (
+                _OTHER_DATE_PREFIX.search(text, *before)
+                or _REFERENCE_PREFIX.search(text, *before)
+                or _EWAY_PREFIX.search(text, *before)
+            ):
+                marked.append(match)
+                continue
+            if (value := to_date(match.group(1))) is not None:
+                return value
+    for match in marked:
+        if (value := to_date(match.group(1))) is not None:
+            return value
+    return None
 # The separator before an amount admits a hyphen, because "Total - 5,000.00" is
 # printed — and that is the same character a negative amount begins with. With
 # nothing to tell them apart the separator ate the sign: "Taxable Value
@@ -1001,8 +1099,7 @@ def parse_heuristic(text: str) -> ParsedInvoice:
             result.buyer_gstin = gstins[1]
 
     result.invoice_number = _invoice_number_in(text)
-    if match := (_DATE_PATTERN.search(text) or _LOOSE_DATE_PATTERN.search(text)):
-        result.invoice_date = to_date(match.group(1))
+    result.invoice_date = _invoice_date_in(text)
     if match := _HSN_PATTERN.search(text):
         result.hsn_code = match.group(1)
 
