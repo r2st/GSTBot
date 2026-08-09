@@ -439,6 +439,73 @@ describe("running out of the monthly allowance mid-batch", () => {
     );
   });
 
+  // The per-minute upload ceiling is the other answer about the account rather
+  // than the document. It differs from the allowance in the direction that
+  // matters: carrying on does not merely fail, it spends the budget that would
+  // have let the rest of the batch through, because the limiter counts the
+  // requests it refuses too.
+  it("stops uploading once the upload rate limit is reached", async () => {
+    const user = userEvent.setup();
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse(invoiceResponse()))
+      .mockResolvedValueOnce(
+        jsonResponse({ detail: "Too many requests. Try again in 45s." }, { status: 429 }),
+      );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [
+      file("a.txt"),
+      file("b.txt"),
+      file("c.txt"),
+      file("d.txt"),
+    ]);
+
+    await screen.findByRole("alert");
+    // One success, one refusal, and nothing attempted after it. Left running,
+    // c and d would have been charged against the same window they were
+    // waiting on.
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+  });
+
+  it("lists the files the rate limit cost, and says they can just be dropped again", async () => {
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Too many requests. Try again in 45s." }, { status: 429 }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [
+      file("a.txt"),
+      file("b.txt"),
+      file("c.txt"),
+    ]);
+
+    expect(await screen.findByText("b.txt")).toBeInTheDocument();
+    expect(screen.getByText("c.txt")).toBeInTheDocument();
+    expect(screen.getAllByText(/rate limit was reached before this file/)).toHaveLength(2);
+    // Unlike the allowance, this comes good on its own — so the instruction is
+    // to wait and retry, not to go and buy something.
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /2 file\(s\) were not uploaded.*drop them again/,
+    );
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/Upgrade the plan/);
+  });
+
+  it("leaves the seconds to the row the server answered", async () => {
+    // The banner says only what the rows cannot: how much of the batch never
+    // went. The wait itself is the server's sentence, and it is already on the
+    // row for the file that was actually refused.
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Too many requests. Try again in 45s." }, { status: 429 }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+
+    expect(await screen.findByText("Too many requests. Try again in 45s.")).toBeInTheDocument();
+  });
+
   it("keeps going through an ordinary per-file failure", async () => {
     // A duplicate or an unreadable scan says nothing about the next file, so
     // only the allowance stops the batch.

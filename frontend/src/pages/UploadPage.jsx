@@ -9,6 +9,39 @@ import { INVOICE_EXTENSIONS, MAX_UPLOAD_MB, partitionFiles } from "../lib/valida
 
 const ACCEPT = INVOICE_EXTENSIONS.join(",");
 
+// The refusals that stop a batch rather than being carried to the next file.
+// Both are answers about the account rather than about the document, so every
+// file after this one gets the same one — which makes carrying on thirty round
+// trips that cannot succeed, burying the one thing the user needs to read under
+// thirty identical copies of it.
+//
+// 402 is the monthly allowance, and it does not come back partway through a
+// batch. 429 is the per-minute upload ceiling, where carrying on is worse than
+// merely futile: the limiter counts every request it receives, including the
+// ones it refuses, so the rest of the batch spends the budget that would have
+// let it through and holds the window open while it does. The ceiling is 60 a
+// minute and the loop below is a tight sequential one, so a drop of more than
+// sixty invoices reliably failed its own tail — and those files are exactly the
+// ones that would have gone through had the batch waited instead of hammering.
+//
+// Unlike the allowance, this one comes good on its own, which is why the banner
+// says to drop them again rather than to go and buy something. The failing
+// row already carries the server's own message, which names the seconds.
+const HALTING = {
+  402: {
+    row: "Not uploaded — the monthly allowance ran out before this file.",
+    banner: (count) =>
+      `The monthly allowance ran out. ${count} file(s) were not uploaded. ` +
+      "Upgrade the plan or try again next month.",
+  },
+  429: {
+    row: "Not uploaded — the upload rate limit was reached before this file.",
+    banner: (count) =>
+      `The upload rate limit was reached. ${count} file(s) were not uploaded. ` +
+      "Wait a moment, then drop them again.",
+  },
+};
+
 /** One row per file, so a 40-file batch reports per document rather than as a whole. */
 function ResultRow({ result }) {
   const { filename, status, invoice, error } = result;
@@ -124,16 +157,16 @@ export default function UploadPage() {
           ...prev,
         ]);
 
-        // The monthly allowance is spent, and it does not come back partway
-        // through a batch. Every remaining file would get the same 402, so
-        // carrying on means thirty more round trips that cannot succeed —
-        // spending the upload rate limit on them, and burying the one thing
-        // the user needs to read under thirty identical copies of it.
+        // An allowance that is spent, or a rate limit that is reached, is an
+        // answer about the account rather than about this document — so every
+        // remaining file gets the same one. See HALTING above for why each of
+        // the two stops the batch.
         //
         // Stopped rather than silently skipped: the files that were not
         // attempted are listed as such, because a batch that quietly shrinks
         // from forty to twelve is how an invoice goes missing from a return.
-        if (err.status === 402) {
+        const halt = HALTING[err.status];
+        if (halt) {
           const remaining = accepted.slice(index + 1);
           // The banner says only what the rows cannot: how much of the batch
           // never went. Repeating the server's message here as well would put
@@ -144,14 +177,11 @@ export default function UploadPage() {
               ...remaining.map((skipped) => ({
                 filename: skipped.name,
                 status: "error",
-                error: "Not uploaded — the monthly allowance ran out before this file.",
+                error: halt.row,
               })),
               ...prev,
             ]);
-            setError(
-              `The monthly allowance ran out. ${remaining.length} file(s) were not ` +
-                "uploaded. Upgrade the plan or try again next month.",
-            );
+            setError(halt.banner(remaining.length));
           }
           break;
         }
