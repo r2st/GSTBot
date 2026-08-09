@@ -209,6 +209,11 @@ describe("ReconcilePage", () => {
       renderPage();
 
       expect(await screen.findByText("Database unreachable")).toBeInTheDocument();
+      // And stops calling it empty, which is the half of this the banner does
+      // not do on its own. The sentence is not a caption on the banner — it is
+      // a finding about the period, and it comes with an instruction to go and
+      // import a 2B that may well already be there.
+      expect(screen.queryByText(/No GSTR-2B imported yet/)).not.toBeInTheDocument();
     });
 
     it("says something even when the edge answers with no body it can read", async () => {
@@ -226,6 +231,37 @@ describe("ReconcilePage", () => {
       await screen.findByText(/No GSTR-2B imported yet/);
       // A 404 from both endpoints is the ordinary first visit to a period.
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("does not invite a run it could not find out about", async () => {
+      // The other half of the same fault, on the other endpoint. The 2B loads,
+      // the run endpoint answers 500, and the page offers "Run the
+      // reconciliation to see what matches" — which says this period has never
+      // been reconciled. Every figure that sentence is standing in for comes
+      // from the run it claims does not exist.
+      global.fetch = vi.fn(async (url) => {
+        if (String(url).includes("/latest")) {
+          return {
+            ok: false,
+            status: 500,
+            statusText: "",
+            text: async () => JSON.stringify({ detail: "Database unreachable" }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => JSON.stringify(imported()),
+        };
+      });
+      renderPage();
+
+      await screen.findByText(/invoices imported/);
+      expect(await screen.findByText("Database unreachable")).toBeInTheDocument();
+      expect(
+        screen.queryByText(/Run the reconciliation to see what matches/),
+      ).not.toBeInTheDocument();
     });
 
     it("does not raise a banner for the run alone being absent", async () => {

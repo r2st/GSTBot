@@ -123,6 +123,13 @@ export default function ReconcilePage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
+  // Which of the two halves came back unknown rather than empty. A 404 says
+  // the period really has no 2B, or really has no run; anything else says only
+  // that we did not find out. Both render as a null `imported` / `run`, and
+  // the sentences under them are findings about the period rather than
+  // captions on the banner — so they need telling apart. Tracked per endpoint
+  // because the two fail independently.
+  const [unknown, setUnknown] = useState({ imported: false, run: false });
   // Bumped to refetch the period already selected. An import that lands on the
   // month on screen changes no state the load effect depends on, so without
   // this there is nothing for it to react to.
@@ -161,9 +168,16 @@ export default function ReconcilePage() {
     // "no GSTR-2B imported for this period", inviting the user to import one
     // they had already imported. The page said the period was empty on the
     // strength of never having found out.
-    const failure = [importResult, runResult].find(
-      (result) => result.status === "rejected" && result.reason?.status !== 404,
-    );
+    const unanswered = (result) =>
+      result.status === "rejected" && result.reason?.status !== 404;
+    // Which is only half of it. The banner says something went wrong; it does
+    // not stop the panels below saying the period is empty, and those two
+    // sentences are the ones a user acts on — "No GSTR-2B imported yet" comes
+    // with instructions to go and fetch one that may already be imported, and
+    // "Run the reconciliation" invites a re-run of a run that may exist.
+    setUnknown({ imported: unanswered(importResult), run: unanswered(runResult) });
+
+    const failure = [importResult, runResult].find(unanswered);
     if (failure) setError(failure.reason?.message || "Could not load this period.");
     setLoading(false);
   }, []);
@@ -319,6 +333,14 @@ export default function ReconcilePage() {
                 Number(imported.total_cess),
             )}
           </p>
+        ) : unknown.imported ? (
+          // Nothing. The banner above has said the period could not be loaded,
+          // and this sentence is not a caption on it — it is a finding that the
+          // period holds no statement, followed by instructions to go to the
+          // portal and fetch one. On a period whose 2B is already imported that
+          // is a wasted download and a re-import, prompted by a page that never
+          // found out either way.
+          null
         ) : (
           <p className="muted">
             No GSTR-2B imported yet. Download it from the GST portal (Returns → GSTR-2B →
@@ -445,7 +467,12 @@ export default function ReconcilePage() {
         </>
       )}
 
-      {!run && !loading && imported && (
+      {/* `!unknown.run` for the same reason as the panel above: this says the
+          period has never been reconciled, and it says so to invite a run. A
+          run endpoint that answered 500 leaves that unestablished, and the
+          findings, both ITC figures and the matched count all come from the
+          run this sentence claims does not exist. */}
+      {!run && !unknown.run && !loading && imported && (
         <p className="muted">
           GSTR-2B is loaded. Run the reconciliation to see what matches.
         </p>
