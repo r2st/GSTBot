@@ -139,6 +139,20 @@ export default function DashboardPage() {
     } catch (err) {
       if (isAbortError(err)) return;
       setError(err.message);
+      // Cleared, unlike the dimmed-while-loading case below. The two look
+      // alike and are opposites: while a period loads there is an answer on
+      // the way, so holding the previous month beats blanking the screen. When
+      // that answer is an error there is nothing on the way, and what stays up
+      // is the month the user just navigated *away* from — under a picker
+      // naming the month they navigated to.
+      //
+      // Only two of the four stat cards carry a period of their own, so output
+      // tax and ITC at risk sat there as April's figures with March selected
+      // and nothing on them to say so. That is the same fault the abort guard
+      // above exists to stop; a failure reaches it by the other road.
+      //
+      // The ITC and filing screens already do this for the same reason.
+      setData(null);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }

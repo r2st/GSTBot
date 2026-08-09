@@ -379,6 +379,37 @@ describe("DashboardPage", () => {
       vi.useRealTimers();
     });
 
+    it("does not leave the old month's figures under the new month's label", async () => {
+      // The counterpart to the test above, and the case where keeping them is
+      // wrong. While a period loads there is an answer coming, so dimming the
+      // previous month beats blanking it. When that answer is an error there
+      // is nothing coming: the picker says March, the banner says the load
+      // failed, and every figure on the page is April's — two of the four stat
+      // cards carrying no period of their own to give it away.
+      vi.setSystemTime(new Date(2026, 4, 1));
+      mockDashboard(dashboard());
+      renderPage();
+      await screen.findByText(/Umang Traders/);
+      expect(
+        screen.getByRole("heading", { name: /Tax breakdown — April 2026/ }),
+      ).toBeInTheDocument();
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        statusText: "Internal Server Error",
+        text: async () => JSON.stringify({ detail: "Database unavailable" }),
+      });
+      await userEvent.selectOptions(screen.getByLabelText("Period"), "2026-03");
+
+      expect(await screen.findByRole("alert")).toHaveTextContent("Database unavailable");
+      expect(
+        screen.queryByRole("heading", { name: /Tax breakdown — April 2026/ }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByText(/Umang Traders/)).not.toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
     describe("when answers come back out of order", () => {
       /**
        * A fetch that hands back the levers instead of resolving on its own.
