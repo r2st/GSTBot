@@ -103,11 +103,20 @@ export default function AlertsPage() {
   const [scope, setScope] = useState("open");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
-  // Which alert has an action in flight. Per-id rather than one page-wide flag
-  // so dismissing the third alert does not disable the buttons on the other
-  // nine — clearing a backlog is one row at a time, and that is the whole
+  // Which alerts have an action in flight. Per-id rather than one page-wide
+  // flag so dismissing the third alert does not disable the buttons on the
+  // other nine — clearing a backlog is one row at a time, and that is the whole
   // interaction this screen exists for.
-  const [pending, setPending] = useState(null);
+  //
+  // A set rather than a single id, because "one row at a time" is how it is
+  // clicked, not how it is answered: the clicks run ahead of the network and
+  // several are in the air together. Holding one id, the second row clicked
+  // took the flag off the first, re-enabling a button whose own request had not
+  // come back — and a second click on it decremented `openTotal` twice for one
+  // alert, which the server cannot correct because dismissing an already
+  // dismissed alert honestly answers "dismissed" both times. The badge then
+  // under-reported the backlog until the next load.
+  const [pending, setPending] = useState(() => new Set());
   // Which scope the list on screen is showing, readable from a callback that
   // has been waiting on the network. The tabs stay live while an action is in
   // flight, so `scope` closed over at click time is the tab the action was
@@ -152,7 +161,7 @@ export default function AlertsPage() {
    */
   async function apply(id, action) {
     const target = scope;
-    setPending(id);
+    setPending((prev) => new Set(prev).add(id));
     setError("");
     try {
       const updated = await action(id);
@@ -197,7 +206,13 @@ export default function AlertsPage() {
       // and it failed, and that is worth saying wherever they are standing.
       setError(err.message);
     } finally {
-      setPending(null);
+      // Only this row's flag. Clearing the whole set here would re-enable the
+      // rows still waiting, which is the bug a set exists to stop.
+      setPending((prev) => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   }
 
@@ -249,7 +264,7 @@ export default function AlertsPage() {
               <AlertRow
                 key={alert.id}
                 alert={alert}
-                busy={pending === alert.id}
+                busy={pending.has(alert.id)}
                 onRead={(id) => apply(id, api.markAlertRead)}
                 onDismiss={(id) => apply(id, api.dismissAlert)}
               />

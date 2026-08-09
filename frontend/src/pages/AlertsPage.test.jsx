@@ -276,6 +276,79 @@ describe("AlertsPage", () => {
     renderPage();
     expect(await screen.findByRole("button", { name: /Open \(2\)/ })).toBeInTheDocument();
   });
+
+  /** A fetch whose list is fixed and whose every dismiss is held open. */
+  function heldDismissals(list) {
+    const releases = [];
+    const fetch = vi.fn(async (url, options) => {
+      const body = (data) => ({
+        ok: true,
+        status: 200,
+        statusText: "",
+        text: async () => JSON.stringify(data),
+      });
+      if (options?.method === "POST" || String(url).includes("/dismiss")) {
+        const id = Number(String(url).match(/alerts\/(\d+)/)[1]);
+        await new Promise((resolve) => releases.push(resolve));
+        return body(alert({ id, status: "dismissed" }));
+      }
+      return body(list);
+    });
+    global.fetch = fetch;
+    return { fetch, releaseAll: () => releases.forEach((resolve) => resolve()) };
+  }
+
+  it("keeps a row disabled while its own request is still in flight", async () => {
+    // The per-row busy flag has to be per row. Held as a single id, the second
+    // row clicked took the flag off the first — so a row whose dismissal was
+    // still in the air went clickable again, which is the one state this
+    // button is disabled to prevent. Clearing a backlog is a run of quick
+    // clicks down the list, so two in flight at once is the normal case here,
+    // not an edge one.
+    const { releaseAll } = heldDismissals(
+      page([alert({ id: 1 }), alert({ id: 2 }), alert({ id: 3 })]),
+    );
+    renderPage();
+
+    const rows = await screen.findAllByRole("listitem");
+    await userEvent.click(within(rows[0]).getByRole("button", { name: "Dismiss" }));
+    await userEvent.click(within(rows[1]).getByRole("button", { name: "Dismiss" }));
+
+    // Both are waiting on the network; neither may be clicked again.
+    expect(within(rows[0]).getByRole("button", { name: "Dismiss" })).toBeDisabled();
+    expect(within(rows[1]).getByRole("button", { name: "Dismiss" })).toBeDisabled();
+    // The row nobody touched stays live — the reason the flag is per row.
+    expect(within(rows[2]).getByRole("button", { name: "Dismiss" })).toBeEnabled();
+
+    releaseAll();
+  });
+
+  it("does not let a re-enabled row take the same alert off the count twice", async () => {
+    // What the lost busy flag costs. Dismissing the same alert twice is
+    // harmless server-side — it was already dismissed and stays dismissed —
+    // but each answer comes back closed, and the badge is decremented once per
+    // answer. The count then under-reports the backlog until the next load,
+    // and under-reporting is the direction that gets a deadline missed.
+    const { fetch, releaseAll } = heldDismissals(
+      page([alert({ id: 1 }), alert({ id: 2 }), alert({ id: 3 })]),
+    );
+    renderPage();
+
+    await screen.findByRole("button", { name: /Open \(3\)/ });
+    const rows = screen.getAllByRole("listitem");
+    await userEvent.click(within(rows[0]).getByRole("button", { name: "Dismiss" }));
+    await userEvent.click(within(rows[1]).getByRole("button", { name: "Dismiss" }));
+    await userEvent.click(within(rows[0]).getByRole("button", { name: "Dismiss" }));
+
+    releaseAll();
+
+    // Alert 1 and alert 2, once each: one left open.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Open \(1\)/ })).toBeInTheDocument(),
+    );
+    const dismissals = fetch.mock.calls.filter(([url]) => String(url).includes("/dismiss"));
+    expect(dismissals).toHaveLength(2);
+  });
 });
 
 describe("an action that outlives the tab it was started on", () => {
