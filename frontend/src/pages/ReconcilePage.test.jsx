@@ -664,4 +664,95 @@ describe("ReconcilePage", () => {
       expect(reload[0].url).toContain(startedOn);
     });
   });
+
+  describe("an invoice this statement declares late", () => {
+    // A May 2B routinely carries April invoices the supplier filed late. The
+    // report lists them, because the statement names them, but every counter
+    // the server sends deliberately leaves them out — April already counted
+    // them, and adding them here would grow April's matched count every time a
+    // supplier caught up on an old one.
+    //
+    // So two numbers on this screen are right about different questions, and
+    // the screen has to survive them disagreeing. The stat card is the period's
+    // own tally and excludes the carried row; the chip beside the filter counts
+    // the rows that filter yields and includes it. The "Late filing" marker is
+    // the only thing on the page that explains why — without it the extra row
+    // is unaccounted for, and a user counting rows finds one more than every
+    // number beside them.
+
+    /** The standard run plus one late-filed April invoice, matched. */
+    function withCarried() {
+      const base = run();
+      return run({
+        report: {
+          ...base.report,
+          findings: [
+            ...base.report.findings,
+            {
+              category: "matched",
+              invoice_id: 21,
+              invoice_number: "APR/0098",
+              supplier_gstin: "29AAGCB7383J1Z4",
+              supplier_name: "Northwind Supplies",
+              invoice_date: "2026-03-28",
+              matched_on: "exact",
+              carried: true,
+              note: "Booked in 2026-03; declared in this statement",
+              differences: [],
+              books: { taxable_value: "20000.00", total_tax: "3600.00" },
+              gstr2b: { taxable_value: "20000.00", total_tax: "3600.00" },
+            },
+          ],
+        },
+      });
+    }
+
+    it("marks the row so the extra line is not unexplained", async () => {
+      mockApi({ imported2b: imported(), latest: withCarried() });
+      renderPage();
+
+      const row = (await screen.findByText("APR/0098")).closest("tr");
+      const marker = within(row).getByText("Late filing");
+      expect(marker).toBeInTheDocument();
+      // Which month booked it rides on the marker rather than in a column of
+      // its own, which would be empty on every other row.
+      expect(marker).toHaveAttribute("title", "Booked in 2026-03; declared in this statement");
+    });
+
+    it("leaves the marker off the period's own rows", async () => {
+      mockApi({ imported2b: imported(), latest: withCarried() });
+      renderPage();
+
+      const row = (await screen.findByText("INV-2026-0042")).closest("tr");
+      expect(within(row).queryByText("Late filing")).not.toBeInTheDocument();
+    });
+
+    it("counts the carried row on the chip, which labels the list", async () => {
+      mockApi({ imported2b: imported(), latest: withCarried() });
+      renderPage();
+
+      // Two matched rows are shown under this filter, so the chip says two.
+      // Taken from the server's matched_count it said one, over a list of two.
+      const chip = await screen.findByRole("button", { name: /^Matched \(/ });
+      expect(chip).toHaveTextContent("Matched (2)");
+      expect(screen.getByRole("button", { name: /^All \(/ })).toHaveTextContent("All (5)");
+
+      await userEvent.click(chip);
+      const rows = within(screen.getByRole("table")).getAllByRole("row");
+      expect(rows).toHaveLength(3); // header + the two the chip counted
+    });
+
+    it("keeps the carried row off the stat card, which is the period's own", async () => {
+      mockApi({ imported2b: imported(), latest: withCarried() });
+      renderPage();
+
+      // The run's own numerator over the run's own denominator. Taking the
+      // numerator from the chip tally instead would read "2 / 3" — a period
+      // that matched more invoices than it considered.
+      const card = (await screen.findByText("Matched", { selector: ".stat-label" })).closest(
+        ".stat-card",
+      );
+      expect(within(card).getByText("1 / 3")).toBeInTheDocument();
+    });
+  });
 });
