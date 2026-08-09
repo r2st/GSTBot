@@ -16,18 +16,30 @@ export default function InvoicesPage() {
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  // Whether the table on screen failed to load, as opposed to loading and
+  // coming back empty. Both leave `data` null, and the two empty states below
+  // are findings about the books rather than captions on the banner.
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const load = useCallback(async ({ signal } = {}) => {
     setLoading(true);
     setError("");
     try {
       setData(await api.listInvoices({ ...filters, limit: PAGE_SIZE, offset }, { signal }));
+      setLoadFailed(false);
     } catch (err) {
       // A superseded request has already been replaced by a newer one, which
       // owns the table, the banner and the spinner from here on. Returning
       // before `finally` would skip the reset, so the check is repeated there.
       if (isAbortError(err)) return;
       setError(err.message);
+      // The rows on screen were fetched under the previous filters and page,
+      // and no answer is coming to replace them — so they are left asserting a
+      // filter they were never tested against, under a pager saying how many
+      // invoices matched it. That is the out-of-order fault the abort guard
+      // above exists to stop, reached by the other road.
+      setData(null);
+      setLoadFailed(true);
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
@@ -119,6 +131,15 @@ export default function InvoicesPage() {
 
       {loading && !data ? (
         <SkeletonTable rows={8} columns={7} label="Loading invoices" />
+      ) : loadFailed ? (
+        // Nothing, rather than either empty state below. Both are findings
+        // about the books — that the filters matched nothing, or that there
+        // are no invoices at all — and a load that failed establishes neither.
+        // "No invoices yet", under a button offering to upload their first, is
+        // the sentence the split below exists to keep off a filtered view; a
+        // failed load was showing it to everyone, and on a book with five
+        // hundred invoices it reads as the books having been lost.
+        null
       ) : items.length === 0 && filtered ? (
         // Not "no invoices yet". A search for a supplier who has not been
         // booked, or a status nothing currently holds, is the ordinary way to

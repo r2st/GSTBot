@@ -211,6 +211,41 @@ describe("InvoicesPage", () => {
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
+  it("does not tell a business its books are empty when it could not read them", async () => {
+    // "No invoices yet", under a button offering to upload their first, is the
+    // sentence this page is careful never to show a filtered view — and a
+    // failed load showed it to everyone. On a book with five hundred invoices
+    // it reads as the books having been lost.
+    mockApi({ fail: { status: 500, message: "Database unreachable" } });
+    renderPage();
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Database unreachable");
+    expect(screen.queryByText("No invoices yet.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /Upload your first invoice/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not leave the previous rows under filters they were not fetched for", async () => {
+    mockApi({ items: [invoice({ counterparty_name: "Northwind Supplies" })] });
+    renderPage();
+    await screen.findByText("Northwind Supplies");
+
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 500,
+      statusText: "Error",
+      text: async () => JSON.stringify({ detail: "Database unreachable" }),
+    }));
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "failed");
+
+    expect(await screen.findByRole("alert")).toHaveTextContent("Database unreachable");
+    expect(screen.queryByText("Northwind Supplies")).not.toBeInTheDocument();
+    // Nor the pager's count, which is a statement about how many invoices the
+    // filters matched.
+    expect(screen.queryByText(/of 1$/)).not.toBeInTheDocument();
+  });
+
   describe("filters", () => {
     it("sends the selected type as a query parameter", async () => {
       const urls = mockApi();
