@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { currentPeriod, periodLabel } from "../lib/format";
 import FilingPage from "./FilingPage";
 
 const PERIOD = "2026-04";
@@ -400,7 +401,13 @@ describe("FilingPage", () => {
     await loaded();
     await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
 
-    expect(await screen.findByText("Period is not yet complete")).toBeInTheDocument();
+    // The server's sentence is carried whole; what is added in front of it is
+    // which return it was about, because none of these refusals say.
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent("Period is not yet complete");
+    expect(banner).toHaveTextContent(
+      `Could not download the GSTR-1 for ${periodLabel(currentPeriod())}`,
+    );
     // Nothing was handed to the browser to save.
     expect(URL.createObjectURL).not.toHaveBeenCalled();
   });
@@ -415,7 +422,7 @@ describe("FilingPage", () => {
     await loaded();
     await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
 
-    expect(await screen.findByText("Export failed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Export failed");
     expect(screen.getByRole("button", { name: /Download GSTR-1 JSON/i })).toBeEnabled();
   });
 
@@ -839,6 +846,120 @@ describe("FilingPage", () => {
       // switched return would be worse than the stale preview the abort exists
       // to prevent.
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+  });
+
+  describe("a download that outlives the controls that named it", () => {
+    /**
+     * Answer the previews and the status panel at once, but hold the export.
+     *
+     * An export builds the whole return rather than previewing it, so it is
+     * the request most likely to still be running when the picker or the type
+     * toggle has moved on — neither of which is disabled while it runs.
+     */
+    function deferredExport() {
+      const exports = [];
+      global.fetch = vi.fn(async (url) => {
+        const href = String(url);
+        if (href.includes("/filing/export/")) {
+          return new Promise((resolve) => {
+            exports.push({
+              url: href,
+              fail: (status, detail) =>
+                resolve({
+                  ok: false,
+                  status,
+                  statusText: "Error",
+                  text: async () => JSON.stringify({ detail }),
+                }),
+            });
+          });
+        }
+        if (href.includes("/filing/status")) {
+          return {
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: async () => JSON.stringify(filingStatus()),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () =>
+            JSON.stringify(href.includes("/filing/gstr3b") ? gstr3b() : gstr1()),
+        };
+      });
+      return exports;
+    }
+
+    it("blames the month a failed export was for, not the month now selected", async () => {
+      const user = userEvent.setup();
+      const exports = deferredExport();
+      renderPage();
+
+      await loaded();
+      const started = currentPeriod();
+      await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
+      await waitFor(() => expect(exports).toHaveLength(1));
+
+      // An ordinary thing to do while waiting: only the download buttons are
+      // disabled during an export, not the picker that decides what it is.
+      const moved = await selectCompletedPeriod(user);
+      expect(moved).not.toBe(started);
+
+      // The export carries a tighter limit of its own, and its refusal names
+      // no period — so left bare it is read as a fact about whatever is up.
+      exports[0].fail(429, "Too many requests. Retry in 34 seconds.");
+
+      const banner = await screen.findByRole("alert");
+      expect(banner).toHaveTextContent("Too many requests. Retry in 34 seconds.");
+      expect(banner).toHaveTextContent(periodLabel(started));
+      // The month the user is now looking at has failed to export nothing.
+      expect(banner).not.toHaveTextContent(periodLabel(moved));
+    });
+
+    it("blames the return a failed export was for, not the return now shown", async () => {
+      const user = userEvent.setup();
+      const exports = deferredExport();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
+      await waitFor(() => expect(exports).toHaveLength(1));
+      expect(exports[0].url).toContain("/filing/export/gstr1.json");
+
+      // Waited on by the set-off panel rather than by the download button:
+      // `busy` is shared, so while the GSTR-1 export runs the GSTR-3B button
+      // is sitting there reading "Working…".
+      await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+      await screen.findByRole("heading", { name: "What this leaves to pay" });
+
+      exports[0].fail(500, "Export failed");
+
+      // Both returns are being prepared for the same month, so the period
+      // alone does not separate them — over a GSTR-3B preview, an unattributed
+      // "Export failed" is read as the GSTR-3B being the one that cannot go.
+      const banner = await screen.findByRole("alert");
+      expect(banner).toHaveTextContent("Could not download the GSTR-1");
+      expect(banner).not.toHaveTextContent("GSTR-3B");
+    });
+
+    it("lets a download that lands late name itself without help", async () => {
+      // The counterpart to the two above, and the reason the confirmation is
+      // left alone: the server names the file for the return type and the
+      // period precisely so it does not arrive as `download (3)`, so a success
+      // that lands after the picker moved already says what it was.
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
+      expect(
+        await screen.findByText("Downloaded gstr1_29AAGCB7383J1Z4_042026.json"),
+      ).toBeInTheDocument();
     });
   });
 });

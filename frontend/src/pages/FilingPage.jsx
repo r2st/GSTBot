@@ -179,15 +179,44 @@ export default function FilingPage() {
   }, [statusToken]);
 
   async function handleDownload(extension) {
+    // Both controls that decide what this file is — the period picker and the
+    // type toggle — stay live while it is being built, and an export is the
+    // slowest thing the page does: it builds the whole return rather than
+    // previewing it, which is why it carries a tighter limit of its own. So
+    // the return being downloaded is not necessarily the one that will be on
+    // screen when the answer comes back.
+    const target = { period, returnType };
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      const { blob, filename } = await api.downloadExport(returnType, extension, period);
+      const { blob, filename } = await api.downloadExport(
+        target.returnType,
+        extension,
+        target.period,
+      );
       saveBlob(blob, filename);
+      // Needs nothing added to it. The server names the file for the return
+      // type, the GSTIN and the period precisely so it does not arrive as
+      // `download (3)`, so the confirmation already says which return landed
+      // even when the picker has moved on since.
       setNotice(`Downloaded ${filename}`);
     } catch (err) {
-      setError(err.message);
+      // Named rather than dropped, unlike a superseded load. Nothing is coming
+      // to replace this one: the user asked for a file and did not get it, and
+      // staying silent leaves them waiting on a download that will never
+      // start — so the failure is worth saying wherever they are standing.
+      //
+      // But it has to say what it is about. The server's own sentence is a
+      // 429 from the export limit, or a 500, and none of them name a return —
+      // so under a picker that has since moved, "Too many requests" reads as
+      // the month now on screen being the one that cannot be exported. That is
+      // the misattribution the record-filed handler already avoids by naming
+      // its own period in the confirmation.
+      setError(
+        `Could not download the ${RETURNS[target.returnType].label} for ` +
+          `${periodLabel(target.period)}: ${err.message}`,
+      );
     } finally {
       setBusy(false);
     }
