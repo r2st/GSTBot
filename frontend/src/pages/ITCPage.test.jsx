@@ -500,3 +500,74 @@ describe("Rule 37's re-availment", () => {
     expect(screen.queryByText("Re-availed: suppliers paid")).not.toBeInTheDocument();
   });
 });
+
+describe("purchases that carry no credit", () => {
+  // "Credit available" is built from the period's purchases, but not from all
+  // of them: an invoice that is exempt, nil-rated or blocked under s.17(5) had
+  // tax on it that is simply not creditable. Without saying so, the figure
+  // looks too low for the number of invoices behind it, and the obvious
+  // reading — that something was missed in the books — is the wrong one.
+
+  it("says how many of the period's invoices carry none", async () => {
+    mockApi(summary({ invoice_count: 9, unclaimed_count: 2 }));
+    render(
+      <MemoryRouter>
+        <ITCPage />
+      </MemoryRouter>,
+    );
+
+    const help = await screen.findByText(
+      "9 purchase invoices, 2 carrying no claimable credit",
+    );
+    // Under the figure it qualifies, not loose on the page.
+    expect(within(help.closest("tr")).getByText("Credit available")).toBeInTheDocument();
+  });
+
+  it("says nothing extra when every invoice carries credit", async () => {
+    // The common month. A trailing ", 0 carrying no claimable credit" on every
+    // load is noise, and reads as a finding when it is the absence of one.
+    mockApi(summary({ invoice_count: 3, unclaimed_count: 0 }));
+    render(
+      <MemoryRouter>
+        <ITCPage />
+      </MemoryRouter>,
+    );
+
+    const help = await screen.findByText("3 purchase invoices");
+    expect(within(help.closest("tr")).getByText("Credit available")).toBeInTheDocument();
+    expect(screen.queryByText(/carrying no claimable credit/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a period whose liability no credit reaches", () => {
+  it("says so rather than showing an empty list", async () => {
+    // A first month of trading, or one where every rupee of credit was
+    // reversed: there is liability and nothing to set against it. The set-off
+    // panel is the screen's answer to "what do I actually pay", so an empty
+    // list under its heading reads as a screen that failed to load rather than
+    // as the answer — which is that the whole liability is payable in cash.
+    mockApi(
+      summary({
+        available: heads(),
+        net_available: heads(),
+        set_off: {
+          steps: [],
+          cash_payable: heads({ igst: "20000.00" }),
+          credit_carried_forward: heads(),
+          credit_used: heads(),
+          total_cash: "20000.00",
+        },
+        cash_payable: "20000.00",
+      }),
+    );
+    render(
+      <MemoryRouter>
+        <ITCPage />
+      </MemoryRouter>,
+    );
+
+    expect(
+      await screen.findByText("No credit could be applied to this period’s liability."),
+    ).toBeInTheDocument();
+  });
+});
