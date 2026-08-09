@@ -472,4 +472,65 @@ describe("InvoicesPage", () => {
       await screen.findByText("INV-2026-0042");
     });
   });
+
+  describe("sorting", () => {
+    it("sorts by the clicked column, largest or newest first, on the first click", async () => {
+      const urls = mockApi();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      await userEvent.click(screen.getByRole("columnheader", { name: "Date" }).querySelector("button"));
+
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=date_desc"));
+      expect(screen.getByRole("columnheader", { name: "Date" })).toHaveAttribute(
+        "aria-sort",
+        "descending",
+      );
+    });
+
+    it("reverses direction on a second click of the same column", async () => {
+      const urls = mockApi();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+      const dateHeader = () => screen.getByRole("columnheader", { name: "Date" });
+
+      await userEvent.click(within(dateHeader()).getByRole("button"));
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=date_desc"));
+
+      await userEvent.click(within(dateHeader()).getByRole("button"));
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=date_asc"));
+      expect(dateHeader()).toHaveAttribute("aria-sort", "ascending");
+    });
+
+    it("starts a newly clicked column at its own default rather than the old column's direction", async () => {
+      const urls = mockApi();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      // "Invoice" defaults to ascending — a sequence, not a magnitude — unlike
+      // "Date" and "Total", which open on the most recent or the largest.
+      await userEvent.click(within(screen.getByRole("columnheader", { name: "Date" })).getByRole("button"));
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=date_desc"));
+
+      await userEvent.click(
+        within(screen.getByRole("columnheader", { name: "Invoice" })).getByRole("button"),
+      );
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=number_asc"));
+      expect(urls.at(-1)).not.toContain("date");
+    });
+
+    it("returns to page one when the sort changes", async () => {
+      mockApi({ items: [invoice()], total: 60 });
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+
+      await userEvent.click(screen.getByRole("button", { name: "Next" }));
+      await waitFor(() => expect(screen.getByText("26–50 of 60")).toBeInTheDocument());
+
+      await userEvent.click(
+        within(screen.getByRole("columnheader", { name: "Total" })).getByRole("button"),
+      );
+      await waitFor(() => expect(screen.getByText("1–25 of 60")).toBeInTheDocument());
+    });
+  });
 });

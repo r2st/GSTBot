@@ -535,6 +535,98 @@ def test_list_paginates(auth_client):
     assert len(tail["items"]) == 1
 
 
+class TestSorting:
+    """`sort` orders the register; nulls land last regardless of direction."""
+
+    def test_by_date_puts_undated_invoices_last_either_way(self, auth_client, db_session, business):
+        db_session.add_all(
+            [
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="A",
+                    invoice_date=date(2026, 4, 1),
+                ),
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="B",
+                    invoice_date=date(2026, 4, 15),
+                ),
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="C", invoice_date=None,
+                ),
+            ]
+        )
+        db_session.commit()
+
+        desc = auth_client.get("/api/v1/invoices?sort=date_desc").json()["items"]
+        assert [i["invoice_number"] for i in desc] == ["B", "A", "C"]
+
+        asc = auth_client.get("/api/v1/invoices?sort=date_asc").json()["items"]
+        assert [i["invoice_number"] for i in asc] == ["A", "B", "C"]
+
+    def test_by_value_uses_the_derived_figure_not_the_raw_column(
+        self, auth_client, db_session, business
+    ):
+        """A bare "Total:" the heuristic misses leaves `total_value` at zero.
+
+        Sorting by that raw column would put a real ₹590 supply after every
+        invoice extraction happened to total correctly — the same fault
+        `Invoice.invoice_value` exists to fix on the screens that read it.
+        """
+        db_session.add_all(
+            [
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="LOW",
+                    total_value=Decimal("100.00"),
+                ),
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="DERIVED",
+                    total_value=Decimal("0.00"), taxable_value=Decimal("500.00"),
+                    cgst=Decimal("45.00"), sgst=Decimal("45.00"),
+                ),
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="HIGH",
+                    total_value=Decimal("1000.00"),
+                ),
+            ]
+        )
+        db_session.commit()
+
+        items = auth_client.get("/api/v1/invoices?sort=value_desc").json()["items"]
+        assert [i["invoice_number"] for i in items] == ["HIGH", "DERIVED", "LOW"]
+
+    def test_by_number_puts_numberless_invoices_last_either_way(
+        self, auth_client, db_session, business
+    ):
+        db_session.add_all(
+            [
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="B-1",
+                ),
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number="A-1",
+                ),
+                Invoice(
+                    business_id=business.id, invoice_type=InvoiceType.PURCHASE,
+                    status=InvoiceStatus.PARSED, invoice_number=None,
+                ),
+            ]
+        )
+        db_session.commit()
+
+        items = auth_client.get("/api/v1/invoices?sort=number_asc").json()["items"]
+        assert [i["invoice_number"] for i in items] == ["A-1", "B-1", None]
+
+    def test_an_unknown_sort_is_rejected(self, auth_client):
+        assert auth_client.get("/api/v1/invoices?sort=nonsense").status_code == 422
+
+
 # --------------------------------------------------------------------------
 # Review and correction
 # --------------------------------------------------------------------------

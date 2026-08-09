@@ -2,9 +2,10 @@
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -42,6 +43,37 @@ _upload_limit = RateLimit("invoice_upload", "60/minute")
 _reparse_limit = RateLimit("invoice_reparse", "20/minute")
 _read_limit = RateLimit("invoice_read", "240/minute")
 _write_limit = RateLimit("invoice_write", "120/minute")
+
+InvoiceSort = Literal[
+    "date_desc", "date_asc",
+    "value_desc", "value_asc",
+    "number_desc", "number_asc",
+]
+
+# What a row is worth, in SQL. Mirrors ``Invoice.invoice_value``: the stored
+# total where the extractor found one, the taxable value plus tax where it did
+# not — because the column defaults to zero on a bare "Total:" the heuristic
+# pattern misses, and sorting by that column would put a ₹5,31,000 invoice
+# after every one that extraction happened to value correctly.
+_VALUE_EXPR = case(
+    (Invoice.total_value != 0, Invoice.total_value),
+    else_=func.coalesce(Invoice.taxable_value, 0)
+    + Invoice.cgst + Invoice.sgst + Invoice.igst + Invoice.cess,
+)
+
+# Nulls sort last regardless of direction on both of the nullable columns here.
+# A document nothing could read a date or number off is missing that fact, not
+# holding the smallest possible one — sorting oldest-first should not open on a
+# page of invoices with no date, and sorting Z-to-A should not close on them
+# either.
+_SORTS: dict[str, tuple] = {
+    "date_desc": (Invoice.invoice_date.desc().nulls_last(),),
+    "date_asc": (Invoice.invoice_date.asc().nulls_last(),),
+    "value_desc": (_VALUE_EXPR.desc(),),
+    "value_asc": (_VALUE_EXPR.asc(),),
+    "number_desc": (Invoice.invoice_number.desc().nulls_last(),),
+    "number_asc": (Invoice.invoice_number.asc().nulls_last(),),
+}
 
 ALLOWED_CONTENT_TYPES = {
     "application/pdf",
@@ -230,6 +262,17 @@ def list_invoices(
         max_length=100,
         description="Substring of the invoice number or the counterparty name.",
     ),
+    sort: InvoiceSort | None = Query(
+        default=None,
+        description=(
+            "Sort order. Omitted means newest uploaded first. `value_*` sorts "
+            "by what the invoice is worth — the stored total where there is "
+            "one, taxable value plus tax where there is not — matching the "
+            "figure every screen displays. Invoices with no date, or no "
+            "number, sort last under `date_*` and `number_*` regardless of "
+            "direction."
+        ),
+    ),
     limit: int = Query(default=50, ge=1, le=200, description="Page size, 1-200."),
     offset: Offset = 0,
     db: Session = Depends(get_db),
@@ -253,10 +296,15 @@ def list_invoices(
         )
 
     total = int(db.scalar(select(func.count(Invoice.id)).where(*conditions)) or 0)
+    # The requested sort, then upload order as a tiebreak — two invoices dated
+    # the same day would otherwise not have a fixed order between one page and
+    # the next, and a row could appear on both pages of the same query or on
+    # neither.
+    order = (*_SORTS.get(sort, ()), Invoice.created_at.desc(), Invoice.id.desc())
     rows = db.scalars(
         select(Invoice)
         .where(*conditions)
-        .order_by(Invoice.created_at.desc(), Invoice.id.desc())
+        .order_by(*order)
         .limit(limit)
         .offset(offset)
     ).all()

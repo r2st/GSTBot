@@ -438,6 +438,26 @@ input[aria-invalid="true"]:focus {
   letter-spacing: 0.03em;
   color: var(--ink-soft);
 }
+.th-sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.th-sort:hover,
+.th-sort:focus-visible {
+  color: var(--ink);
+}
+th[aria-sort]:not([aria-sort="none"]) .th-sort {
+  color: var(--ink);
+}
 .table-invoices {
   background: var(--surface);
   border: 1px solid var(--line);

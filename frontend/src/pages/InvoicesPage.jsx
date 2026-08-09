@@ -9,9 +9,36 @@ import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
 
 const PAGE_SIZE = 25;
 
+// One entry per sortable column. `asc`/`desc` are the values the API takes;
+// `first` is which of the two a first click lands on — descending for a
+// figure someone scans top-down for the largest or the latest, ascending for
+// a number read as a sequence.
+const SORTS = {
+  number: { asc: "number_asc", desc: "number_desc", first: "asc" },
+  date: { asc: "date_asc", desc: "date_desc", first: "desc" },
+  value: { asc: "value_asc", desc: "value_desc", first: "desc" },
+};
+
+/** A `<th>` that sorts its column on click, and says so to assistive tech. */
+function SortHeader({ column, sort, onSort, children }) {
+  const spec = SORTS[column];
+  const direction = sort === spec.asc ? "ascending" : sort === spec.desc ? "descending" : "none";
+  return (
+    <th scope="col" aria-sort={direction}>
+      <button type="button" className="th-sort" onClick={() => onSort(column)}>
+        {children}
+        {direction !== "none" && (
+          <span aria-hidden="true">{direction === "ascending" ? " ▲" : " ▼"}</span>
+        )}
+      </button>
+    </th>
+  );
+}
+
 export default function InvoicesPage() {
   usePageTitle("Invoices");
   const [filters, setFilters] = useState({ invoice_type: "", status: "", search: "" });
+  const [sort, setSort] = useState("");
   const [offset, setOffset] = useState(0);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -25,7 +52,9 @@ export default function InvoicesPage() {
     setLoading(true);
     setError("");
     try {
-      setData(await api.listInvoices({ ...filters, limit: PAGE_SIZE, offset }, { signal }));
+      setData(
+        await api.listInvoices({ ...filters, sort, limit: PAGE_SIZE, offset }, { signal }),
+      );
       setLoadFailed(false);
     } catch (err) {
       // A superseded request has already been replaced by a newer one, which
@@ -43,7 +72,7 @@ export default function InvoicesPage() {
     } finally {
       if (!signal?.aborted) setLoading(false);
     }
-  }, [filters, offset]);
+  }, [filters, sort, offset]);
 
   // Every keystroke in the search box is a new request, and responses do not
   // come back in the order they were sent. Left unguarded, the answer for
@@ -65,6 +94,20 @@ export default function InvoicesPage() {
   function updateFilter(field, value) {
     setOffset(0); // A new filter means a new result set, so page 1.
     setFilters((prev) => ({ ...prev, [field]: value }));
+  }
+
+  // A first click on a column sorts by it, in whichever direction is the more
+  // useful default for that column; a second click on the same column reverses
+  // it; a click on a different column starts that one over at its own default
+  // rather than carrying the previous column's direction.
+  function toggleSort(column) {
+    const spec = SORTS[column];
+    setOffset(0);
+    setSort((prev) => {
+      if (prev === spec.asc) return spec.desc;
+      if (prev === spec.desc) return spec.asc;
+      return spec[spec.first];
+    });
   }
 
   const items = data?.items ?? [];
@@ -173,12 +216,18 @@ export default function InvoicesPage() {
             <table className="table table-invoices">
             <thead>
               <tr>
-                <th scope="col">Invoice</th>
+                <SortHeader column="number" sort={sort} onSort={toggleSort}>
+                  Invoice
+                </SortHeader>
                 <th scope="col">Party</th>
-                <th scope="col">Date</th>
+                <SortHeader column="date" sort={sort} onSort={toggleSort}>
+                  Date
+                </SortHeader>
                 <th scope="col">Taxable</th>
                 <th scope="col">Tax</th>
-                <th scope="col">Total</th>
+                <SortHeader column="value" sort={sort} onSort={toggleSort}>
+                  Total
+                </SortHeader>
                 <th scope="col">Status</th>
               </tr>
             </thead>
