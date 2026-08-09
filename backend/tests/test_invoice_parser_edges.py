@@ -147,14 +147,29 @@ class TestReadingAYesNoAnswer:
 
     @pytest.mark.parametrize(
         "answer",
-        ["N", "n", "No", "false", "FALSE", "0", "NA", "N/A", "not applicable", "nil", "-"],
+        [
+            "N", "n", "No", "false", "FALSE", "0", "NA", "N/A",
+            "not applicable", "none", "nil", "-",
+            # A GSTR-2B's wording for the same refusal, where the question is
+            # whether credit may be claimed rather than whether a clause
+            # applies. Read here rather than in a second set of its own, so the
+            # portal's JSON and its CSV cannot disagree about one answer.
+            "not available", "Not Available", "unavailable",
+        ],
     )
     def test_every_way_of_saying_no_means_no(self, answer):
         assert to_flag(answer) is False
 
-    @pytest.mark.parametrize("answer", ["Y", "yes", "TRUE", "1", "applicable"])
+    @pytest.mark.parametrize("answer", ["Y", "yes", "TRUE", "1", "applicable", "Available"])
     def test_every_way_of_saying_yes_means_yes(self, answer):
         assert to_flag(answer) is True
+
+    def test_a_whole_answer_is_not_read_as_the_word_inside_it(self):
+        # The reason these are sets of whole answers and not a regex. "Not
+        # applicable" contains "applicable" and "unavailable" contains
+        # "available", and a substring match reads both as their own opposite.
+        assert to_flag("not applicable") is False
+        assert to_flag("unavailable", default=True) is False
 
     def test_a_reverse_charge_of_not_applicable_no_longer_flags_the_invoice(self):
         """The whole reason this function exists.

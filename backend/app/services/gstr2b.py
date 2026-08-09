@@ -489,9 +489,6 @@ _CSV_COLUMNS: dict[str, str] = {
     "notetype": "document_type",
 }
 
-# Cells the portal uses for "no credit here", as opposed to a blank.
-_ITC_UNAVAILABLE = {"NO", "N", "NOT AVAILABLE", "UNAVAILABLE"}
-
 
 def _squash(heading: str) -> str:
     return re.sub(r"[^a-z0-9]", "", (heading or "").lower())
@@ -627,8 +624,25 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
         record.cess += _money(values.get("cess"))
 
         # One ineligible line makes the invoice's credit partial; treating it
-        # as available would overstate the claim.
-        if values.get("itc_available", "").strip().upper() in _ITC_UNAVAILABLE:
+        # as available would overstate the claim. Latched, so a later rate line
+        # that says nothing cannot hand the credit back.
+        #
+        # Read with :func:`_flag` rather than against a set of its own. The
+        # private set this used to check knew four spellings of "no" and the
+        # shared reader knew eleven, and neither was a superset of the other, so
+        # the same answer was read differently depending on which shape a
+        # business happened to upload: a CSV saying "N/A", "Nil", "None",
+        # "False", "0" or "-" was read as credit *available*, and so was a JSON
+        # saying "Not available" — the words this column is actually about.
+        # Both gaps run one way. Credit the portal has withheld is counted as
+        # claimable, so the tax lands in ``itc_eligible`` instead of
+        # ``itc_at_risk`` and nothing tells the business the claim is the one
+        # the notice will be about.
+        #
+        # ``default=True`` because a blank cell is not a refusal — most exports
+        # leave the column empty on the rate lines below the first — and because
+        # it is the default the portal's own ``itcavl`` carries.
+        if not _flag(values.get("itc_available"), default=True):
             record.itc_available = False
 
         record.rate_items.append(

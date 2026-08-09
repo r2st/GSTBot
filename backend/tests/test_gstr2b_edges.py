@@ -53,7 +53,7 @@ class TestTheYesNoFlags:
         assert gstr2b.parse_json(payload)[0].itc_available is False
 
     def test_an_unrecognised_word_falls_back_rather_than_guessing(self):
-        # "Available"/"Blocked" style text from a hand-edited export. Guessing
+        # "Partially"/"Blocked" style text from a hand-edited export. Guessing
         # wrong here either invents credit or destroys it, so the field's
         # documented default is what stands.
         payload = portal_json()
@@ -64,6 +64,92 @@ class TestTheYesNoFlags:
         payload = portal_json()
         payload["data"]["docdata"]["b2b"][0]["inv"][0]["rev"] = "maybe"
         assert gstr2b.parse_json(payload)[0].reverse_charge is False
+
+
+class TestTheITCAnswerMeansTheSameInBothShapes:
+    """The same word about the same credit, read the same way, either way in.
+
+    A business uploads its 2B as the portal's JSON or as the CSV the portal
+    also offers, and which one it picks is a matter of what its accountant
+    downloaded — not a statement about the invoices. So a column that says
+    credit is unavailable has to be read as unavailable in both, and the two
+    readers here used to hold separate vocabularies for it: the CSV checked a
+    private four-word set, the JSON went through the shared reader's eleven,
+    and neither contained the other.
+
+    The gaps ran one way, which is why this is a contract and not a tidy-up.
+    Every word one reader missed was a *refusal* it read as consent, so tax the
+    portal has withheld was counted claimable — it lands in ``itc_eligible``
+    instead of ``itc_at_risk``, and the business is told a claim is safe in the
+    precise case a notice is coming. Parametrised over both shapes rather than
+    asserted twice, so a spelling added to one reader cannot quietly stay
+    missing from the other.
+    """
+
+    @staticmethod
+    def _from_json(raw: object) -> bool:
+        payload = portal_json()
+        payload["data"]["docdata"]["b2b"][0]["inv"][0]["itcavl"] = raw
+        return parse_json(payload)[0].itc_available
+
+    @staticmethod
+    def _from_csv(raw: object) -> bool:
+        csv_text = (
+            "GSTIN of supplier,Invoice number,Invoice Date,"
+            "Taxable Value(Rs),Integrated Tax(Rs),ITC Availability\n"
+            f"{SUPPLIER_GSTIN_OTHER_STATE},AGREE-1,15-04-2026,"
+            f'100000.00,18000.00,"{raw}"\n'
+        )
+        return parse_csv(csv_text)[0].itc_available
+
+    def _read(self, shape: str, raw: object) -> bool:
+        return self._from_json(raw) if shape == "json" else self._from_csv(raw)
+
+    # The whole vocabulary of "no", not just the four the CSV used to know.
+    # "N/A", "Nil", "None", "-" and "0" are what a hand-edited export carries
+    # where the portal wrote "N"; "Not available" and "Unavailable" are the
+    # words this column is actually about, and were the ones the JSON missed.
+    @pytest.mark.parametrize("shape", ["json", "csv"])
+    @pytest.mark.parametrize(
+        "raw",
+        [
+            "N", "No", "NO", "FALSE", "0", "F", "NA", "N/A",
+            "Not applicable", "None", "Nil", "-",
+            "Not available", "Unavailable", "not available", " NOT AVAILABLE ",
+        ],
+    )
+    def test_a_refusal_withholds_the_credit_whichever_shape_carries_it(self, shape, raw):
+        assert self._read(shape, raw) is False
+
+    @pytest.mark.parametrize("shape", ["json", "csv"])
+    @pytest.mark.parametrize("raw", ["Y", "Yes", "TRUE", "1", "T", "Available", "Applicable"])
+    def test_a_yes_leaves_the_credit_claimable_whichever_shape_carries_it(self, shape, raw):
+        assert self._read(shape, raw) is True
+
+    @pytest.mark.parametrize("shape", ["json", "csv"])
+    @pytest.mark.parametrize("raw", ["", "Partially"])
+    def test_saying_nothing_recognisable_defaults_to_available_in_both(self, shape, raw):
+        # Not a refusal. Most exports leave the column empty on the rate lines
+        # below the first, and the portal's own ``itcavl`` defaults this way —
+        # so a blank must not start withholding credit that was never withheld.
+        assert self._read(shape, raw) is True
+
+    def test_one_refused_rate_line_still_latches_the_whole_document(self):
+        # The widened vocabulary must not cost the latch: a document is one
+        # credit decision, and a later line saying nothing cannot hand back
+        # what an earlier line refused. "Nil" here is a word the CSV reader
+        # could not previously read at all.
+        csv_text = (
+            "GSTIN of supplier,Invoice number,Invoice Date,"
+            "Taxable Value(Rs),Integrated Tax(Rs),ITC Availability\n"
+            f"{SUPPLIER_GSTIN_OTHER_STATE},LATCH-1,15-04-2026,100000.00,18000.00,Nil\n"
+            f"{SUPPLIER_GSTIN_OTHER_STATE},LATCH-1,15-04-2026,50000.00,9000.00,\n"
+            f"{SUPPLIER_GSTIN_OTHER_STATE},LATCH-1,15-04-2026,50000.00,9000.00,Yes\n"
+        )
+        (record,) = parse_csv(csv_text)
+
+        assert record.itc_available is False
+        assert record.taxable_value == Decimal("200000.00")
 
 
 class TestPeriodFormats:

@@ -330,9 +330,18 @@ def to_money(value: object, default: Decimal | None = Decimal("0.00")) -> Decima
 # What a document, a portal export or a model says for "no" — and for "yes".
 # Kept as sets rather than as a regex because these are whole answers, not
 # substrings: "not applicable" must not be read as the "applicable" inside it.
-_TRUE_WORDS = frozenset({"Y", "YES", "TRUE", "1", "APPLICABLE", "T"})
+_TRUE_WORDS = frozenset({"Y", "YES", "TRUE", "1", "APPLICABLE", "T", "AVAILABLE"})
 _FALSE_WORDS = frozenset(
-    {"N", "NO", "FALSE", "0", "F", "NA", "N/A", "NOT APPLICABLE", "NONE", "NIL", "-"}
+    {
+        "N", "NO", "FALSE", "0", "F", "NA", "N/A", "NOT APPLICABLE", "NONE", "NIL", "-",
+        # The wording a GSTR-2B uses for its own "no", where the question is
+        # whether credit may be claimed rather than whether a clause applies.
+        # These used to live in a second, smaller set private to the GSTR-2B CSV
+        # reader; they belong here because the answer means the same thing
+        # whoever is asking. "Available" is their opposite and joins the true
+        # words for the same reason.
+        "NOT AVAILABLE", "UNAVAILABLE",
+    }
 )
 
 
