@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { currentPeriod, periodLabel } from "../lib/format";
 import ReconcilePage from "./ReconcilePage";
 
 const PERIOD = "2026-04";
@@ -183,7 +184,9 @@ function deferredFetch() {
 /** Switch to the month before the default, whenever the suite happens to run. */
 async function selectPreviousPeriod(user) {
   const select = screen.getByLabelText("Period");
-  await user.selectOptions(select, select.options[1].value);
+  const value = select.options[1].value;
+  await user.selectOptions(select, value);
+  return value;
 }
 
 describe("ReconcilePage", () => {
@@ -398,6 +401,37 @@ describe("ReconcilePage", () => {
     expect(
       await screen.findByText(/No GSTR-2B has been imported for 2026-04/),
     ).toBeInTheDocument();
+  });
+
+  it("blames the month a failed run was for, not the month now selected", async () => {
+    const user = userEvent.setup();
+    const pending = deferredFetch();
+    renderPage();
+
+    const started = currentPeriod();
+    const startedLoads = pending.splice(0);
+    startedLoads.find((r) => r.url.includes("/gstr2b/")).answer(imported());
+    startedLoads.find((r) => r.url.includes("/latest")).refuse(404);
+    await screen.findByText(/invoices imported/);
+
+    await user.click(screen.getByRole("button", { name: /Run reconciliation/ }));
+    await waitFor(() => expect(pending).toHaveLength(1));
+    const reconcile = pending.pop();
+    expect(reconcile.method).toBe("POST");
+
+    // The picker stays live while a run is in flight — nothing disables it.
+    const moved = await selectPreviousPeriod(user);
+    expect(moved).not.toBe(started);
+    const movedLoads = pending.splice(0);
+    movedLoads.find((r) => r.url.includes("/gstr2b/")).refuse(404);
+    movedLoads.find((r) => r.url.includes("/latest")).refuse(404);
+    await screen.findByText(/No GSTR-2B imported yet/);
+
+    reconcile.refuse(500);
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(`Could not reconcile ${periodLabel(started)}`);
+    expect(banner).not.toHaveTextContent(periodLabel(moved));
   });
 
   it("uploads a 2B and reports what the server made of it", async () => {

@@ -255,7 +255,11 @@ export default function ReconcilePage() {
       if (shownPeriod.current === target) setRun(result);
       setNotice(`Reconciled ${periodLabel(target)}`);
     } catch (err) {
-      setError(err.message);
+      // Named for the same reason the confirmation above names itself. The
+      // picker stays live for the whole run, so a failure landing after the
+      // user has moved to another month would otherwise read as that month's
+      // reconciliation — the one now on screen — refusing to run.
+      setError(`Could not reconcile ${periodLabel(target)}: ${err.message}`);
     } finally {
       setBusy(false);
     }
