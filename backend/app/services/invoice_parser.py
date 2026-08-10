@@ -978,8 +978,20 @@ def _labelled_amount(pattern: re.Pattern[str], text: str) -> tuple[Decimal | Non
 # Yes". The bracket there sits exactly where the "(Y/N)" box does, so it is
 # admitted in the same place — without it the label ends at "charge", the ")"
 # is not a separator, and the answer standing right beside it is not read.
+#
+# "Mechanism" is the third spelling, and the commonest of the three on a form
+# that spells anything out at all — it is the statutory name in sections 9(3)
+# and 9(4), so "Reverse Charge Mechanism (RCM) Applicable: Yes" is at least as
+# ordinary as the bare "Reverse Charge" this pattern was written against. Left
+# out, the word sat between "charge" and everything after it — the bracket,
+# the label words, the separator — so none of those matched what followed and
+# the line matched nothing at all. That is the failure the acronym clause
+# above already describes from the other direction: a real "Yes" went unread
+# and the field kept its default of "no reverse charge", marking the invoice
+# creditable and, on a sale, telling the buyer's GSTR-2B they owe nothing.
 _REVERSE_CHARGE_PATTERN = re.compile(
     r"(?:reverse\s*charge|rcm)"
+    r"(?:\s+mechanism)?"  # "Reverse Charge Mechanism"
     r"(?:\s*\(\s*(?:y\s*/\s*n|rcm|reverse\s*charge)\s*\))?+"  # "(Y/N)", "(RCM)"
     r"(?:\s+(?:is\s+)?applicable|\s+basis)?+"  # label words, never the answer
     r"\s*[:\-]?\s*"

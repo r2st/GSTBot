@@ -1804,6 +1804,9 @@ class TestRCMIsTheSameQuestionAsReverseCharge:
             "RCM: Y",
             "Whether GST is payable under reverse charge (RCM): Yes",
             "Reverse Charge (RCM): Yes",
+            "Reverse Charge Mechanism (RCM) Applicable: Yes",
+            "Is Reverse Charge Mechanism (RCM) applicable: Yes",
+            "Reverse Charge Mechanism: Yes",
         ],
     )
     def test_an_answer_of_yes_flags_the_invoice_however_it_is_spelt(self, line):
@@ -1817,6 +1820,8 @@ class TestRCMIsTheSameQuestionAsReverseCharge:
             "Whether tax is payable under RCM (Y/N): N",
             "RCM: Not Applicable",
             "Whether GST is payable under reverse charge (RCM): No",
+            "Reverse Charge Mechanism (RCM) Applicable: No",
+            "Reverse Charge Mechanism: No",
         ],
     )
     def test_an_answer_of_no_still_leaves_the_invoice_ordinary(self, line):
