@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date, datetime
 
 import pytest
+from sqlalchemy import event
 
 from app.core.config import settings
 from app.core.security import hash_password
@@ -266,6 +267,107 @@ class TestWhatIsExcluded:
         assert sent == []
         assert result.businesses == 0
         assert result.skipped_no_recipient == 1
+
+
+class TestAlertsThatVanishBetweenTheTwoQueries:
+    """``send_pending_alerts`` asks twice: once for the business ids that have
+    something outstanding, then once per business for the alerts themselves.
+    The sweep, the alerts API and a tenant deletion all write to the same rows
+    from other connections, so the two answers are not guaranteed to agree —
+    a business can be named by the first query and have nothing left by the
+    second. The guard for that is unreachable from ordinary fixtures, because
+    fixtures cannot write in the gap between two statements one function issues
+    back to back. A cursor-level listener can.
+    """
+
+    @pytest.fixture()
+    def vanish_after_the_scan(self, db_session):
+        """Hand back a way to soft-delete alerts the instant the id scan runs.
+
+        Call it with the business ids whose alerts should be gone by the time
+        the per-business fetch asks for them; call it with none for all of
+        them. Hooked to the ``DISTINCT`` scan specifically and fired once —
+        the statement after it is the one whose answer this is meant to
+        change, and re-firing there would only be a second no-op write.
+
+        The ``UPDATE`` goes through a second cursor on the same DBAPI
+        connection rather than the one SQLAlchemy is holding, which still has
+        the scan's rows to hand back.
+        """
+        fired: list[str] = []
+        bind = db_session.get_bind()
+        listeners: list = []
+
+        def arm(*business_ids: int):
+            where = ""
+            if business_ids:
+                ids = ", ".join(str(int(i)) for i in business_ids)
+                where = f" WHERE business_id IN ({ids})"
+
+            def _soft_delete_mid_flight(
+                conn, cursor, statement, parameters, context, executemany
+            ):
+                if fired or "DISTINCT" not in statement:
+                    return
+                fired.append(statement)
+                writer = conn.connection.cursor()
+                try:
+                    writer.execute(
+                        f"UPDATE alerts SET deleted_at = '2026-05-14 07:15:00'{where}"
+                    )
+                finally:
+                    writer.close()
+
+            event.listen(bind, "after_cursor_execute", _soft_delete_mid_flight)
+            listeners.append(_soft_delete_mid_flight)
+            return fired
+
+        try:
+            yield arm
+        finally:
+            for listener in listeners:
+                event.remove(bind, "after_cursor_execute", listener)
+
+    def test_a_business_whose_alerts_are_gone_by_the_second_query_is_skipped(
+        self, db_session, business, sent, vanish_after_the_scan
+    ):
+        make_user(db_session, business)
+        make_alert(db_session, business)
+        fired = vanish_after_the_scan()
+
+        result = send_pending_alerts(db_session, now=NOW)
+
+        # The scan did name the business - without this the test proves
+        # nothing about the guard, only that an empty table sends no email.
+        assert fired, "the DISTINCT scan never ran"
+        assert sent == []
+        assert result == alert_delivery.AlertEmailResult()
+
+    def test_the_business_whose_alerts_survived_still_gets_its_digest(
+        self, db_session, sent, vanish_after_the_scan
+    ):
+        """The skip is a ``continue``, not a ``return``.
+
+        A row disappearing under one business says nothing about the next one
+        in the scan, and ending the run there would silently cost every
+        business after it today's send - the same failure the per-business
+        commit exists to rule out.
+        """
+        first = make_business(db_session, gstin=BUSINESS_GSTIN)
+        second = make_business(db_session, gstin="29AABCU9603R1ZM")
+        make_user(db_session, first, email="first@example.com")
+        make_user(db_session, second, email="second@example.com")
+        make_alert(db_session, first)
+        second_alert = make_alert(db_session, second)
+        vanish_after_the_scan(first.id)
+
+        result = send_pending_alerts(db_session, now=NOW)
+
+        assert [call["to"] for call in sent] == ["second@example.com"]
+        assert result.businesses == 1
+        assert result.alerts_sent == 1
+        db_session.refresh(second_alert)
+        assert second_alert.status is AlertStatus.SENT
 
 
 class TestARelayFailure:
