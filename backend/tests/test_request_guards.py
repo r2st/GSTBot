@@ -12,6 +12,10 @@ read.
   JSON routes did not measure at all.
 * ``/api/v1/health`` skipped the global rate limiter, because the limiter was
   reading the list of paths that exist to keep the *access log* quiet.
+
+The last class here guards the same shape prospectively rather than
+retrospectively: which routes are metered was, until it, a per-router habit
+with nothing sweeping it.
 """
 from __future__ import annotations
 
@@ -311,3 +315,96 @@ class TestTheHealthProbesAndTheGlobalLimit:
         assert "/api/v1/health" in _QUIET_PATHS
         assert "/api/v1/health" not in _UNLIMITED_PATHS
         assert _UNLIMITED_PATHS < _QUIET_PATHS
+
+
+# --------------------------------------------------------------------------
+# Which routes carry a bucket of their own
+# --------------------------------------------------------------------------
+
+# Routes with no ``RateLimit`` dependency of their own. Two of the three are
+# still counted by the global limiter in ``app.core.middleware``; only
+# ``/health/live`` is exempt from both, and ``_UNLIMITED_PATHS`` is where that
+# is decided. Adding to this set is the same kind of decision as adding to the
+# public allowlist above — it says a route may be called without bound by
+# anyone who can reach it.
+UNMETERED = {
+    # The index: a dict of literal strings naming the other URLs. No
+    # dependency, no query, nothing per-caller to spend.
+    "/",
+    # Touches nothing. See ``_UNLIMITED_PATHS`` for why metering a liveness
+    # probe eventually has an orchestrator kill a pod for being healthy.
+    "/api/v1/health/live",
+    # No bucket of its own, but not a hole: the global limiter counts it, which
+    # ``test_readiness_is_counted_as_it_always_was`` above pins from the
+    # outside. A per-route bucket on top would be a second number to retune
+    # during an incident for no more protection than the first already gives.
+    "/api/v1/health/ready",
+}
+
+
+class TestEveryRouteIsMetered:
+    """A new endpoint cannot ship unmetered without this file going red.
+
+    The three sweeps in ``tests/test_tenancy_contract.py`` and above exist
+    because tenancy and authentication were per-router habits that a new route
+    could quietly not have. Rate limiting was the third such habit and the only
+    one with nothing sweeping it: every route today does carry a bucket, and
+    nothing in the suite would have noticed a route added tomorrow that did
+    not.
+
+    That is the hole ``POST /itc/set-off`` came through in a different form —
+    an endpoint whose signature looks complete because what it is missing is a
+    dependency rather than an argument.
+    """
+
+    def test_no_route_outside_the_unmetered_ones_is_missing_a_bucket(self):
+        from app.core.rate_limit import RateLimit
+        from tests.test_route_contracts import API_ROUTES
+
+        def calls(dependant):
+            yield dependant.call
+            for sub in dependant.dependencies:
+                yield from calls(sub)
+
+        unmetered = {
+            route.path
+            for route in API_ROUTES
+            # Same exclusion as the token sweep: tests/test_errors.py mounts a
+            # router on the shared app and whether it is here depends on import
+            # order.
+            if not route.path.startswith("/_")
+            and not any(isinstance(call, RateLimit) for call in calls(route.dependant))
+        }
+        assert unmetered <= UNMETERED, f"no rate limit: {sorted(unmetered - UNMETERED)}"
+
+    def test_the_sweep_is_reading_real_buckets(self):
+        """Guards the sweep itself: a walk that finds nothing would pass it."""
+        from app.core.rate_limit import RateLimit
+        from tests.test_route_contracts import API_ROUTES
+
+        def calls(dependant):
+            yield dependant.call
+            for sub in dependant.dependencies:
+                yield from calls(sub)
+
+        metered = [
+            route
+            for route in API_ROUTES
+            if any(isinstance(call, RateLimit) for call in calls(route.dependant))
+        ]
+        # Every router declares at least one bucket, and there are ten of them.
+        assert len(metered) >= 30, f"only {len(metered)} routes look metered"
+
+    def test_the_unmetered_ones_that_are_not_exempt_are_still_counted_globally(self):
+        """The allowlist is three routes, and only one is a genuine hole."""
+        from app.core.middleware import _UNLIMITED_PATHS
+
+        # /health/ready and / carry no bucket of their own, so the global
+        # limiter is the only thing bounding them. If either were ever added to
+        # _UNLIMITED_PATHS it would become reachable without any bound at all,
+        # and this sweep would be the last place that was still true.
+        assert "/" not in _UNLIMITED_PATHS
+        assert "/api/v1/health/ready" not in _UNLIMITED_PATHS
+        # And the one that is exempt from both layers is still only the one.
+        exempt_from_both = sorted(path for path in UNMETERED if path in _UNLIMITED_PATHS)
+        assert exempt_from_both == ["/api/v1/health/live"]

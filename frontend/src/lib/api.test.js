@@ -299,6 +299,39 @@ describe("api", () => {
     expect(options.headers["Content-Type"]).toBeUndefined();
   });
 
+  it("posts every file of a batch under the one field name the route reads", async () => {
+    setToken("tok-1");
+    global.fetch.mockResolvedValueOnce(jsonResponse({ items: [] }));
+
+    const files = [
+      new File(["one"], "a.txt", { type: "text/plain" }),
+      new File(["two"], "b.txt", { type: "text/plain" }),
+    ];
+    await api.bulkUploadInvoices(files, "sales");
+
+    const [url, options] = global.fetch.mock.calls[0];
+    expect(url).toBe("/api/v1/invoices/bulk");
+    // `files: list[UploadFile] = File(...)` on the route is a *repeated* field,
+    // not one field holding a list. Appending under any other name — "file",
+    // the "files[]" some clients send — is a 422 naming a field the browser
+    // never sent, and nothing on the page would say which. Pinned by name and
+    // by count because getAll is what distinguishes the two mistakes: the
+    // wrong name gives an empty list, one append gives a short one.
+    expect(options.body.getAll("files").map((f) => f.name)).toEqual(["a.txt", "b.txt"]);
+    expect(options.body.get("invoice_type")).toBe("sales");
+    expect(options.headers["Content-Type"]).toBeUndefined();
+  });
+
+  it("defaults a batch to purchase, the type that claims credit", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ items: [] }));
+    await api.bulkUploadInvoices([new File(["one"], "a.txt")]);
+
+    // Matches the route's own default. A batch booked as sales by accident
+    // claims input credit on the business's own output tax — see the comment
+    // on the type toggle in UploadPage for why that direction is the costly one.
+    expect(global.fetch.mock.calls[0][1].body.get("invoice_type")).toBe("purchase");
+  });
+
   it("omits empty filters from the invoice query", async () => {
     global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
     await api.listInvoices({ invoice_type: "purchase", status: "", search: undefined, limit: 25 });
