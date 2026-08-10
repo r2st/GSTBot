@@ -795,6 +795,110 @@ Grand Total: 1,18,000.00
         absent=("cgst", "sgst"),
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
+    # ------------------------------------------------------- HSN in a column
+    Layout(
+        name="HSN in the item table's column, dotted into groups",
+        text=f"""\
+AURANGABAD BEARINGS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: AB-77
+Invoice Date: 04/05/2026
+Description        HSN       Qty   Rate      Amount
+Ball bearing       8482.10    10   1000.00   10,000.00
+Taxable Value                                10,000.00
+CGST 9%                                         900.00
+SGST 9%                                         900.00
+Grand Total                                  11,800.00
+""",
+        invoice_number="AB-77",
+        invoice_date=date(2026, 5, 4),
+        taxable_value=money("10000.00"),
+        total_value=money("11800.00"),
+        cgst=money("900.00"),
+        sgst=money("900.00"),
+        tax_rate=Decimal("18"),
+        # The rate column is the discriminating part: "1000.00" normalises to
+        # six digits and would be a well-formed HSN read on shape alone. What
+        # rules it out is that it does not sit under the heading.
+        hsn_code="848210",
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="an HSN/SAC column carrying a service accounting code",
+        text=f"""\
+NANDED CONSULTING
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: NC-12
+Invoice Date: 18/06/2026
+Sr  Description       HSN/SAC   Qty   Amount
+1   Consultancy       998311      1   10,000.00
+Taxable Value                        10,000.00
+CGST 9%                                 900.00
+SGST 9%                                 900.00
+Grand Total                          11,800.00
+""",
+        invoice_number="NC-12",
+        invoice_date=date(2026, 6, 18),
+        taxable_value=money("10000.00"),
+        total_value=money("11800.00"),
+        cgst=money("900.00"),
+        sgst=money("900.00"),
+        tax_rate=Decimal("18"),
+        hsn_code="998311",
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="a rate-wise HSN summary printed below the totals",
+        text=f"""\
+JALGAON POLYMERS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: JP-9
+Invoice Date: 22/07/2026
+Taxable Value: 50,000.00
+CGST 9%: 4,500.00
+SGST 9%: 4,500.00
+Grand Total: 59,000.00
+HSN Summary
+HSN        Taxable       CGST      SGST
+39269099  50,000.00   4,500.00  4,500.00
+""",
+        invoice_number="JP-9",
+        invoice_date=date(2026, 7, 22),
+        taxable_value=money("50000.00"),
+        total_value=money("59000.00"),
+        cgst=money("4500.00"),
+        sgst=money("4500.00"),
+        tax_rate=Decimal("18"),
+        hsn_code="39269099",
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
+    Layout(
+        name="an item table with no HSN column at all",
+        text=f"""\
+LATUR TRADERS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: LT-5
+Invoice Date: 09/09/2026
+Description        Qty    Rate      Amount
+Cotton bale        1000   50.00     50,000.00
+Taxable Value                       50,000.00
+CGST 9%                              4,500.00
+SGST 9%                              4,500.00
+Grand Total                         59,000.00
+""",
+        invoice_number="LT-5",
+        invoice_date=date(2026, 9, 9),
+        taxable_value=money("50000.00"),
+        total_value=money("59000.00"),
+        cgst=money("4500.00"),
+        sgst=money("4500.00"),
+        tax_rate=Decimal("18"),
+        # A quantity of 1000 is four digits and so is a well-formed HSN. With
+        # no heading to sit under there is nothing to read it as one, and an
+        # invented code would file a return against the wrong commodity.
+        absent=("hsn_code",),
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
 )
 
 
@@ -866,3 +970,73 @@ class TestTheCorpusItself:
         # one carries IGST; a corpus of only one shape proves half the module.
         assert any(layout.igst > ZERO for layout in CORPUS)
         assert any(layout.cgst > ZERO for layout in CORPUS)
+
+
+class TestTheHsnColumnReader:
+    """Reading HSN out of the item table rather than off an inline label.
+
+    Rule 46 puts the code in the item table, and a table heads its columns
+    once. So the common invoice prints "HSN" at the top and the digits several
+    lines below, with "Qty", "Rate" and "Amount" in between — out of reach of a
+    pattern that expects the code beside its label. What follows fixes the
+    boundaries of the fallback that reads it, because a column is located by
+    position alone and position is a weaker claim than a label.
+    """
+
+    def _table(self, code_line: str, heading: str = "Description        HSN       Qty") -> str:
+        return (
+            f"PIMPRI FASTENERS\nGSTIN: {SUPPLIER_GSTIN_SAME_STATE}\n"
+            f"Invoice No: PF-1\nInvoice Date: 01/04/2026\n"
+            f"{heading}\n{code_line}\n"
+            "Taxable Value: 10,000.00\nGrand Total: 11,800.00\n"
+        )
+
+    def test_an_inline_label_is_preferred_to_a_column(self):
+        # A document carrying both: the label is the surer reading, and the
+        # column below it is the per-line repeat of the same summary.
+        text = (
+            f"GSTIN: {SUPPLIER_GSTIN_SAME_STATE}\nInvoice No: PF-2\n"
+            "HSN: 730890\n"
+            "Description        HSN       Qty\n"
+            "Bracket            847130     10\n"
+            "Grand Total: 11,800.00\n"
+        )
+
+        assert parse_heuristic(text).hsn_code == "730890"
+
+    @pytest.mark.parametrize("code", ["8482", "848210", "84821000"])
+    def test_each_length_the_portal_takes_is_read(self, code):
+        line = "Ball bearing       " + code
+        assert parse_heuristic(self._table(line)).hsn_code == code
+
+    @pytest.mark.parametrize("code", ["84821", "8482100"])
+    def test_a_length_the_portal_refuses_is_not_read(self, code):
+        # Five and seven digits are not HSN codes. Storing one puts a value in
+        # the field that `validate_invoice` then reports as an error, which
+        # reads as a misread code rather than the blank it actually is.
+        line = "Ball bearing       " + code
+        assert parse_heuristic(self._table(line)).hsn_code is None
+
+    def test_a_dotted_code_loses_its_dots(self):
+        # 8482.10 is the 6-digit code printed in groups, not a figure.
+        line = "Ball bearing       8482.10"
+        assert parse_heuristic(self._table(line)).hsn_code == "848210"
+
+    def test_a_figure_in_a_neighbouring_column_is_not_the_code(self):
+        # "1000.00" normalises to six digits and is a well-formed code on
+        # shape alone. It sits under "Rate", so it is a rate.
+        heading = "Description        HSN       Qty   Rate"
+        line = "Ball bearing                  10   1000.00"
+
+        assert parse_heuristic(self._table(line, heading)).hsn_code is None
+
+    def test_a_code_far_below_its_heading_is_not_claimed(self):
+        # Past the item table the digits belong to another part of the page —
+        # a bank account, a PIN code, a phone number.
+        heading = "Description        HSN       Qty"
+        line = "\n".join(["", "", "", "", "Bank A/C           123456"])
+
+        assert parse_heuristic(self._table(line, heading)).hsn_code is None
+
+    def test_a_column_heading_with_no_table_under_it_reads_nothing(self):
+        assert parse_heuristic(self._table("")).hsn_code is None

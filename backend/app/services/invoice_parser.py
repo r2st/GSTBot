@@ -882,6 +882,61 @@ _TOTAL_PATTERN = re.compile(
 _HSN_PATTERN = re.compile(r"\b(?:HSN|SAC)(?:\s*/\s*SAC)?\s*(?:code)?\s*[:.\-]?\s*(\d{4,8})\b",
                           re.IGNORECASE)
 
+# The same label used as a *column header*, with the code printed on a later
+# line underneath it rather than beside it.
+#
+# This is how nearly every real tax invoice carries HSN: rule 46 requires the
+# code in the item table, and a table prints its heading once at the top. The
+# inline pattern above cannot reach it, because the other column headings
+# ("Qty", "Rate", "Amount") sit between the word and the digits. Left unread,
+# every such invoice files with an empty HSN — a warning out of
+# :func:`~app.services.filing.validate_invoice`, and a row missing from the
+# rate-wise HSN summary the portal asks for in GSTR-1.
+_HSN_HEADER = re.compile(r"\b(?:HSN|SAC)(?:\s*/\s*SAC)?(?:\s*code)?\b", re.IGNORECASE)
+
+# A code as printed in that column. Either plain digits, or broken into groups
+# by dots — "8482.10" is a common way to print the 6-digit code 848210.
+#
+# The lookarounds are what keep a money figure out. A comma or a further digit
+# on either side disqualifies the run, so neither the "000" inside "10,000.00"
+# nor the "11800" of "11800.00" can pass for a code; and the length check after
+# normalising settles the rest, since the portal takes 4, 6 or 8 digits and
+# nothing else.
+_HSN_COLUMN_CODE = re.compile(r"(?<![\d,.])(\d{4}(?:\.\d{2}){1,2}|\d{4,8})(?![\d,.])")
+
+# How far below its heading a column's first value may sit. A table puts it on
+# the very next line; a couple more allows for a rule drawn under the headings,
+# or a wrapped heading. Far enough past that and any digits found are another
+# part of the document rather than this column's contents.
+_HSN_COLUMN_REACH = 4
+
+
+def _hsn_in_column(text: str) -> str | None:
+    """An HSN read from the item table's column, or ``None``.
+
+    Matched by horizontal position: the code has to overlap the columns the
+    heading itself occupies. That is what tells it from the quantity and the
+    rate printed alongside it, which are digits on the same line and are only
+    ever distinguishable by which heading they sit under.
+    """
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        header = _HSN_HEADER.search(line)
+        if header is None:
+            continue
+        # Widened by a character at each end: a heading and its values are
+        # often aligned to opposite edges of the column, so a short code under
+        # a long heading can miss it by one.
+        start, end = header.start() - 1, header.end() + 1
+        for below in lines[index + 1 : index + 1 + _HSN_COLUMN_REACH]:
+            for match in _HSN_COLUMN_CODE.finditer(below):
+                if match.start() >= end or match.end() <= start:
+                    continue
+                code = match.group(1).replace(".", "")
+                if len(code) in (4, 6, 8):
+                    return code
+    return None
+
 # A figure carrying paise, which is the one shape that proves ``_AMOUNT``
 # matched an amount in full rather than stopping part-way through one.
 _COMPLETE_AMOUNT = re.compile(r"\d[\d,]*\.\d{2}")
@@ -1171,6 +1226,11 @@ def parse_heuristic(text: str) -> ParsedInvoice:
     result.invoice_date = _invoice_date_in(text)
     if match := _HSN_PATTERN.search(text):
         result.hsn_code = match.group(1)
+    else:
+        # Only as a fallback: the inline label is the surer reading, and where
+        # a document carries both it is the summary block at the foot that the
+        # column repeats per line item.
+        result.hsn_code = _hsn_in_column(text)
 
     # Tax amounts are read line by line, because the label, the rate and the
     # amount all sit on one line and only their order distinguishes them.
