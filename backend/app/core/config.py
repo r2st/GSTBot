@@ -447,6 +447,19 @@ def validate_startup_config(settings_obj: Settings | None = None) -> list[str]:
             "alerts will stay in-app only."
         )
 
+    if current.smtp_username and not current.smtp_password:
+        # ``smtplib.SMTP.login`` takes the password as-is and encodes it, so a
+        # blank one is not "log in with no password" — it is an ``AttributeError``
+        # the first time the digest tries to send, which is a type
+        # ``send_email`` does not catch and is out of scope for the per-tenant
+        # isolation the alert digest otherwise guarantees. Catching the typo
+        # here, before a relay is ever dialled, is cheaper than catching it in
+        # a log line the day the digest is first turned on.
+        found.append(
+            "SMTP_USERNAME is set but SMTP_PASSWORD is not — the alert email digest "
+            "will fail to authenticate."
+        )
+
     if current.is_production:
         if not current.rate_limit_enabled:
             found.append("RATE_LIMIT_ENABLED is false in a production environment.")

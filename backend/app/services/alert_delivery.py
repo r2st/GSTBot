@@ -163,9 +163,20 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
             continue
 
         subject, body = _digest(alerts)
-        reached = _send_to_all(recipients, subject, body, business_id=business_id)
 
+        # The send itself is inside the try, not just the commit after it.
+        # ``_send_to_all`` only ever catches :class:`EmailSendError` — the type
+        # :func:`send_email` promises to raise for a relay it can reach and
+        # fails against. A misconfigured relay does not keep to that contract:
+        # ``smtplib.SMTP.login`` with a username set and no password raises
+        # ``AttributeError``, not ``SMTPException``, and nothing upstream of
+        # here is prepared to see one. Left outside the try, that one bad
+        # tenant's config would propagate out of this function entirely and
+        # take every business after it in ``business_ids`` down with it — the
+        # exact failure the per-business commit below exists to rule out, and
+        # the one the module docstring promises will not happen.
         try:
+            reached = _send_to_all(recipients, subject, body, business_id=business_id)
             for alert in alerts:
                 alert.channel = _CHANNEL
                 if reached:
@@ -176,7 +187,7 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
             db.commit()
         except Exception:  # noqa: BLE001 - one tenant must not end the run
             db.rollback()
-            logger.exception("Could not record alert delivery for business %s", business_id)
+            logger.exception("Could not send/record alert delivery for business %s", business_id)
             continue
 
         total = AlertEmailResult(

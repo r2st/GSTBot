@@ -229,6 +229,18 @@ class TestStartupWarnings:
         warnings = validate_startup_config(Settings(**prod(log_format="console")))
         assert any("LOG_FORMAT" in w for w in warnings)
 
+    def test_an_smtp_username_with_no_password_warns(self):
+        warnings = validate_startup_config(
+            Settings(**prod(smtp_username="alerts", smtp_password=""))
+        )
+        assert any("SMTP_PASSWORD" in w for w in warnings)
+
+    def test_an_smtp_username_with_a_password_warns_about_nothing(self):
+        warnings = validate_startup_config(
+            Settings(**prod(smtp_username="alerts", smtp_password="hunter2"))
+        )
+        assert not any("SMTP" in w for w in warnings)
+
     def test_a_clean_production_config_warns_about_nothing_security_related(self):
         warnings = validate_startup_config(
             Settings(
