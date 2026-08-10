@@ -884,4 +884,142 @@ describe("ReconcilePage", () => {
     expect(onPost).not.toHaveBeenCalled();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
+
+  it("does nothing when the picker reports no file list at all", async () => {
+    // The sibling of the case above, and the reason the guard is `?? []`
+    // rather than a length check: a picker reset programmatically reports
+    // `files` as null in some browsers, and `Array.from(null)` throws.
+    const onPost = vi.fn();
+    mockApi({ imported2b: imported(), latest: run(), onPost });
+    renderPage();
+    await screen.findByText("ITC at risk", { selector: ".stat-label" });
+
+    fireEvent.change(screen.getByLabelText(/Replace GSTR-2B|Import GSTR-2B/), {
+      target: { files: null },
+    });
+
+    expect(onPost).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+});
+
+// The report is written by the matcher, not by a form, and every field on a
+// finding traces back to something the parser did or did not read off a scan.
+// A row that renders only when all of them are present is a row that vanishes
+// for exactly the invoices most in need of attention.
+describe("a finding assembled from what the parser could not read", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A run whose sole finding carries the bare minimum the matcher emits. */
+  function bare(overrides = {}) {
+    return run({
+      total_invoices: 1,
+      matched_count: 0,
+      report: {
+        tolerance: "1.00",
+        findings: [
+          {
+            category: "missing_in_2b",
+            invoice_id: 31,
+            invoice_number: null,
+            supplier_gstin: null,
+            supplier_name: null,
+            invoice_date: null,
+            differences: [],
+            books: { taxable_value: "50000.00", total_tax: "9000.00" },
+            ...overrides,
+          },
+        ],
+      },
+    });
+  }
+
+  it("still links an invoice with no number, under a stand-in label", async () => {
+    // This is the row that matters most — in the books, not in the 2B, so the
+    // credit is at risk — and it is the one a photographed invoice with no
+    // legible number produces. A blank cell here is an unclickable dead end.
+    mockApi({ imported2b: imported(), latest: bare() });
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "(no number)" });
+    expect(link).toHaveAttribute("href", "/invoices/31");
+  });
+
+  it("shows a dash for a supplier it could not name, and no stray GSTIN line", async () => {
+    mockApi({ imported2b: imported(), latest: bare() });
+    renderPage();
+
+    const row = (await screen.findByRole("link", { name: "(no number)" })).closest("tr");
+    // The supplier cell holds a name over a GSTIN. With neither read, the
+    // dash stands in for the name and the GSTIN line renders as nothing —
+    // not as the literal "null" that a bare interpolation would print.
+    expect(row.querySelectorAll("td")[2].textContent).toBe("—");
+  });
+
+  it("prints an unlinked stand-in for a 2B row with no invoice id", async () => {
+    // A finding the statement declares and the books never booked has no
+    // invoice of ours to link to, so the same stand-in has to render as text.
+    mockApi({
+      imported2b: imported(),
+      latest: bare({ category: "missing_in_books", invoice_id: null }),
+    });
+    renderPage();
+
+    expect(await screen.findByText("(no number)")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "(no number)" })).not.toBeInTheDocument();
+  });
+
+  it("labels a category this build has never heard of, rather than blanking the chip", async () => {
+    // The matcher's categories are a server-side enum. A build of this app
+    // that predates a new one must not answer with an empty chip on a row it
+    // is still showing every other column of.
+    mockApi({
+      imported2b: imported(),
+      latest: bare({ category: "amended_by_supplier", invoice_number: "AMD-1" }),
+    });
+    renderPage();
+
+    const row = (await screen.findByText("AMD-1")).closest("tr");
+    expect(within(row).getByText("amended_by_supplier")).toBeInTheDocument();
+  });
+
+  it("marks a late filing with no note without an empty tooltip", async () => {
+    mockApi({
+      imported2b: imported(),
+      latest: bare({ carried: true, note: null, invoice_number: "APR/1" }),
+    });
+    renderPage();
+
+    const row = (await screen.findByText("APR/1")).closest("tr");
+    expect(within(row).getByText("Late filing")).toHaveAttribute("title", "");
+  });
+
+  it("counts a run with no matched tally as none matched, not as all of them", async () => {
+    // A run row written before the counter existed reads back null. Rendering
+    // that as "null / 3" is merely ugly; letting it satisfy the all-matched
+    // comparison would colour the card green on a period nothing matched in.
+    mockApi({
+      imported2b: imported(),
+      latest: run({ matched_count: null, total_invoices: 3 }),
+    });
+    renderPage();
+
+    const card = (await screen.findByText("Matched", { selector: ".stat-label" })).closest(
+      ".stat-card",
+    );
+    expect(within(card).getByText("0 / 3")).toBeInTheDocument();
+    expect(card).toHaveClass("tone-warn");
+  });
+
+  it("says something when the refusal it was handed carries no words", async () => {
+    // `{"detail": ""}` from a proxy that rewrote the body. An empty string is
+    // not nullish, so it survives every `??` on the way here and lands as an
+    // error banner with nothing in it — which reads as a rendering bug rather
+    // than as a period that could not be loaded.
+    mockApi({ fail: { status: 500, message: "" } });
+    renderPage();
+
+    expect(await screen.findByText("Could not load this period.")).toBeInTheDocument();
+  });
 });

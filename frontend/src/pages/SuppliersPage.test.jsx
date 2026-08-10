@@ -839,6 +839,39 @@ describe("SuppliersPage", () => {
       expect(await screen.findByText("dispute_rate")).toBeInTheDocument();
     });
 
+    it("shows a dash for a supplier there is not yet enough evidence to score", async () => {
+      // A supplier seen on one invoice in one period has no filing history to
+      // score against, and the backend sends the score as null rather than
+      // inventing a zero. Rendering that null as an empty cell reads as a
+      // score of nothing, which is the opposite claim — the dash says the
+      // score is unknown, which is what the confidence figure beside it is
+      // there to qualify.
+      const user = userEvent.setup();
+      mockApi({
+        detail: detail({
+          score_detail: scoreDetail({
+            score: null,
+            risk_level: "unknown",
+            confidence: 0.1,
+            invoices_observed: 1,
+            periods_observed: 1,
+          }),
+        }),
+      });
+      renderPage();
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      // Scoped to the panel's key-value block: "Score" also heads a column of
+      // the table listing it, and another of the table behind the panel.
+      const panel = (await screen.findByRole("heading", { name: /Northwind|29AAG/ })).closest(
+        "section",
+      );
+      const score = within(panel.querySelector(".kv")).getByText("Score").closest("div");
+      expect(within(score).getByText("—")).toBeInTheDocument();
+    });
+
     it("labels a risk level it does not recognise as unrated", async () => {
       // `RISK[level] ?? RISK.unknown`. A backend that adds a `critical` level
       // before the frontend learns the word must not render an unstyled chip

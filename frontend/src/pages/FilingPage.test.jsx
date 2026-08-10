@@ -282,6 +282,47 @@ describe("FilingPage", () => {
     );
   });
 
+  it("lists an issue about an invoice with no number, and one about no invoice", async () => {
+    // Both shapes come out of the validator. An invoice whose number the
+    // parser never read still has a GSTIN the portal will reject, and a
+    // return-level issue — a period with no invoices at all, a GSTIN missing
+    // from the business record — belongs to no invoice. A row that renders
+    // blank for either is a defect the user is told about and cannot find.
+    mockApi({
+      gstr1: gstr1({
+        validation: validation({
+          issues: [
+            {
+              invoice_id: 9,
+              invoice_number: null,
+              field: "counterparty_gstin",
+              severity: "error",
+              message: "No supplier GSTIN was read from this invoice",
+            },
+            {
+              invoice_id: null,
+              invoice_number: null,
+              field: "period",
+              severity: "warning",
+              message: "No invoices in this period",
+            },
+          ],
+        }),
+      }),
+    });
+    renderPage();
+
+    await loaded();
+    // The one with an invoice behind it is clickable under a stand-in label.
+    expect(screen.getByRole("link", { name: "(no number)" })).toHaveAttribute(
+      "href",
+      "/invoices/9",
+    );
+    // The return-level one reads the same but has nowhere to go.
+    expect(screen.getAllByText("(no number)")).toHaveLength(2);
+    expect(screen.getAllByRole("link", { name: "(no number)" })).toHaveLength(1);
+  });
+
   it("says so plainly when there is nothing to fix", async () => {
     mockApi();
     renderPage();
@@ -369,6 +410,36 @@ describe("FilingPage", () => {
       .closest("section");
     expect(within(panel).getByText("₹11,000.00")).toBeInTheDocument();
     expect(within(panel).getByText("₹9,000.00")).toBeInTheDocument();
+  });
+
+  it("falls back to the set-off's own figure when the combined one is absent", async () => {
+    // `gstbot_cash_payable` and `gstbot_reverse_charge` are the later of the
+    // two shapes this document has had. A return generated before them — one
+    // being re-read from a stored preview — still has to render a cash figure
+    // and a set-off panel rather than "₹0.00" under a heading asking what is
+    // left to pay.
+    const user = userEvent.setup();
+    const document = gstr3b();
+    mockApi({
+      gstr3b: {
+        ...document,
+        document: {
+          ...document.document,
+          gstbot_cash_payable: null,
+          gstbot_reverse_charge: null,
+        },
+      },
+    });
+    renderPage();
+
+    await loaded();
+    await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+
+    const panel = (await screen.findByRole("heading", { name: "What this leaves to pay" }))
+      .closest("section");
+    expect(within(panel).getByText("₹2,000.00")).toBeInTheDocument();
+    // And says nothing about a reverse charge it knows nothing about.
+    expect(within(panel).queryByText("Of which reverse charge")).not.toBeInTheDocument();
   });
 
   it("downloads an export under the name the server gave it", async () => {
@@ -548,6 +619,45 @@ describe("FilingPage", () => {
       expect(onRecordFiled).not.toHaveBeenCalled();
     });
 
+    it("clears the ARN complaint as soon as the field is corrected", async () => {
+      // The message sits under the field and is about what is in it. Left up
+      // while someone retypes, it reads as a standing refusal of the value
+      // they are looking at — and the submit that would clear it is the very
+      // thing the message is telling them not to press.
+      const user = userEvent.setup();
+      mockApi({ onRecordFiled: vi.fn() });
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      const field = await screen.findByLabelText(/ARN/i);
+      await user.type(field, "AB12");
+      await user.click(await markFiled());
+      await screen.findByRole("alert");
+
+      await user.type(field, "3456789012");
+
+      await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+      expect(field).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("names a recorded filing whose acknowledgement was never supplied", async () => {
+      // The ARN is optional on purpose — it is often not to hand at the moment
+      // someone marks a return done. The sentence still has to read as a
+      // sentence, without a dangling "(ARN )".
+      mockApi({
+        filingStatus: filingStatus([
+          standing({ period: previousPeriod(), filed: true, filed_on: "2026-05-09", arn: null }),
+        ]),
+      });
+      const user = userEvent.setup();
+      renderPage();
+
+      await selectCompletedPeriod(user);
+      const note = await screen.findByText(/Already recorded as filed on/i);
+      expect(note).not.toHaveTextContent("ARN");
+      expect(note).toHaveTextContent(/corrects the reference rather than filing twice/);
+    });
+
     it("confirms the filing by naming its own period", async () => {
       const user = userEvent.setup();
       mockApi();
@@ -678,6 +788,23 @@ describe("FilingPage", () => {
       const table = await screen.findByRole("region", { name: "Filing status by period" });
       expect(within(table).getByText("Due in 0d")).toBeInTheDocument();
       expect(within(table).queryByText(/Overdue/)).not.toBeInTheDocument();
+    });
+
+    it("names a return type this build does not know, rather than blanking the cell", async () => {
+      // The status table lists whatever the server tracks. GSTR-9 or a CMP-08
+      // added there before this screen learns to preview it must still appear
+      // with its period and due date — the table is what says a deadline is
+      // coming, and a row with no return name on it says nothing at all.
+      mockApi({
+        filingStatus: filingStatus([
+          standing({ return_type: "gstr9", due_date: "2026-12-31", days_until_due: 200 }),
+        ]),
+      });
+      renderPage();
+
+      const table = await screen.findByRole("region", { name: "Filing status by period" });
+      expect(within(table).getByText("GSTR9")).toBeInTheDocument();
+      expect(within(table).getByText("31 Dec 2026")).toBeInTheDocument();
     });
 
     it("marks a return filed after its due date as late rather than on time", async () => {

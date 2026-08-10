@@ -153,6 +153,46 @@ describe("LoginPage", () => {
       expect(screen.queryByText(/check digit does not match/)).not.toBeInTheDocument();
     });
 
+    it("does not clear a live verdict because a superseded check failed", async () => {
+      // The other half of the same guard, on the failure path. A check that
+      // errors is not a verdict — but it must not un-say the verdict for the
+      // GSTIN now in the field either, which is the hint telling someone
+      // their registration will go through.
+      const user = userEvent.setup();
+      const pending = [];
+      global.fetch = vi.fn(
+        (url) =>
+          new Promise((resolve) => {
+            pending.push({
+              url: String(url),
+              answer: (body) => resolve(jsonResponse(body)),
+              // The lookup is unauthenticated, so a 429 from the IP bucket is
+              // the realistic way this rejects while someone is typing.
+              refuse: () => resolve(jsonResponse({ detail: "Too many requests" }, { status: 429 })),
+            });
+          }),
+      );
+
+      renderPage();
+      await user.click(screen.getByRole("tab", { name: "Create account" }));
+      const field = screen.getByLabelText("GSTIN");
+
+      await user.type(field, "27AAPFU0939F1ZW");
+      await waitFor(() => expect(pending).toHaveLength(1));
+
+      await user.type(field, "{backspace}V");
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      pending[1].answer(VALID);
+      expect(await screen.findByText(/Valid — Maharashtra/)).toBeInTheDocument();
+
+      pending[0].refuse();
+
+      await waitFor(() =>
+        expect(screen.getByText(/Valid — Maharashtra/)).toBeInTheDocument(),
+      );
+    });
+
     it("does not put a verdict back under an incomplete GSTIN", async () => {
       const user = userEvent.setup();
       const pending = deferredChecks();
@@ -214,6 +254,26 @@ describe("LoginPage", () => {
     function registered() {
       return global.fetch.mock.calls.some(([url]) => String(url).includes("/auth/register"));
     }
+
+    it("blocks a GSTIN the server refused without saying why", async () => {
+      // The server's verdict carries a reason and the field shows it. A
+      // verdict with no reason still has to block the submit — letting it
+      // through costs a round trip that comes back as a generic 400 pointing
+      // at no field at all, on the one form a new user has to get through.
+      const user = userEvent.setup();
+      global.fetch.mockResolvedValueOnce(jsonResponse({ valid: false }));
+
+      renderPage();
+      await goToRegister(user);
+      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
+      await user.type(screen.getByLabelText("Email"), "new@example.com");
+      await user.type(screen.getByLabelText("Password"), "supersecret123");
+      await user.click(screen.getByRole("button", { name: "Create account" }));
+
+      expect(await screen.findByText("That GSTIN is not valid.")).toBeInTheDocument();
+      expect(registered()).toBe(false);
+    });
 
     it("asks for the email rather than sending a doomed request", async () => {
       const user = userEvent.setup();

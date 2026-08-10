@@ -67,6 +67,15 @@ function renderPage() {
   );
 }
 
+/** A tile by its label — the figures repeat further down the page. */
+function statCard(container, label) {
+  const card = [...container.querySelectorAll(".stat-card")].find(
+    (node) => node.querySelector(".stat-label")?.textContent === label,
+  );
+  if (!card) throw new Error(`no stat card labelled "${label}"`);
+  return card;
+}
+
 describe("DashboardPage", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => vi.restoreAllMocks());
@@ -160,6 +169,16 @@ describe("DashboardPage", () => {
     );
   });
 
+  it("counts a single alert in the singular", async () => {
+    // The banner is one sentence and the whole of it is a count. "1 alerts
+    // need your attention" is the string a business sees on the morning the
+    // first deadline alert of the month is raised.
+    mockDashboard(dashboard({ open_alerts: 1 }));
+    renderPage();
+
+    expect(await screen.findByText(/1 alert needs your attention/)).toBeInTheDocument();
+  });
+
   it("says nothing about alerts when there are none", async () => {
     mockDashboard(dashboard({ open_alerts: 0 }));
     renderPage();
@@ -172,6 +191,38 @@ describe("DashboardPage", () => {
     mockDashboard(dashboard());
     renderPage();
     expect(await screen.findByText("Needs review")).toBeInTheDocument();
+  });
+
+  it("reads a settled, clean period as good rather than as three warnings", async () => {
+    // Every tile on this row is a tone, and the tones are what someone takes
+    // in before any of the numbers. A month with nothing payable, nothing at
+    // risk and nothing to review must not colour like a month with all three
+    // — the whole point of the row is that a bad colour means look here.
+    mockDashboard(
+      dashboard({
+        counts: { total: 3, sales: 1, purchase: 2, by_status: { parsed: 3 }, needs_review: 0 },
+        net_liability: { cgst: "0.00", sgst: "0.00", igst: "0.00", cess: "0.00", total: "0.00" },
+        itc_at_risk: "0.00",
+      }),
+    );
+    const { container } = renderPage();
+
+    await screen.findByText("Needs review");
+    expect(statCard(container, "Net liability")).toHaveClass("tone-good");
+    expect(statCard(container, "ITC at risk")).toHaveClass("tone-good");
+    // The count keeps its plain styling; nothing needs chasing.
+    const row = screen.getByText("Needs review").closest("div");
+    expect(row.querySelector("dd")).not.toHaveClass("is-warn");
+  });
+
+  it("reads credit its suppliers have not filed for as bad, not merely a warning", async () => {
+    // This is the figure that becomes a reversal with interest if the supplier
+    // never files. It is the loudest thing on the row on purpose.
+    mockDashboard(dashboard({ itc_at_risk: "45000.00" }));
+    const { container } = renderPage();
+
+    await screen.findByText("Needs review");
+    expect(statCard(container, "ITC at risk")).toHaveClass("tone-bad");
   });
 
   it("warns loudly once a deadline has passed", async () => {

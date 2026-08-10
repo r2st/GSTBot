@@ -207,6 +207,43 @@ describe("ITCPage", () => {
     expect(screen.getByText("333 outstanding")).toBeInTheDocument();
   });
 
+  it("keeps a reversal row usable when the parser named nothing on the invoice", async () => {
+    // Rule 37 reverses on the invoice date and the payment date, both of which
+    // the matcher has regardless of what the extraction read off the scan. So
+    // this row is raised for invoices with no number and no supplier — and it
+    // is the row that costs real money to ignore, so it has to stay clickable.
+    mockApi(
+      summary({
+        rule_37: {
+          overdue: [
+            {
+              invoice_id: 41,
+              invoice_number: null,
+              supplier_gstin: null,
+              supplier_name: null,
+              invoice_date: "2025-06-01",
+              days_outstanding: 333,
+              days_remaining: -153,
+              tax: heads({ igst: "18000.00" }),
+              overdue: true,
+            },
+          ],
+          approaching: [],
+          reversal: heads({ igst: "18000.00" }),
+          approaching_amount: heads(),
+          days: 180,
+          warning_days: 30,
+        },
+      }),
+    );
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: "(no number)" });
+    expect(link).toHaveAttribute("href", "/invoices/41");
+    // Name over GSTIN, with neither read: a dash, and no "null" beneath it.
+    expect(link.closest("tr").querySelectorAll("td")[2].textContent).toBe("—");
+  });
+
   it("flags invoices approaching the 180-day deadline differently", async () => {
     mockApi(
       summary({
@@ -536,6 +573,58 @@ describe("purchases that carry no credit", () => {
     const help = await screen.findByText("3 purchase invoices");
     expect(within(help.closest("tr")).getByText("Credit available")).toBeInTheDocument();
     expect(screen.queryByText(/carrying no claimable credit/)).not.toBeInTheDocument();
+  });
+});
+
+describe("a summary missing the fields a newer backend added", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("falls back to the set-off's own cash figure when there is no combined one", async () => {
+    // `cash_payable` is the whole of it — the waterfall's residue plus the
+    // reverse-charge tax credit may not settle. An API that predates it still
+    // sends `set_off.total_cash`, and half the answer is better than a tile
+    // reading "₹0.00" on a period with money owing.
+    mockApi(summary({ cash_payable: null }));
+    const { container } = renderPage();
+
+    await loaded();
+    expect(statCard(container, "Cash to pay")).toHaveTextContent("₹2,000.00");
+  });
+
+  it("reads a period with nothing to pay as good rather than as a warning", async () => {
+    mockApi(
+      summary({
+        output_tax: heads(),
+        cash_payable: "0.00",
+        set_off: {
+          steps: [{ credit_head: "igst", liability_head: "igst", amount: "0.00" }],
+          cash_payable: heads(),
+          credit_carried_forward: heads({ igst: "18000.00" }),
+          credit_used: heads(),
+          total_cash: "0.00",
+        },
+      }),
+    );
+    const { container } = renderPage();
+
+    await loaded();
+    expect(statCard(container, "Cash to pay")).toHaveClass("tone-good");
+  });
+
+  it("leaves the re-availment row out when the field is absent, not just zero", async () => {
+    // The row is conditional on there being some. `undefined > 0` is false by
+    // luck rather than by intent, so the `?? 0` is what actually decides it —
+    // and an absent field must read as "none", never as a row of blanks.
+    mockApi(summary({ rule_37_reavailment: null }));
+    const { container } = renderPage();
+
+    await loaded();
+    const table = container.querySelector("table");
+    expect(within(table).queryByText("Re-availed: suppliers paid")).not.toBeInTheDocument();
+    // The rows either side of it, which are read every month, are still there.
+    expect(within(table).getByText("Credit available")).toBeInTheDocument();
+    expect(within(table).getByText("Less: reversals")).toBeInTheDocument();
   });
 });
 

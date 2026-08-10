@@ -202,6 +202,99 @@ describe("AlertsPage", () => {
     expect(await screen.findByText(/Nothing outstanding/)).toBeInTheDocument();
   });
 
+  it("says an empty tab is empty in the terms of that tab", async () => {
+    // Three tabs, three different findings. "Nothing outstanding" under
+    // "Closed" would claim there is no backlog, which is the one thing the
+    // closed tab says nothing about; "Nothing closed yet" under "All" would
+    // claim alerts exist and are all open. Each sentence is acted on.
+    mockFetch(page([]), page([]), page([]));
+    renderPage();
+    await screen.findByText(/Nothing outstanding/);
+
+    await userEvent.click(screen.getByRole("button", { name: "Closed" }));
+    expect(await screen.findByText("Nothing closed yet.")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(await screen.findByText(/No alerts yet/)).toBeInTheDocument();
+  });
+
+  it("labels a severity this build has never heard of, rather than a blank chip", async () => {
+    // The severities are a server-side enum, and the chip is the whole of how
+    // urgent an alert looks. A build that predates a new one must render the
+    // row at its quietest rather than with nothing where the chip goes —
+    // silence and "not urgent" are different claims, and only one is safe.
+    mockFetch(page([alert({ severity: "catastrophic" })]));
+    const { container } = renderPage();
+
+    const row = (await screen.findByText(/is overdue/)).closest("li");
+    expect(within(row).getByText("Upcoming")).toBeInTheDocument();
+    expect(container.querySelector(".alert-row")).toHaveClass("is-neutral");
+  });
+
+  it("leaves the other rows alone when one of several is acted on", async () => {
+    // The list is rebuilt from the acted-on alert's response, so every row
+    // that is not it has to come through the rebuild unchanged. Marking one
+    // read and finding a sibling's title or status altered would be a page
+    // rewriting rows the server never spoke about.
+    mockFetch(
+      page([alert({ id: 1 }), alert({ id: 2, title: "GSTR-1 for 2026-04 is due soon" })]),
+      alert({ id: 1, status: "read" }),
+    );
+    renderPage();
+    await screen.findByText(/GSTR-1 for 2026-04 is due soon/);
+
+    const first = screen.getByText(/GSTR-3B for 2026-04 is overdue/).closest("li");
+    await userEvent.click(within(first).getByRole("button", { name: "Mark as read" }));
+
+    await waitFor(() =>
+      expect(within(first).queryByRole("button", { name: "Mark as read" })).not.toBeInTheDocument(),
+    );
+    // The sibling is untouched: still open, still offering both actions.
+    const second = screen.getByText(/GSTR-1 for 2026-04 is due soon/).closest("li");
+    expect(within(second).getByRole("button", { name: "Mark as read" })).toBeInTheDocument();
+    expect(within(second).getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
+  });
+
+  it("does not banner a load it cancelled itself", async () => {
+    // Switching tabs twice quickly aborts the middle load. Its rejection is
+    // an expected part of the flow, and reporting it would put an error over
+    // a list that arrived perfectly well.
+    const pending = [];
+    global.fetch = vi.fn(
+      (url, options = {}) =>
+        new Promise((resolve, reject) => {
+          pending.push({
+            url: String(url),
+            answer: (body) =>
+              resolve({
+                ok: true,
+                status: 200,
+                statusText: "",
+                text: async () => JSON.stringify(body),
+              }),
+          });
+          options.signal?.addEventListener("abort", () => {
+            const err = new Error("The operation was aborted.");
+            err.name = "AbortError";
+            reject(err);
+          });
+        }),
+    );
+    renderPage();
+
+    pending[0].answer(page([alert()]));
+    await screen.findByText(/is overdue/);
+
+    await userEvent.click(screen.getByRole("button", { name: "Closed" }));
+    await userEvent.click(screen.getByRole("button", { name: "All" }));
+    await waitFor(() => expect(pending.length).toBe(3));
+
+    pending[2].answer(page([alert({ status: "dismissed" })]));
+
+    expect(await screen.findByText("Dismissed")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("reports a failure to load instead of looking empty", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: false,

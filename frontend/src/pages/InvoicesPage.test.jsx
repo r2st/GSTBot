@@ -502,6 +502,23 @@ describe("InvoicesPage", () => {
       expect(dateHeader()).toHaveAttribute("aria-sort", "ascending");
     });
 
+    it("reverses an ascending column to descending", async () => {
+      // The other way round from the case above. "Invoice" opens ascending
+      // because it is a sequence, so its second click is the one that runs
+      // the asc-to-desc arm — the arm no column that opens descending reaches.
+      const urls = mockApi();
+      renderPage();
+      await screen.findByText("INV-2026-0042");
+      const header = () => screen.getByRole("columnheader", { name: "Invoice" });
+
+      await userEvent.click(within(header()).getByRole("button"));
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=number_asc"));
+
+      await userEvent.click(within(header()).getByRole("button"));
+      await waitFor(() => expect(urls.at(-1)).toContain("sort=number_desc"));
+      expect(header()).toHaveAttribute("aria-sort", "descending");
+    });
+
     it("starts a newly clicked column at its own default rather than the old column's direction", async () => {
       const urls = mockApi();
       renderPage();
@@ -531,6 +548,61 @@ describe("InvoicesPage", () => {
         within(screen.getByRole("columnheader", { name: "Total" })).getByRole("button"),
       );
       await waitFor(() => expect(screen.getByText("1–25 of 60")).toBeInTheDocument());
+    });
+  });
+
+  describe("a request this page cancelled itself", () => {
+    /**
+     * A fetch that rejects the way a browser does when the signal aborts.
+     *
+     * The mocks above resolve immediately, so the effect's cleanup always
+     * fires after the answer has already landed and the abort rejection never
+     * happens. Every keystroke in the search box supersedes a request, so in
+     * a browser it happens constantly.
+     */
+    function abortingFetch() {
+      const pending = [];
+      global.fetch = vi.fn(
+        (url, options = {}) =>
+          new Promise((resolve, reject) => {
+            pending.push({
+              url: String(url),
+              answer: (body) =>
+                resolve({
+                  ok: true,
+                  status: 200,
+                  statusText: "OK",
+                  text: async () => JSON.stringify(body),
+                }),
+            });
+            options.signal?.addEventListener("abort", () => {
+              const err = new Error("The operation was aborted.");
+              err.name = "AbortError";
+              reject(err);
+            });
+          }),
+      );
+      return pending;
+    }
+
+    it("does not banner its own cancellation, or blank the rows it already has", async () => {
+      // "signal is aborted without reason" in front of someone who simply kept
+      // typing is worse than the stale rows the abort exists to prevent — and
+      // clearing `data` would take the table down between keystrokes.
+      const pending = abortingFetch();
+      renderPage();
+
+      pending[0].answer({ items: [invoice()], total: 1, limit: PAGE_SIZE, offset: 0 });
+      await screen.findByText("INV-2026-0042");
+
+      // A keystroke supersedes the request the next one starts.
+      await userEvent.type(screen.getByRole("searchbox"), "AC");
+      await waitFor(() => expect(pending.length).toBeGreaterThan(2));
+
+      pending.at(-1).answer({ items: [invoice()], total: 1, limit: PAGE_SIZE, offset: 0 });
+
+      expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
 });

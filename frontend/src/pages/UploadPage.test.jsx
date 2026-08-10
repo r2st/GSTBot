@@ -111,6 +111,34 @@ describe("UploadPage", () => {
     expect(await screen.findByText("No valid supplier GSTIN found")).toBeInTheDocument();
   });
 
+  it("still gives a scan the parser read nothing off a row worth clicking", async () => {
+    // The commonest bad-but-not-failed outcome: a photographed invoice the
+    // model could not get a number, a GSTIN or a date out of. It is stored,
+    // it is claimable once corrected, and the row has to say which file it
+    // was and offer the way in — an empty row reads as a dropped upload, and
+    // the fix for a dropped upload is to drop it again, which duplicates it.
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({
+        queued: false,
+        message: "Invoice processed",
+        invoice: { id: 12, invoice_value: "0.00" },
+      }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), file("photo.txt"));
+
+    expect(await screen.findByText("photo.txt")).toBeInTheDocument();
+    expect(screen.getByText(/No number found/)).toBeInTheDocument();
+    // No stray separators for the fields that are not there.
+    expect(screen.getByText(/No number found/).textContent).toBe("No number found · ₹0.00");
+    expect(screen.getByRole("link", { name: "Review" })).toHaveAttribute(
+      "href",
+      "/invoices/12",
+    );
+  });
+
   it("reports a per-file failure without losing the batch", async () => {
     const user = userEvent.setup();
     global.fetch
@@ -369,6 +397,20 @@ describe("UploadPage", () => {
 
       await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
       expect(global.fetch).not.toHaveBeenCalled();
+    });
+
+    it("ignores a drop with no file list at all rather than throwing on it", async () => {
+      // Not the same event as the one above. `Array.from(undefined)` throws,
+      // and a throw here escapes into React's event handling — which takes the
+      // page down for a gesture that should simply do nothing.
+      global.fetch = vi.fn();
+      const { container } = renderPage();
+
+      fireEvent.drop(dropzone(container), { dataTransfer: {} });
+
+      await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
+      expect(global.fetch).not.toHaveBeenCalled();
+      expect(screen.getByRole("heading", { name: "Upload invoices" })).toBeInTheDocument();
     });
   });
 });

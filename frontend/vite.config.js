@@ -39,7 +39,23 @@ export default defineConfig({
       // fully covered still scores ~70% when it renders a row of handlers
       // that no single test clicks. Statements and lines are the honest
       // signal here; functions is kept only as a floor.
-      thresholds: { statements: 99, branches: 90, functions: 87, lines: 99 },
+      //
+      // `branches` is at 99 rather than at the 99.75 actually measured, and
+      // the gap is deliberate. Three branches are unreachable by construction
+      // and are left in as guards rather than deleted:
+      //
+      //   * InvoiceDetailPage's `draft[field] ?? ""` — `adopt` already
+      //     coerces every field, and the form does not render without an
+      //     invoice.
+      //   * UploadPage's `progress ? … : "Extracting…"` — `busy` and
+      //     `progress` are set in one React batch, so no render sees the
+      //     first without the second.
+      //   * validate.js's `Number.isFinite(value) ? value : null` — a field
+      //     the amount check let through is finite by then.
+      //
+      // A gate at the measured figure would make removing any one of those
+      // guards the way to keep CI green.
+      thresholds: { statements: 99, branches: 99, functions: 87, lines: 99 },
     },
   },
 });

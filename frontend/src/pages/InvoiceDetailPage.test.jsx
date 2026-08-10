@@ -66,6 +66,29 @@ describe("InvoiceDetailPage", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
+  it("identifies an invoice by its id when nothing read a number off it", async () => {
+    // The heading is how someone knows which invoice they are looking at, and
+    // an unreadable number is exactly the case that brought them here. An
+    // empty heading over a form of empty fields gives no way to tell this
+    // page from a failed load.
+    await renderPage(
+      invoice({
+        invoice_number: null,
+        counterparty_name: null,
+        parsed_with: null,
+        extraction_confidence: null,
+      }),
+    );
+
+    expect(screen.getByRole("heading", { name: "Invoice #42" })).toBeInTheDocument();
+    // And says the extraction is unattributed rather than reading "Read by".
+    expect(screen.getByText(/Read by unknown/)).toBeInTheDocument();
+    // A null field is an empty box, not the string "null" for the user to
+    // delete before they can type the number they are reading off the paper.
+    expect(screen.getByLabelText("Invoice number")).toHaveValue("");
+    expect(screen.getByLabelText("Counterparty name")).toHaveValue("");
+  });
+
   it("shows a placeholder while the invoice loads", () => {
     global.fetch.mockReturnValueOnce(new Promise(() => {}));
     render(
@@ -610,6 +633,34 @@ describe("InvoiceDetailPage", () => {
       );
       expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
       expect(screen.queryByDisplayValue("Reparsed Name")).not.toBeInTheDocument();
+    });
+
+    it("does not banner a superseded re-extraction's failure over the next invoice", async () => {
+      // The same guard on the other arm. The re-extraction is a model call, so
+      // failing is the ordinary outcome when the key is missing or throttled —
+      // and "no extraction key configured" over an invoice the user has just
+      // opened and is correcting names a failure that did not happen to it.
+      const user = userEvent.setup();
+      const pending = deferredFetch();
+      renderAtFortyTwo();
+
+      await waitFor(() => expect(pending).toHaveLength(1));
+      pending[0].answer(invoice());
+      await screen.findByLabelText("Counterparty GSTIN");
+      await user.click(screen.getByRole("button", { name: "Re-extract" }));
+      await waitFor(() => expect(pending).toHaveLength(2));
+
+      await openFortyThree(user);
+      await waitFor(() => expect(pending).toHaveLength(3));
+      pending[2].answer(invoice({ id: 43, invoice_number: "INV-2026-0043" }));
+      await screen.findByText("INV-2026-0043");
+
+      pending[1].answer({ detail: "Extraction is unavailable" }, { status: 503 });
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Re-extract" })).toBeEnabled(),
+      );
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
 
     // Delete is the only write on this page that can move the user, so a
