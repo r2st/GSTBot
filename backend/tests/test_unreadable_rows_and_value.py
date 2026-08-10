@@ -212,20 +212,23 @@ class TestWhatAnInvoiceIsWorth:
 
         assert shown == filed == Decimal("11800.00")
 
-    def test_a_bare_total_label_is_what_produces_the_zero(self):
+    def test_an_unrecognised_total_label_is_what_produces_the_zero(self):
         """Why the column cannot simply be trusted, from the parser's end.
 
-        ``_TOTAL_PATTERN`` needs "value" or "amount" after "total", because
-        "Total" also begins "Total Tax" and "Sub Total". A grand total printed
-        as a bare ``Total:`` — which is ordinary — leaves the column at zero
-        with every other figure on the invoice correct.
+        ``_TOTAL_PATTERN`` knows a fixed vocabulary — "Grand Total", "Total
+        Value", "Amount Payable", "Net Payable" and a bare "Total" among them —
+        and a wording outside it, such as "Total Payable", leaves the column at
+        zero with every other figure on the invoice correct. See
+        ``tests/test_invoice_formats.py`` for the corpus this vocabulary is
+        checked against; this test is only about what a *miss* does to the
+        figure the rest of this module reasons about.
         """
         parsed = invoice_parser.parse_heuristic(
             "Invoice No: INV-1\n"
             "Invoice Date: 15/04/2026\n"
             "Taxable Value: 450000.00\n"
             "IGST @ 18%: 81000.00\n"
-            "Total: 531000.00\n"
+            "Total Payable: 531000.00\n"
         )
 
         assert parsed.taxable_value == Decimal("450000.00")

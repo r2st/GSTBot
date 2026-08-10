@@ -168,6 +168,46 @@ Invoice Total 56000.00
         tax_rate=Decimal("12"),
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
+    Layout(
+        name="'Assessable Value' and 'Net Payable' — an import invoice's own wording",
+        text=f"""\
+COASTAL IMPORTS LLP
+GSTIN: {SUPPLIER_GSTIN_OTHER_STATE}
+Invoice No: CI-2026-004
+Invoice Date: 10/07/2026
+Assessable Value: 300000.00
+IGST @ 18%: 54000.00
+Net Payable: 354000.00
+""",
+        invoice_number="CI-2026-004",
+        invoice_date=date(2026, 7, 10),
+        taxable_value=money("300000.00"),
+        total_value=money("354000.00"),
+        igst=money("54000.00"),
+        tax_rate=Decimal("18"),
+        supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+    ),
+    Layout(
+        name="a bare 'Total', not the 'Sub-Total' a few lines above it",
+        text=f"""\
+CHENNAI EXPORTS PRIVATE LIMITED
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Invoice No: CE-991
+Invoice Date: 11/07/2026
+Taxable Value: 80000.00
+CGST @ 9%: 7200.00
+SGST @ 9%: 7200.00
+Total: 94400.00
+""",
+        invoice_number="CE-991",
+        invoice_date=date(2026, 7, 11),
+        taxable_value=money("80000.00"),
+        total_value=money("94400.00"),
+        cgst=money("7200.00"),
+        sgst=money("7200.00"),
+        tax_rate=Decimal("18"),
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+    ),
     # ------------------------------------------------------------ tabular
     Layout(
         name="column layout, no colons, amounts right-aligned",

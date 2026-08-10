@@ -832,14 +832,52 @@ _TAX_LABELS = {
     "cess": re.compile(r"\bCESS\b", re.IGNORECASE),
 }
 _PERCENT_PATTERN = re.compile(r"(\d{1,2}(?:\.\d{1,2})?)\s*%")
+
+# "Assessable Value" is customs' own name for the figure duty is charged on —
+# rule 3 of the Customs Valuation Rules uses it, so an import invoice, or one
+# from a supplier whose template also handles imports, prints this rather than
+# "Taxable Value". Left out, the field was not merely misread: a document
+# whose IGST read correctly (:data:`_TAX_LABELS` matches "IGST" on its own
+# line regardless of what the taxable line said) stored ₹0 taxable value
+# beside a real tax figure, which is the shape ``validate_period``'s footing
+# check exists to catch and cannot here — that check only runs when *both*
+# figures are non-zero.
 _TAXABLE_PATTERN = re.compile(
-    rf"(?:taxable\s*(?:value|amount)|sub\s*-?\s*total|net\s*amount)\s*[:.\-]?\s*(?:INR|Rs\.?|₹)?\s*{_AMOUNT}",
-    re.IGNORECASE,
-)
-_TOTAL_PATTERN = re.compile(
-    rf"(?:grand\s*total|total\s*(?:invoice\s*)?(?:value|amount)|amount\s*payable|invoice\s*total)"
+    rf"(?:taxable\s*(?:value|amount)|assessable\s*value|sub\s*-?\s*total|net\s*amount)"
     rf"\s*[:.\-]?\s*(?:INR|Rs\.?|₹)?\s*{_AMOUNT}",
     re.IGNORECASE,
+)
+
+# "Net Payable" and a bare "Total" join the labels already here for the same
+# reason "Assessable Value" was added above: a real wording this pattern did
+# not know, silently leaving the grand total at ₹0 on a document that
+# otherwise parses.
+#
+# A bare "Total" needs a guard the others do not. Unlike "Grand Total" or
+# "Invoice Total", the word "Total" alone also opens "Total Tax", "Total
+# Discount" and "Sub-Total" — and unlike those two, "Sub-Total" is a real label
+# read by :data:`_TAXABLE_PATTERN` above with a *different* figure. Matched
+# without a guard, "Total" inside "Sub-Total: 200000.00" is exactly as valid a
+# match as a real total line, and being earlier in the text it would win over
+# the actual "Amount Payable: 236000.00" a few lines down — replacing the
+# grand total with the taxable value it was computed from, on a layout that
+# otherwise parses every other field correctly.
+#
+# Anchoring to the start of a line closes that without a lookbehind for every
+# spelling of "sub" (which Python's fixed-width lookbehind cannot express as
+# one alternative anyway): a real total label is always the first word on its
+# line, and "Sub-Total" is not — "Total" there is the second half of a
+# hyphenated word, never the first token after a line break. The other three
+# guards this module leans on for a bare word — "Total Tax", "Total Discount",
+# "Total Quantity" — need no anchor at all, because the shared amount suffix
+# below already requires a separator or a currency mark immediately after the
+# label, and none of those three has one: the word that follows is not a
+# number, so the match fails right there regardless of position on the line.
+_TOTAL_PATTERN = re.compile(
+    rf"(?:grand\s*total|total\s*(?:invoice\s*)?(?:value|amount)|amount\s*payable|invoice\s*total"
+    rf"|net\s*payable|^[ \t]*total)"
+    rf"\s*[:.\-]?\s*(?:INR|Rs\.?|₹)?\s*{_AMOUNT}",
+    re.IGNORECASE | re.MULTILINE,
 )
 _HSN_PATTERN = re.compile(r"\b(?:HSN|SAC)(?:\s*/\s*SAC)?\s*(?:code)?\s*[:.\-]?\s*(\d{4,8})\b",
                           re.IGNORECASE)
