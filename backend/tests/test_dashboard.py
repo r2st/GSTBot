@@ -690,6 +690,70 @@ class TestTaxSummariesAgreesWithTaxSummary:
 
         assert invoice_service.tax_summaries(db_session, business.id, []) == {}
 
+    def test_no_period_at_all_totals_every_period_rather_than_none_of_them(
+        self, db_session, business
+    ):
+        """``period=None`` is "the whole book", not "the period called None".
+
+        The two arms of ``tax_summary`` reach ``_summarise`` differently — one
+        passes ``periods=[period]``, the other passes no filter — so "all
+        periods" is a separate query shape rather than the same one with a
+        wider list, and nothing else in the product exercises it: every caller
+        today (``filing``, ``late_fee``, the dashboard) names a period.
+
+        It is the lifetime figure a business is shown when it has not picked a
+        month, so getting it wrong understates the book rather than erroring.
+        Pinned against the sum of the periods it covers, which is the only
+        definition of right that does not restate the implementation.
+        """
+        from app.services import invoice_service
+
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-APR",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+            total_value=Decimal("118000.00"),
+        )
+        make_invoice(
+            db_session, business.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-MAR",
+            period="2026-03", invoice_date=date(2026, 3, 9),
+            taxable_value=Decimal("50000.00"), igst=Decimal("9000.00"),
+            total_value=Decimal("59000.00"),
+        )
+
+        everything = invoice_service.tax_summary(db_session, business.id)
+        march = invoice_service.tax_summary(db_session, business.id, "2026-03")
+        april = invoice_service.tax_summary(db_session, business.id, "2026-04")
+
+        assert everything["sales"]["count"] == 2
+        assert (
+            everything["sales"]["total_tax"]
+            == march["sales"]["total_tax"] + april["sales"]["total_tax"]
+            == Decimal("27000.00")
+        )
+        # Not the same answer as any single period — the assertion above would
+        # also hold if one month were silently being returned as the total.
+        assert everything["sales"]["count"] > april["sales"]["count"]
+
+    def test_no_period_at_all_still_scopes_to_one_tenant(
+        self, db_session, business, other_tenant
+    ):
+        # The unfiltered arm drops the period predicate. Dropping the tenant
+        # one alongside it would be invisible on a single-tenant test box and
+        # would put a competitor's turnover on the dashboard.
+        from app.models.business import Business
+        from app.services import invoice_service
+
+        rival = db_session.query(Business).filter(Business.id != business.id).one()
+        make_invoice(
+            db_session, rival.id,
+            invoice_type=InvoiceType.SALES, invoice_number="S-OTHER",
+            taxable_value=Decimal("100000.00"), igst=Decimal("18000.00"),
+        )
+
+        assert invoice_service.tax_summary(db_session, business.id)["sales"]["count"] == 0
+
     def test_another_tenants_invoices_are_not_in_any_period(
         self, db_session, business, other_tenant
     ):

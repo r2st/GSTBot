@@ -590,6 +590,40 @@ class TestAlertsThisBuildDoesNotUnderstand:
 
         assert result.raised == 1
 
+    def test_asking_about_no_periods_at_all_queries_nothing(self, db_session, business):
+        """``_existing`` answers an empty ask without going to the database.
+
+        ``sweep_business`` returns early when its window comes out empty, so
+        this is the second of two guards and nothing in the product reaches it
+        — today. What makes it worth keeping rather than deleting is what the
+        query does without it: ``Alert.period.in_([])`` is a degenerate ``IN``,
+        which SQLAlchemy emits with a warning and which the two backends here
+        do not compile the same way. An empty ask is not a database question,
+        and the cheapest correct answer is the empty one.
+
+        A caller with an alert on file proves the ``{}`` is the empty *ask*
+        being honoured rather than the tenant simply having nothing.
+        """
+        from sqlalchemy import event
+
+        sweep(db_session, business)
+        assert alerts_for(db_session, business), "fixture should leave alerts on file"
+
+        statements: list[str] = []
+        engine = db_session.get_bind()
+
+        def _record(conn, cursor, statement, parameters, context, executemany):
+            if "from alerts" in " ".join(statement.split()).lower():
+                statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", _record)
+        try:
+            assert alerting._existing(db_session, business.id, []) == {}
+        finally:
+            event.remove(engine, "before_cursor_execute", _record)
+
+        assert statements == []
+
 
 # ---------------------------------------------------------------------------
 # Every tenant, one at a time

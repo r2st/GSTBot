@@ -58,10 +58,14 @@ class InvoiceOut(BaseModel):
     extraction_confidence: float | None = None
     parse_error: str | None = None
     created_at: datetime
-
-    @property
-    def total_tax(self) -> Decimal:
-        return self.cgst + self.sgst + self.igst + self.cess
+    # No ``total_tax`` here. It was a plain ``@property``, which Pydantic does
+    # not serialize and no caller ever read: absent from ``model_fields``, from
+    # ``model_computed_fields`` and from the OpenAPI schema, so every client
+    # summing the four heads itself was not working around it — the field was
+    # never on the wire. ``Invoice.total_tax`` on the ORM model is the real one
+    # and is what the services use. Restoring this would mean
+    # ``@computed_field``, and a new response field is an API change to make
+    # deliberately rather than by fixing a property nobody could see.
 
 
 class InvoiceDetailOut(InvoiceOut):

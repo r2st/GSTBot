@@ -5,6 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.models.business import BusinessPlan
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
@@ -724,6 +725,27 @@ class TestTheCodedFieldsAReviewerCanType:
         ).json()
         assert body["place_of_supply"] is None
 
+    # Two characters at most: the field carries ``max_length=2``, which is
+    # checked before the validator, so a wider run of spaces is refused on
+    # length and never reaches the clearing path this is about.
+    @pytest.mark.parametrize("blank", ["", " ", "  ", "\t"])
+    def test_emptying_the_box_clears_the_place_of_supply_rather_than_refusing_it(
+        self, auth_client, invoice_id, blank
+    ):
+        """A cleared text box arrives as ``""``, not as ``null``.
+
+        Which is the ordinary way a reviewer removes a code they should not
+        have entered: select the contents, delete, save. Read as a *value* it
+        is not a state code and 422s, and the reviewer is told to fix a field
+        they were trying to empty, with no spelling of "empty" that the form
+        will accept. Treated as clearing, it agrees with sending ``null``.
+        """
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"place_of_supply": blank}
+        )
+        assert body.status_code == 200, body.text
+        assert body.json()["place_of_supply"] is None
+
     @pytest.mark.parametrize("bad", ["notdigit", "12345", "123", "8471301X"])
     def test_an_hsn_the_portal_will_not_take_is_refused(self, auth_client, invoice_id, bad):
         response = auth_client.patch(f"/api/v1/invoices/{invoice_id}", json={"hsn_code": bad})
@@ -744,6 +766,20 @@ class TestTheCodedFieldsAReviewerCanType:
             f"/api/v1/invoices/{invoice_id}", json={"hsn_code": None}
         ).json()
         assert body["hsn_code"] is None
+
+    @pytest.mark.parametrize("blank", ["", "   ", "\t", "\n "])
+    def test_emptying_the_box_clears_the_hsn_rather_than_refusing_it(
+        self, auth_client, invoice_id, blank
+    ):
+        """Same clearing rule as ``place_of_supply`` above, and for the same
+        reason — the two coded boxes sit next to each other on the review
+        screen, and a reviewer who learns that one empties by being emptied
+        should not find the other 422ing."""
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"hsn_code": blank}
+        )
+        assert body.status_code == 200, body.text
+        assert body.json()["hsn_code"] is None
 
 
 @pytest.mark.parametrize(
@@ -1543,3 +1579,59 @@ class TestTheSupplierSavepointHoldsOnlyTheSupplier:
             db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
         )
         assert again.id == first.id
+
+    def test_a_conflict_that_is_not_a_lost_race_is_not_swallowed_as_one(
+        self, db_session, business
+    ):
+        """A soft-deleted supplier still holds the GSTIN.
+
+        ``uq_suppliers_business_gstin`` is a plain unique constraint, not one
+        predicated on ``deleted_at IS NULL`` the way the invoice and return
+        keys are — so a tombstone keeps the key occupied, while
+        ``_find_supplier`` filters tombstones out and reports the GSTIN as
+        free. Look, insert, conflict, look again, still nothing.
+
+        That shape is indistinguishable from a lost race at the ``except``, and
+        the difference is everything: a lost race means the row is there and
+        the caller can have it, this means the row is *not* there and never
+        will be until someone restores it. Returning ``None`` here would put
+        the ``AttributeError`` two lines down instead, on a function documented
+        never to hand back nothing; swallowing it would attach the invoice to
+        no supplier at all. It has to surface.
+        """
+        tombstone = Supplier(
+            business_id=business.id,
+            gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            legal_name="Deleted Supplier Pvt Ltd",
+        )
+        db_session.add(tombstone)
+        db_session.commit()
+        tombstone.soft_delete()
+        db_session.commit()
+
+        with pytest.raises(IntegrityError):
+            invoice_service.get_or_create_supplier(
+                db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+            )
+
+    def test_the_session_survives_that_conflict_for_the_caller_to_roll_back(
+        self, db_session, business
+    ):
+        # The SAVEPOINT rolled back before the raise, so the error reaches the
+        # caller as a failed statement rather than as a dead transaction the
+        # request handler cannot even log against.
+        supplier = Supplier(
+            business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE, legal_name="X"
+        )
+        db_session.add(supplier)
+        db_session.commit()
+        supplier.soft_delete()
+        db_session.commit()
+
+        with pytest.raises(IntegrityError):
+            invoice_service.get_or_create_supplier(
+                db_session, business.id, SUPPLIER_GSTIN_OTHER_STATE
+            )
+
+        db_session.rollback()
+        assert db_session.query(Supplier).count() == 1

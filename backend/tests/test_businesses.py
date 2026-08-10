@@ -10,6 +10,7 @@ as.
 """
 from __future__ import annotations
 
+from app.models.business import Business
 from app.models.business_membership import BusinessMembership
 from app.models.user import User, UserRole
 from tests.conftest import BUSINESS_GSTIN, TEST_EMAIL, TEST_PASSWORD
@@ -68,6 +69,36 @@ class TestListingMyBusinesses:
         assert home["is_home"] is True
         assert linked["is_home"] is False
         assert linked["role"] == "owner"
+
+    def test_a_linked_business_that_was_deleted_drops_out_of_the_list(
+        self, auth_client, client, business, db_session
+    ):
+        """The membership outlives the business it points at.
+
+        Unlinking soft-deletes the membership; deleting the *business* does
+        not, because the two are separate rows and nothing cascades a soft
+        delete. So a live membership can point at a tombstone, and listing has
+        to filter on the far side of the join rather than trusting that a
+        membership implies a business worth showing.
+
+        Left unfiltered this is not a cosmetic bug: the row is rendered by
+        ``_out``, so a deleted registration keeps appearing in the tenant
+        switcher, and picking it acts as a business that is supposed to be
+        gone.
+        """
+        second = register_second_business(client)
+        link(auth_client)
+        assert len(auth_client.get("/api/v1/businesses/mine").json()["items"]) == 2
+
+        deleted = db_session.get(Business, second["business"]["id"])
+        deleted.soft_delete()
+        db_session.commit()
+
+        body = auth_client.get("/api/v1/businesses/mine").json()
+        assert [item["id"] for item in body["items"]] == [business.id]
+        # The membership is untouched — it is the listing that filters, not the
+        # delete that cleaned up after itself.
+        assert db_session.query(BusinessMembership).count() == 1
 
 
 # ---------------------------------------------------------------------------

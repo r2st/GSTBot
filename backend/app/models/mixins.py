@@ -13,9 +13,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import ClassVar
 
-from sqlalchemy import DateTime, ForeignKey, Index, Numeric, func
+from sqlalchemy import DateTime, ForeignKey, Numeric, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 from sqlalchemy.types import JSON
@@ -89,18 +88,20 @@ class BusinessScopedMixin:
     Declared here rather than per-model so that "multi-tenant from day 1" is
     structural: a table that inherits this cannot be written without a tenant,
     and every tenant-filtered query has an index to use.
-    """
 
-    # Supplied by the concrete model; declared so the index name below can be
-    # built from it without the type checker losing track of the attribute.
-    __tablename__: ClassVar[str]
+    The composite ``(business_id, created_at)`` index that every scoped table
+    also needs is *not* declared here. It was, via ``declared_attr.directive``,
+    and it never once took effect: all five scoped models declare their own
+    ``__table_args__`` for a unique constraint or a second composite index, and
+    a class attribute shadows an inherited ``declared_attr`` completely — there
+    is no merge. Each model therefore had to spell the index out anyway, and
+    the mixin's copy only made it look like it was inherited. Deleting it
+    changes no DDL; ``test_model_registry.py`` is what actually holds the line,
+    by failing when a scoped table is missing the index.
+    """
 
     @declared_attr
     def business_id(cls) -> Mapped[int]:  # noqa: N805
         return mapped_column(
             ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
         )
-
-    @declared_attr.directive
-    def __table_args__(cls) -> tuple:  # noqa: N805
-        return (Index(f"ix_{cls.__tablename__}_business_created", "business_id", "created_at"),)

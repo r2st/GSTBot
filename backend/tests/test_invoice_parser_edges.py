@@ -15,6 +15,7 @@ happens when each link breaks.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -71,6 +72,33 @@ class TestNumbersAnOcrPassProduces:
     def test_only_the_first_number_on_a_run_together_line_is_taken(self):
         # OCR routinely joins columns: "18% 9,000.00 1,620.00".
         assert to_decimal("18% 9,000.00 1,620.00") == Decimal("18")
+
+    def test_a_match_that_decimal_refuses_falls_back_instead_of_raising(
+        self, monkeypatch
+    ):
+        """The pattern and the constructor are allowed to disagree.
+
+        Today they cannot. ``_NUMBER_PATTERN`` yields ``-?\\d[\\d,]*(\\.\\d{1,2})?``
+        and, once the commas come out, every string of that shape is a Decimal
+        literal — including the Devanagari case above, since ``\\d`` and
+        ``Decimal`` accept the same Unicode digits. So the ``except`` branch is
+        unreachable *through the pattern*, and pointing a bad literal at
+        ``to_decimal`` cannot exercise it.
+
+        It is still the branch that decides what happens the day the pattern is
+        widened — to accept a second decimal group for a European layout, say,
+        or a Unicode minus. So widen it here and assert the contract directly:
+        ``to_decimal`` degrades to its default. It must, because the promise
+        above it is that ``parse_invoice`` never raises, and this runs against
+        whatever a model or an OCR pass produced.
+        """
+        monkeypatch.setattr(
+            invoice_parser, "_NUMBER_PATTERN", re.compile(r"[\d.,-]+")
+        )
+
+        assert to_decimal("1.2.3") == Decimal("0.00")
+        assert to_decimal("1.2.3", default=None) is None
+        assert to_decimal("--5", default=Decimal("-1")) == Decimal("-1")
 
 
 class TestDatesThatArriveAlreadyParsed:

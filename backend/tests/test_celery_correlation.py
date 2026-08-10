@@ -22,8 +22,16 @@ from app.celery_app import (
     _attach_correlation_id,
     _bind_task_correlation_id,
     _clear_task_correlation_id,
+    _configure_worker_logging,
 )
-from app.core.logging import bind_correlation_id, get_correlation_id, set_correlation_id
+from app.core.logging import (
+    ConsoleFormatter,
+    CorrelationIdFilter,
+    JsonFormatter,
+    bind_correlation_id,
+    get_correlation_id,
+    set_correlation_id,
+)
 
 BACKEND = Path(__file__).resolve().parent.parent
 
@@ -157,6 +165,44 @@ class TestCeleryConfiguration:
         from celery.signals import setup_logging
 
         assert setup_logging.receivers
+
+    def test_the_receiver_installs_the_handler_that_carries_the_id(self):
+        """Having a receiver and having it configure anything are two claims.
+
+        The test above pins only the first, and it is the cheaper half: a
+        receiver that returned immediately would still satisfy it, and Celery
+        would still stand down — leaving the worker with *no* configured
+        handler at all rather than with Celery's. That is strictly worse than
+        the thing the signal was connected to prevent, and it is invisible
+        until someone reads a worker log and finds no correlation id on it.
+
+        Root logging is process-global, so the previous configuration is put
+        back; ``configure_logging`` clears root's handlers and the rest of the
+        suite's ``caplog`` assertions run against whatever is left behind.
+        """
+        root = logging.getLogger()
+        saved_handlers, saved_level = root.handlers[:], root.level
+        try:
+            _configure_worker_logging()
+
+            assert len(root.handlers) == 1, "Celery's handlers must be replaced, not joined"
+            handler = root.handlers[0]
+            assert isinstance(handler.formatter, ConsoleFormatter | JsonFormatter)
+            correlation = next(
+                f for f in handler.filters if isinstance(f, CorrelationIdFilter)
+            )
+
+            # The id reaches the record, which is the whole reason the worker
+            # is not allowed to keep Celery's handler.
+            set_correlation_id("worker-line-42")
+            record = logging.LogRecord(
+                "app.tasks", logging.INFO, __file__, 1, "parsed", None, None
+            )
+            assert correlation.filter(record)
+            assert record.correlation_id == "worker-line-42"
+        finally:
+            root.handlers[:] = saved_handlers
+            root.setLevel(saved_level)
 
     def test_deadlines_are_computed_in_ist(self):
         # Every due date this product tracks is an Indian statutory one.

@@ -934,6 +934,38 @@ class TestOneLineThatNamesTwoTaxHeads:
             ZERO,
         )
 
+    def test_a_head_whose_own_column_holds_no_figure_reads_nothing(self):
+        """Both labels first, then both figures — a column *header* run into
+        its values, which is what a tax table OCRs to when the rules between
+        the cells are lost.
+
+        There are two amounts and two heads, so the shortfall guard that
+        catches a combined line lets this through; the column cut then leaves
+        CGST with ``"CGST "`` and no figure in it. Reading nothing there is the
+        point. The figures are equal here only by convention, and the head
+        whose column is empty has no claim on its neighbour's amount — taking
+        the last number on the line would give CGST the SGST figure and be
+        wrong in exactly the cases (unequal heads, a cess column) where anyone
+        would notice.
+
+        Half a line read is still a line that does not foot, which is what
+        ``validate_period`` is for and what puts it in front of a reviewer.
+        """
+        assert self._heads("CGST SGST 9,000.00 9,000.00") == (
+            ZERO,
+            Decimal("9000.00"),
+            ZERO,
+            ZERO,
+        )
+
+    def test_a_header_row_above_its_values_reads_no_tax_at_all(self):
+        # The same table with the line break intact. Neither label shares a
+        # line with a figure, so neither head is read rather than both being
+        # taken from the row below — the failure `_amount_on_line`'s money
+        # shape test and `TestALabelWithNothingBesideItReadsNoNumber` are both
+        # about, reached here through the tax reader instead.
+        assert self._heads("CGST SGST\n9,000.00 9,000.00") == (ZERO, ZERO, ZERO, ZERO)
+
     def test_a_rate_printed_without_a_percent_sign_is_not_read_as_the_amount(self):
         # The column search must still prefer the last figure inside its own
         # column, because "9" here is a rate with no percent sign to strip.

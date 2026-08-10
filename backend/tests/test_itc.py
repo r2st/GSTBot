@@ -1031,6 +1031,55 @@ class TestRule37IsPaidOnceNotEveryMonthAfter:
         assert april.rule_37_reversal.total == Decimal("0.00")
         assert may.rule_37_reversal.igst == Decimal("18000.00")
 
+    def test_an_overdue_item_with_no_invoice_date_is_skipped_not_raised_on(self):
+        """``reversal_in`` re-derives the lapse date from the item it is given.
+
+        :func:`~app.services.itc.rule_37` drops a dateless invoice before it
+        can become an item, so nothing in the product builds this today. The
+        field is still ``date | None`` — ``Rule37Item`` declares it that way,
+        and ``as_dict`` serialises the None case — so the method has to hold
+        for a result it did not build itself.
+
+        Without the guard it is not a wrong figure, it is a ``TypeError``
+        inside ``lapse_date``, on the path that produces GSTR-3B's reversal
+        line. Skipping is the same answer ``rule_37`` already gives: a missing
+        date means the extraction failed, not that 180 days have passed, and
+        there is no honest lapse month to charge it to.
+        """
+        dateless = itc_service.Rule37Item(
+            invoice_id=1,
+            invoice_number="NO-DATE-1",
+            supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            supplier_name="Northwind Supplies",
+            invoice_date=None,
+            days_outstanding=None,
+            days_remaining=None,
+            tax=heads(igst="18000"),
+            overdue=True,
+        )
+        dated = itc_service.Rule37Item(
+            invoice_id=2,
+            invoice_number="DATED-1",
+            supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            supplier_name="Northwind Supplies",
+            # 181 days later is 2026-04-30, so this one does belong to PERIOD.
+            invoice_date=date(2025, 10, 31),
+            days_outstanding=181,
+            days_remaining=-1,
+            tax=heads(igst="5000"),
+            overdue=True,
+        )
+        result = itc_service.Rule37Result(
+            overdue=[dateless, dated],
+            reversal=heads(igst="23000"),
+        )
+
+        # The dated one still lands, so this is the guard skipping one item
+        # rather than the method bailing out on the first.
+        assert result.reversal_in(PERIOD).igst == Decimal("5000.00")
+        # And the dateless credit is not quietly charged to some other month.
+        assert result.reversal_in("2026-05").total == Decimal("0.00")
+
 
 class TestRule37GivesTheCreditBackWhenTheSupplierIsPaid:
     """The other half of Rule 37, and the half that did not exist.
@@ -1169,6 +1218,45 @@ class TestRule37GivesTheCreditBackWhenTheSupplierIsPaid:
         )
 
         assert summary.rule_37_reavailment.total == Decimal("0.00")
+
+    def test_an_exempt_purchase_carrying_no_tax_gives_back_nothing(
+        self, db_session, business
+    ):
+        """Credit-eligible on paper, nil in fact.
+
+        A nil-rated or exempt purchase — unbranded foodgrain, a farm supply —
+        is an ordinary purchase invoice with ``itc_eligible`` left on and every
+        tax head at zero, because nothing was charged. It passes both of the
+        rule's real conditions: paid this month, lapsed months ago.
+
+        Nothing was ever reversed on it, so nothing can come back. The arithmetic
+        happens to agree — adding a zero ``TaxHeads`` changes no total — but the
+        invoice does not belong in this calculation at all, and letting it through
+        would put a row with no tax on it into the 4(A)(5) working a reviewer
+        reads to justify the figure.
+        """
+        self.lapsed_and_paid(
+            db_session,
+            business,
+            date(2026, 9, 15),
+            invoice_number="EXEMPT-1",
+            igst=Decimal("0.00"),
+            cgst=Decimal("0.00"),
+            sgst=Decimal("0.00"),
+            cess=Decimal("0.00"),
+            total_value=Decimal("100000.00"),
+        )
+        # A real credit alongside it, so a reavailment of zero cannot be the
+        # whole function silently returning nothing.
+        self.lapsed_and_paid(
+            db_session, business, date(2026, 9, 15), invoice_number="TAXED-1"
+        )
+
+        summary = itc_service.summarise(
+            db_session, business.id, "2026-09", as_of=date(2026, 9, 30)
+        )
+
+        assert summary.rule_37_reavailment.total == Decimal("18000.00")
 
     def test_it_is_claimed_in_table_4a_of_the_3b(self, db_session, business):
         """Where the portal expects it, and where the netting has to tie.
