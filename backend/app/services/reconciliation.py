@@ -54,7 +54,6 @@ from app.models.reconciliation_run import (
     ReconciliationStatus,
 )
 from app.models.supplier import Supplier
-from app.services import gstin as gstin_service
 from app.services import supplier_score
 from app.services.gst_calendar import gstr1_due_date
 from app.services.gstr2b import GSTR2BRecord
@@ -1119,13 +1118,3 @@ def periods_with_2b(db: Session, business_id: int) -> list[str]:
             .order_by(GSTRReturn.period.desc())
         ).all()
     )
-
-
-def normalize_gstin(value: str | None) -> str | None:
-    """Validated GSTIN, or ``None``. Re-exported for the router's convenience."""
-    if not value:
-        return None
-    try:
-        return gstin_service.parse(value).gstin
-    except gstin_service.InvalidGSTIN:
-        return None

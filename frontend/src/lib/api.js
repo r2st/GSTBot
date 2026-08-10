@@ -466,7 +466,14 @@ export const api = {
   lateFee: (returnType, period, params = {}, { signal } = {}) =>
     request(`/filing/${returnType}/late-fee${query({ period, ...params })}`, { signal }),
 
-  /** The download URL for an export. Used as an href, not fetched. */
+  /**
+   * The URL of an export.
+   *
+   * It said "used as an href, not fetched", and that stopped being true when
+   * the export endpoints started needing the bearer token: `downloadExport`
+   * below is now the only caller, and it fetches this. Kept separate from it
+   * so the query-building lives in one place.
+   */
   exportUrl: (returnType, extension, period) =>
     `${BASE}/filing/export/${returnType}.${extension}${query({ period })}`,
 

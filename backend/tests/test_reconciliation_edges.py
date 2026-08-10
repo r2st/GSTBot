@@ -515,43 +515,6 @@ class TestAFailedRunLeavesNothingBehind:
 
 
 # ---------------------------------------------------------------------------
-# normalize_gstin
-# ---------------------------------------------------------------------------
-
-class TestNormalizeGstin:
-    def test_a_valid_gstin_comes_back_normalised(self):
-        assert (
-            reconciliation.normalize_gstin(SUPPLIER_GSTIN_OTHER_STATE.lower())
-            == SUPPLIER_GSTIN_OTHER_STATE
-        )
-
-    def test_surrounding_whitespace_is_tolerated(self):
-        assert (
-            reconciliation.normalize_gstin(f"  {SUPPLIER_GSTIN_OTHER_STATE}  ")
-            == SUPPLIER_GSTIN_OTHER_STATE
-        )
-
-    @pytest.mark.parametrize("value", [None, "", "   "])
-    def test_nothing_in_gives_none_out(self, value):
-        assert reconciliation.normalize_gstin(value) is None
-
-    @pytest.mark.parametrize(
-        "value",
-        [
-            "not a gstin",
-            "29AAGCB7383J1Z",  # one short
-            "29AAGCB7383J1ZZ",  # wrong check digit
-            "00AAGCB7383J1Z4",  # no such state
-            "1234567890abcde",
-        ],
-    )
-    def test_an_invalid_gstin_gives_none_rather_than_raising(self, value):
-        # The router calls this on user-supplied filter values, so a raise
-        # here would be a 500 on a typo.
-        assert reconciliation.normalize_gstin(value) is None
-
-
-# ---------------------------------------------------------------------------
 # What the run costs the database
 # ---------------------------------------------------------------------------
 

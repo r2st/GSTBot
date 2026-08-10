@@ -58,7 +58,6 @@ from sqlalchemy.pool import StaticPool  # noqa: E402
 from app.core.database import Base, get_db  # noqa: E402
 from app.main import app  # noqa: E402  (importing main registers every model)
 from app.models.business import Business  # noqa: E402
-from app.models.user import User  # noqa: E402
 
 # Checksum-valid GSTINs used across the suite. Two Maharashtra (27) and one
 # Karnataka (29), so both the intra-state and inter-state tax splits have real
@@ -222,10 +221,6 @@ def auth_client(client):
     client.headers.update({"Authorization": f"Bearer {response.json()['access_token']}"})
     return client
 
-
-@pytest.fixture()
-def current_user(db_session, auth_client) -> User:
-    return db_session.query(User).filter_by(email=TEST_EMAIL).one()
 
 
 @pytest.fixture()
