@@ -11,6 +11,11 @@ function Bomb({ explode, message = "Cannot read properties of null" }) {
   return <p>Everything is fine</p>;
 }
 
+/** Throws something that is not an Error, which React catches all the same. */
+function RawThrow({ value }) {
+  throw value;
+}
+
 describe("ErrorBoundary", () => {
   beforeEach(() => {
     // The boundary logs to console.error by design — it is the only reporting
@@ -67,6 +72,22 @@ describe("ErrorBoundary", () => {
       </MemoryRouter>,
     );
     expect(screen.getByText(/total_value of null/)).toBeInTheDocument();
+  });
+
+  it("shows a thrown value that is not an Error, rather than an empty detail", () => {
+    // `throw` takes any value, and a bundled dependency rejecting a render
+    // with a string is the realistic source. Reading `.message` off it gives
+    // undefined, and the detail line then renders as nothing at all — which
+    // is the one line telling anyone what actually broke.
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <RawThrow value="chart series is not an array" />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("chart series is not an array")).toBeInTheDocument();
   });
 
   it("still logs, so there is something to debug from", () => {
@@ -177,6 +198,19 @@ describe("SectionBoundary", () => {
   it("renders its children when nothing throws", () => {
     render(<Page explode={false} />);
     expect(screen.getByText("Everything is fine")).toBeInTheDocument();
+  });
+
+  it("shows a thrown value that is not an Error here too", () => {
+    // The quiet fallback has the same detail line, and the same way to lose it.
+    render(
+      <MemoryRouter>
+        <SectionBoundary name="The net liability trend">
+          <RawThrow value="series[3].total is null" />
+        </SectionBoundary>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("series[3].total is null")).toBeInTheDocument();
   });
 
   it("costs the page only the section that failed", () => {

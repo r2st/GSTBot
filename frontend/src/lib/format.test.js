@@ -38,6 +38,14 @@ describe("rupeesShort", () => {
     expect(rupeesShort(0)).toBe("₹0");
     expect(rupeesShort(undefined)).toBe("₹0");
   });
+
+  it("falls back to zero rather than rendering NaN on a tile", () => {
+    // The stat tiles feed this straight from the API. A total that arrived as
+    // a word would otherwise read "₹NaNCr", which is worse than a wrong zero:
+    // it looks like a display bug rather than like missing data.
+    expect(rupeesShort("not a number")).toBe("₹0");
+    expect(rupeesShort(Infinity)).toBe("₹0");
+  });
 });
 
 describe("periodLabel", () => {
@@ -108,12 +116,24 @@ describe("daysUntil", () => {
   it("returns null when there is no date", () => {
     expect(daysUntil(null)).toBeNull();
   });
+
+  it("returns null for a date it cannot parse", () => {
+    // Callers render this as "due in N days" and compare it against zero to
+    // decide overdue. NaN would satisfy neither branch and would print as
+    // "due in NaN days"; null is the value they already handle as "no date".
+    expect(daysUntil("not a date", now)).toBeNull();
+  });
 });
 
 describe("status helpers", () => {
   it("labels every status the API can return", () => {
     expect(statusLabel("missing_in_2b")).toBe("Missing in 2B");
     expect(statusLabel("parsed")).toBe("Parsed");
+  });
+
+  it("renders nothing for a row with no status at all", () => {
+    expect(statusLabel(null)).toBe("");
+    expect(statusLabel(undefined)).toBe("");
   });
 
   it("maps a status to a tone", () => {

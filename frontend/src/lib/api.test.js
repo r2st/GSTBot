@@ -2,9 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   api,
   errorMessage,
+  getActiveBusinessId,
   getToken,
   isAbortError,
   onUnauthorized,
+  setActiveBusinessId,
   setToken,
 } from "./api";
 
@@ -52,6 +54,16 @@ describe("errorMessage", () => {
 
   it("falls back to JSON for a structured detail with no message", () => {
     expect(errorMessage({ detail: { code: "rate_limited" } })).toBe('{"code":"rate_limited"}');
+  });
+
+  it("falls back to JSON for a validation entry with no msg", () => {
+    // Not FastAPI's own shape — a gateway that rewrote the list, or a
+    // middleware error serialized into it. Rendering `undefined` in the banner
+    // would tell the user nothing about which field was refused; the raw entry
+    // at least still names it.
+    expect(errorMessage({ detail: [{ loc: ["body", "gstin"], type: "value_error" }] })).toBe(
+      '{"loc":["body","gstin"],"type":"value_error"}',
+    );
   });
 });
 
@@ -422,6 +434,22 @@ describe("api", () => {
     expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/reconciliation");
   });
 
+  it("drops the filters that carry no value rather than sending them empty", async () => {
+    // `?period=` is not the same request as no period at all — the first asks
+    // the server to match the empty string. The filter runs over null and
+    // undefined too, because a page holds an unset control as either.
+    global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+
+    await api.listReconciliations({
+      period: "2026-04",
+      status: "",
+      limit: null,
+      offset: undefined,
+    });
+
+    expect(global.fetch.mock.calls[0][0]).toBe("/api/v1/reconciliation?period=2026-04");
+  });
+
   // What the user reads when the answer did not come from the application.
   // Both of these are invisible to a test that mocks an HTTP/1.1-shaped
   // response, and both are what production actually serves.
@@ -469,6 +497,23 @@ describe("api", () => {
       global.fetch.mockResolvedValueOnce(jsonResponse({}, { status: 429 }));
 
       await expect(api.me()).rejects.toThrow("Too many requests (429)");
+    });
+
+    it("keeps the reason phrase on an unreadable 2xx as well", async () => {
+      // The same HTTP/2 hazard as `statusMessage`, in the other message. A
+      // proxy that answers 200 with an HTML interstitial is usually HTTP/1.1
+      // — it is the hop that did *not* come from the app — so this is the
+      // path where a reason phrase actually shows up.
+      global.fetch.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => "<html>Sign in to the network</html>",
+      });
+
+      await expect(api.me()).rejects.toThrow(
+        "The server sent a response this app could not read (200 OK).",
+      );
     });
 
     it("reports a 2xx whose body is not JSON rather than throwing a parse error", async () => {
@@ -645,6 +690,91 @@ describe("filing records", () => {
     await expect(api.recordFiled("gstr1", { period: "2026-04" })).rejects.toThrow(
       "A filing date of 2027-01-01 is in the future.",
     );
+  });
+});
+
+// `X-Business-Id` is the whole of the multi-GSTIN feature on this side of the
+// wire: the backend resolves the tenant from it in `get_current_business`, and
+// honours it only against a live membership. Which requests carry it, and
+// which must not, is therefore a tenancy question rather than a plumbing one.
+describe("acting for a linked business", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("stores the id as a string, and reads back nothing when cleared", () => {
+    setActiveBusinessId(7);
+    expect(getActiveBusinessId()).toBe("7");
+    setActiveBusinessId(null);
+    expect(getActiveBusinessId()).toBeNull();
+  });
+
+  it("names the business on an authenticated request once one is switched to", async () => {
+    setToken("tok-123");
+    setActiveBusinessId(7);
+    global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+
+    await api.listInvoices();
+
+    expect(global.fetch.mock.calls[0][1].headers["X-Business-Id"]).toBe("7");
+  });
+
+  it("sends nothing extra for a login that never switched", async () => {
+    // The default is the caller's own tenant, and the backend must see exactly
+    // the request shape it saw before this feature existed.
+    setToken("tok-123");
+    global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
+
+    await api.listInvoices();
+
+    expect(global.fetch.mock.calls[0][1].headers).not.toHaveProperty("X-Business-Id");
+  });
+
+  it("never names a business on an unauthenticated request", async () => {
+    // A stale id in localStorage must not ride along on the public lookups. It
+    // identifies nobody without a token, and `auth: false` is the statement
+    // that this request carries no identity at all.
+    setActiveBusinessId(7);
+    global.fetch.mockResolvedValueOnce(jsonResponse({ valid: true }));
+
+    await api.validateGstin("27AAPFU0939F1ZV");
+
+    expect(global.fetch.mock.calls[0][1].headers).not.toHaveProperty("X-Business-Id");
+  });
+
+  it("carries it on an export, which fetches outside `request`", async () => {
+    // downloadExport builds its own headers, so it can and did drift from the
+    // rule above — an export would then have come from the wrong business,
+    // which is the one place that mistake produces a file to file with.
+    setToken("tok-123");
+    setActiveBusinessId(7);
+    global.fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "",
+      text: async () => "",
+      blob: async () => new Blob(["csv,data"]),
+      headers: { get: () => null },
+    });
+
+    await api.downloadExport("gstr1", "csv", "2026-04");
+
+    expect(global.fetch.mock.calls[0][1].headers["X-Business-Id"]).toBe("7");
+  });
+
+  it("forgets the business on logout, since the next sign-in may be another login", async () => {
+    setToken("tok-123");
+    setActiveBusinessId(7);
+
+    api.logout();
+
+    expect(getToken()).toBeNull();
+    expect(getActiveBusinessId()).toBeNull();
   });
 });
 

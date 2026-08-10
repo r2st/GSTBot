@@ -88,6 +88,21 @@ describe("fileError", () => {
   it("says something useful when there is no file", () => {
     expect(fileError(null)).toBe("No file selected.");
   });
+
+  it("names a single permitted extension without a stray 'and'", () => {
+    // readableList joins with "and" from two upwards. A caller narrowing the
+    // list to one would otherwise read "Use  and .json.".
+    expect(fileError(sizedFile("scan.pdf", 5000), { extensions: [".json"] })).toBe(
+      "scan.pdf is .pdf, which cannot be read. Use .json.",
+    );
+  });
+
+  it("refuses an entry with no filename rather than reading past it", () => {
+    // A directory dragged into the dropzone reaches the FileList as an entry
+    // with nothing to take an extension from. Refusing it is right; throwing
+    // on the way to deciding that would take the whole drop down with it.
+    expect(fileError({ size: 5000 })).toContain("cannot be read");
+  });
 });
 
 describe("partitionFiles", () => {
@@ -193,6 +208,15 @@ describe("amountError", () => {
     // user never typed.
     expect(amountError("100.005")).toContain("paise");
     expect(amountError("100.00")).toBe("");
+  });
+
+  it("rejects a run of digits long enough to overflow to Infinity", () => {
+    // Digits only, so the shape check passes, but Number() overflows. The
+    // isFinite guard answers before the size check does, so this reads as
+    // "not a number" rather than as "too large" — either refusal is correct,
+    // and pinning which one arrives keeps the guard from being dropped as
+    // redundant on the assumption that the size check covers it.
+    expect(amountError("9".repeat(400))).toBe("Amount must be a number.");
   });
 
   it("rejects an amount too large for the column", () => {
@@ -327,6 +351,30 @@ describe("invoiceDraftErrors", () => {
     expect(warnings.join(" ")).toContain("interstate or intrastate");
   });
 
+  it("does not call an interstate invoice both, when its CGST/SGST read zero", () => {
+    // The parser writes 0 into the columns it found nothing in rather than
+    // leaving them blank, so an ordinary IGST invoice arrives with cgst and
+    // sgst present and zero. Reading "has CGST/SGST" as "the field is there"
+    // would warn about every interstate supply in the ledger.
+    const { errors, warnings } = invoiceDraftErrors(
+      draft({ igst: "180", cgst: "0", sgst: "0", total_value: "1180" }),
+      { today },
+    );
+    expect(errors).toEqual({});
+    expect(warnings).toEqual([]);
+  });
+
+  it("counts a tax head the parser missed as zero in the total check", () => {
+    // A blank SGST is a field the extraction did not find, not a reason to
+    // skip the arithmetic — the mismatch is exactly the signal that says so.
+    const { warnings } = invoiceDraftErrors(
+      draft({ cgst: "90", sgst: "", total_value: "1180" }),
+      { today },
+    );
+    expect(warnings.join(" ")).toContain("₹1090.00");
+    expect(warnings.join(" ")).toContain("₹1180.00");
+  });
+
   it("warns when CGST and SGST differ", () => {
     const { warnings } = invoiceDraftErrors(draft({ cgst: "90", sgst: "80" }), { today });
     expect(warnings.join(" ")).toContain("normally equal");
@@ -416,6 +464,20 @@ describe("registrationErrors", () => {
   it("enforces the server's password minimum", () => {
     expect(registrationErrors({ ...good, password: "short" }).password).toContain("8 characters");
     expect(registrationErrors({ ...good, password: "12345678" }).password).toBeUndefined();
+  });
+
+  it("faults every missing field on a form whose keys were never set", () => {
+    // The page seeds its state with empty strings, so the absent-key form is
+    // not what the UI sends. It is what a restored draft or a future field
+    // rename produces, and each rule has to read the absence as "not filled
+    // in" rather than as the literal "undefined" that String() would make of
+    // it — which is 9 characters long, and would pass the password rule.
+    expect(registrationErrors({})).toEqual({
+      gstin: "A GSTIN is required to register.",
+      email: "Enter your email.",
+      legal_name: "Legal name is required — it is what appears on your returns.",
+      password: "Use at least 8 characters.",
+    });
   });
 });
 
@@ -539,6 +601,12 @@ describe("taxRateError", () => {
     expect(taxRateError("-1")).toContain("negative");
     expect(taxRateError("101")).toContain("over 100");
     expect(taxRateError("abc")).toContain("must be a number");
+  });
+
+  it("rejects a run of digits long enough to overflow to Infinity", () => {
+    // As in amountError: digits pass the shape check, Number() overflows, and
+    // the isFinite guard answers ahead of the over-100 check.
+    expect(taxRateError("9".repeat(400))).toBe("Tax rate must be a number.");
   });
 
   it("does not block a rate outside the slabs — that is a warning", () => {
