@@ -127,6 +127,28 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         # Rule 37 asks "what is unpaid and older than 180 days" of the whole
         # purchase register, on every ITC screen.
         Index("ix_invoices_business_paid", "business_id", "paid_at"),
+        # The stalled-parse reaper, and the only query in the product that asks
+        # about invoices across every tenant at once. Every other index here
+        # leads with ``business_id``, which is right for the screens and useless
+        # to this one: a leading column the query does not constrain cannot be
+        # searched, so the hourly sweep read the whole live table.
+        #
+        # The beat entry describes itself as "one indexed query over a status
+        # that is empty in the ordinary case" — true of the status, and the
+        # index it named did not exist. The cost is invisible in exactly the way
+        # that keeps it: the sweep commits only when it found something, so on a
+        # healthy deployment it scans a growing invoices table every hour and
+        # reports nothing.
+        #
+        # Over the undeleted rows only, matching the sweep's own predicate — a
+        # tombstone has no parse left to strand.
+        Index(
+            "ix_invoices_status_updated",
+            "status",
+            "updated_at",
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)

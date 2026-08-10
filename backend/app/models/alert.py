@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from enum import Enum
 
-from sqlalchemy import Date, DateTime, Index, String, Text
+from sqlalchemy import Date, DateTime, Index, String, Text, text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -69,6 +69,19 @@ class Alert(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         Index("ix_alerts_business_created", "business_id", "created_at"),
         Index("ix_alerts_business_status", "business_id", "status"),
         Index("ix_alerts_business_due", "business_id", "due_date"),
+        # The email digest asks which tenants have anything undelivered, across
+        # every tenant at once — so like the reaper's query on invoices it
+        # constrains no ``business_id`` and cannot use the three indexes above.
+        # ``business_id`` trails ``status`` here rather than leading it, which
+        # is what lets the DISTINCT be answered from the index instead of from
+        # the rows. See ``send_pending_alerts`` in services/alert_delivery.py.
+        Index(
+            "ix_alerts_status_business",
+            "status",
+            "business_id",
+            sqlite_where=text("deleted_at IS NULL"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
