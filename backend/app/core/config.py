@@ -148,6 +148,22 @@ class Settings(BaseSettings):
     # taken: falling back to heuristics now beats the same failure 30s later.
     openrouter_retry_max_wait_seconds: float = Field(default=30.0, ge=0, le=300)
 
+    # ---- Email (filing-deadline alert digests) ----
+    # Off by default: no deployment has SMTP infrastructure until it sets this,
+    # and the alert stays exactly as useful in-app either way — this only adds
+    # a second place it can be seen. See app/services/alerting.py for what
+    # ships without it.
+    alerts_email_enabled: bool = False
+    smtp_host: str = ""
+    smtp_port: int = Field(default=587, ge=1, le=65535)
+    smtp_username: str = ""
+    smtp_password: str = ""
+    # False for a local mail-catcher (Mailhog, Mailpit) that speaks plain SMTP
+    # on an unencrypted loopback port; every real relay needs this on.
+    smtp_use_tls: bool = True
+    smtp_from_address: str = "alerts@gstbot.aiknol.com"
+    smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+
     # ---- Uploads ----
     upload_dir: str = "./data/invoices"
     max_upload_mb: int = 15
@@ -383,6 +399,7 @@ class Settings(BaseSettings):
             "log_level": self.log_level,
             "log_format": self.log_format,
             "ai_configured": bool(self.openrouter_api_key),
+            "alerts_email_enabled": self.alerts_email_enabled,
             "upload_dir": self.upload_dir,
             "max_upload_mb": self.max_upload_mb,
             "db_pool_size": self.db_pool_size,
@@ -422,6 +439,12 @@ def validate_startup_config(settings_obj: Settings | None = None) -> list[str]:
         found.append(
             "OPENROUTER_API_KEY is not set — invoice extraction falls back to "
             "heuristics and OCR, which is materially less accurate."
+        )
+
+    if current.alerts_email_enabled and not current.smtp_host:
+        found.append(
+            "ALERTS_EMAIL_ENABLED is true but SMTP_HOST is not set — filing-deadline "
+            "alerts will stay in-app only."
         )
 
     if current.is_production:

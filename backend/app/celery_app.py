@@ -97,6 +97,13 @@ celery_app.conf.update(
 # alert exists to reach.
 DEADLINE_SWEEP_HOUR = 7
 
+# Minutes past DEADLINE_SWEEP_HOUR at which the day's alert emails go out.
+# After the sweep, not alongside it: the sweep is what creates the rows this
+# reads, and a beat schedule has no ordering guarantee between two entries at
+# the same minute. Fifteen is comfortably longer than one tenant's sweep pass
+# takes.
+ALERT_EMAIL_MINUTE = 15
+
 # Minute past each hour at which stranded parses are reaped. Offset from the
 # top of the hour so it does not start alongside the deadline sweep, log
 # rotation and everything else that fires at :00.
@@ -116,6 +123,13 @@ celery_app.conf.beat_schedule = {
     "filing-deadline-sweep": {
         "task": "alerts.sweep_filing_deadlines",
         "schedule": crontab(hour=DEADLINE_SWEEP_HOUR, minute=0),
+    },
+    # A no-op on any deployment that has not set ALERTS_EMAIL_ENABLED and
+    # SMTP_HOST — see app/services/alert_delivery.py. Scheduled unconditionally
+    # so turning email on is a config change, not a redeploy.
+    "filing-deadline-alert-emails": {
+        "task": "alerts.send_pending_emails",
+        "schedule": crontab(hour=DEADLINE_SWEEP_HOUR, minute=ALERT_EMAIL_MINUTE),
     },
     # Hourly, and unlike the sweep above this one is not a date-based judgement
     # that can only change overnight — it is an operational state that a single

@@ -442,16 +442,21 @@ journalctl -u gstbot-beat -n 30               # what beat has published
 journalctl -u gstbot-worker -g 'deadline sweep' --since yesterday
 ```
 
-`gstbot-beat.service` runs Celery beat, which publishes one task a day:
-`alerts.sweep_filing_deadlines` at **07:00 IST**. The worker executes it. Beat
-holds only the "when" — it opens no database connection, which is why it is the
-one unit here that does not `Requires=gstbot-migrate.service`.
+`gstbot-beat.service` runs Celery beat, which publishes two tasks a day:
+`alerts.sweep_filing_deadlines` at **07:00 IST**, and `alerts.send_pending_emails`
+fifteen minutes after it. The worker executes both. Beat holds only the "when"
+— it opens no database connection, which is why it is the one unit here that
+does not `Requires=gstbot-migrate.service`.
 
 The sweep reads where each business's returns stand and keeps one alert per
-period and return type in step with that. It writes rows; **it sends nothing**.
-No email, SMS or WhatsApp infrastructure exists on this box, so the alert
-appears in the product and its `channel` stays null — which is also how a
-future sender will find what has not been sent.
+period and return type in step with that. It writes rows; **it sends nothing
+itself**. The second task is what emails a digest of each business's open
+alerts — and on this box it is a no-op, because `ALERTS_EMAIL_ENABLED` is
+unset in `/etc/gstbot/gstbot.env`. No SMTP relay is configured, so every alert
+still appears in the product with `channel` staying null. Filling in
+`SMTP_HOST` and the credentials in the env file's "Email" section turns it on
+without a redeploy — the schedule is already running, waiting for something to
+send.
 
 Two operational facts about it:
 
