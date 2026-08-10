@@ -72,9 +72,30 @@ class Alert(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
         # The email digest asks which tenants have anything undelivered, across
         # every tenant at once — so like the reaper's query on invoices it
         # constrains no ``business_id`` and cannot use the three indexes above.
-        # ``business_id`` trails ``status`` here rather than leading it, which
-        # is what lets the DISTINCT be answered from the index instead of from
-        # the rows. See ``send_pending_alerts`` in services/alert_delivery.py.
+        # ``status`` leads because it is the only column the digest constrains.
+        #
+        # ``business_id`` trails so that Postgres can answer the DISTINCT from
+        # the index alone. Measured on 16, 300 tenants and 18,600 alerts: an
+        # Index Only Scan, Heap Fetches 0, 10 buffers, against 228 buffers and
+        # 222 heap blocks for the same index without ``business_id`` in it.
+        #
+        # Two caveats, because that number is conditional and the shape of this
+        # declaration does not say so:
+        #
+        # * It needs a current visibility map. Straight after a bulk load the
+        #   planner prices the index-only scan as though every row needed a heap
+        #   fetch and takes the bitmap scan instead — the 228-buffer plan, from
+        #   the index that was supposed to avoid it. Autovacuum restores it;
+        #   nothing here does.
+        # * SQLite never does it at all. The DISTINCT is a temp b-tree in every
+        #   arrangement of these columns, and a partial index is not reported as
+        #   covering even when the query's ``deleted_at IS NULL`` matches the
+        #   predicate exactly. So ``test_sweep_indexes``, which plans against
+        #   SQLite, can only prove the search on ``status`` — the covering read
+        #   this column order buys is not visible to the suite, and is asserted
+        #   nowhere.
+        #
+        # See ``send_pending_alerts`` in services/alert_delivery.py.
         Index(
             "ix_alerts_status_business",
             "status",

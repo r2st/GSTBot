@@ -121,7 +121,17 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
             postgresql_where=text("deleted_at IS NULL"),
         ),
         Index("ix_invoices_business_created", "business_id", "created_at"),
-        Index("ix_invoices_business_period", "business_id", "period"),
+        # Nothing asks "what is in this month" on its own. Five callers ask it
+        # of one direction — filing's two, reconciliation's, and ITC's output
+        # tax and exempt ratio — because sales and purchases are different
+        # returns and share this table, so a period holds about twice the rows
+        # any one of them wants. With ``invoice_type`` outside the key it could
+        # only be a filter, applied after the row is off the heap: the scan
+        # fetched both directions and discarded half. ``status`` is left in the
+        # filter on purpose — it is the one column here that changes on every
+        # parse, and an index entry rewrite per parse costs more than the few
+        # unreadable rows it would skip.
+        Index("ix_invoices_business_period", "business_id", "period", "invoice_type"),
         Index("ix_invoices_business_status", "business_id", "status"),
         Index("ix_invoices_business_type_date", "business_id", "invoice_type", "invoice_date"),
         # Rule 37 asks "what is unpaid and older than 180 days" of the whole

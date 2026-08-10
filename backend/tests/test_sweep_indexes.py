@@ -184,3 +184,10 @@ class TestTheAlertDigestIsIndexed:
 
         assert "ix_alerts_status_business" in plan, plan
         assert "SCAN" not in plan, plan
+        # What is asserted here is the search on ``status``, and only that. The
+        # second column of that index exists so Postgres can answer the DISTINCT
+        # without touching the rows; SQLite plans a temp b-tree for it whatever
+        # the column order, and does not treat a partial index as covering even
+        # when the query's predicate matches its own. That benefit is real —
+        # measured — and invisible from here. See the note on the index in
+        # models/alert.py rather than reading this test as covering it.
