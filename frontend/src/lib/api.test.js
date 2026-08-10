@@ -177,6 +177,34 @@ describe("api", () => {
       expect(options.signal).toBe(controller.signal);
     });
 
+    it("passes a signal through to fetch on the late fee", async () => {
+      // Two controls on the filing page choose which return this asks about,
+      // and the answer is an amount of money owed. A superseded response that
+      // lands anyway puts the wrong month's figure under the wrong month's
+      // heading — and unlike a stale table, that is a number someone may pay.
+      global.fetch.mockResolvedValueOnce(jsonResponse({ days_late: 0 }));
+      const controller = new AbortController();
+
+      await api.lateFee("gstr3b", "2026-04", {}, { signal: controller.signal });
+
+      const [url, options] = global.fetch.mock.calls[0];
+      expect(String(url)).toContain("/filing/gstr3b/late-fee?period=2026-04");
+      expect(options.signal).toBe(controller.signal);
+    });
+
+    it("still asks for the late fee when the caller wants no cancellation", async () => {
+      // The refining parameters stay optional and stay out of the query when
+      // they are not given: an omitted turnover means "use the highest cap", and
+      // an empty one would be a different question.
+      global.fetch.mockResolvedValueOnce(jsonResponse({ days_late: 0 }));
+
+      await api.lateFee("gstr1", "2026-04");
+
+      const [url, options] = global.fetch.mock.calls[0];
+      expect(String(url)).toBe("/api/v1/filing/gstr1/late-fee?period=2026-04");
+      expect(options.signal).toBeUndefined();
+    });
+
     it("still works for a caller that does not want to cancel", async () => {
       global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
 

@@ -86,6 +86,29 @@ function StatusRow({ item }) {
   );
 }
 
+/**
+ * How late a return is, in a sentence, and whether it is still getting later.
+ *
+ * The two readings are the same figure at different moments — a projection that
+ * grows every day the return is outstanding, and the settled amount once it has
+ * been filed — so they are worded as different sentences rather than one hedged
+ * one. A business deciding whether to file today needs to know which it is
+ * looking at.
+ */
+function latenessLine(owed) {
+  const days = `${owed.days_late} day${owed.days_late === 1 ? "" : "s"}`;
+  if (owed.projected) {
+    return (
+      `${periodLabel(owed.period)} is ${days} past its ${dateLabel(owed.due_date)} ` +
+      `deadline, and this grows every day until it is filed.`
+    );
+  }
+  return (
+    `Filed ${days} after the ${dateLabel(owed.due_date)} deadline. ` +
+    `This is what that came to.`
+  );
+}
+
 function IssueRow({ issue }) {
   return (
     <tr>
@@ -122,6 +145,7 @@ export default function FilingPage() {
   const [standings, setStandings] = useState(null);
   const [arn, setArn] = useState("");
   const [arnProblem, setArnProblem] = useState("");
+  const [lateFee, setLateFee] = useState(null);
   // Bumped after a filing is recorded, to refetch a status the record changed.
   const [statusToken, setStatusToken] = useState(0);
   // The period and return type the picker is showing, readable from a callback
@@ -177,6 +201,35 @@ export default function FilingPage() {
       });
     return () => controller.abort();
   }, [statusToken]);
+
+  // What being late has cost so far. Follows the picker rather than the status
+  // table, because ss.47 and 50 are charged per return per period and the two
+  // controls above choose which one — GSTR-1 carries the late fee alone, while
+  // GSTR-3B is the only return a cash payment runs through and so the only one
+  // that also accrues interest.
+  //
+  // Refetched when a filing is recorded, because that is the moment the figure
+  // stops growing: the same endpoint answers a running projection while the
+  // return is outstanding and the settled amount once it is not, and leaving
+  // yesterday's projection on screen would keep charging a business for a
+  // return it has just told us it filed.
+  //
+  // Its failure is swallowed for the same reason the status table's is. This
+  // panel is a consequence of the period, not the work the page exists to do,
+  // and a banner saying the late fee could not be loaded would sit above export
+  // buttons that are working perfectly.
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .lateFee(returnType, period, {}, { signal: controller.signal })
+      .then((data) => {
+        if (!controller.signal.aborted) setLateFee(data);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLateFee(null);
+      });
+    return () => controller.abort();
+  }, [period, returnType, statusToken]);
 
   async function handleDownload(extension) {
     // Both controls that decide what this file is — the period picker and the
@@ -259,6 +312,17 @@ export default function FilingPage() {
     (item) => item.period === period && item.return_type === returnType,
   );
   const recordable = periodHasEnded(period);
+  // Shown only when there is something owed. A return inside its deadline has
+  // `days_late` of zero and nothing to say, and a panel headed "what being late
+  // has cost" reading zero on a period that is not late yet would read as a
+  // threat rather than a statement. Guarded on the period matching the picker
+  // as well, so the figure on screen is never last selection's answer arriving
+  // late — the abort handles the common case, a resolved-then-superseded
+  // response is what this catches.
+  const owed =
+    lateFee?.period === period && lateFee?.return_type === returnType && lateFee.days_late > 0
+      ? lateFee
+      : null;
 
   return (
     <div className="page">
@@ -421,6 +485,42 @@ export default function FilingPage() {
               </div>
               <p className="muted small">
                 Worked out on the <Link to="/itc">ITC screen</Link>.
+              </p>
+            </section>
+          )}
+
+          {owed && (
+            <section className="panel">
+              <h2>What being late has cost</h2>
+              <p className="muted small">{latenessLine(owed)}</p>
+              <div className="kv">
+                <div>
+                  <span className="muted">Late fee (s.47)</span>
+                  <strong>{rupees(owed.late_fee_total)}</strong>
+                </div>
+                {/* Only GSTR-3B runs a cash payment, so it is the only return
+                    s.50 interest can arise on. Shown as zero rather than hidden
+                    on a 3B that owed nothing, because "no interest" is the
+                    reassuring half of the answer; hidden entirely on a GSTR-1,
+                    where the row would invite the question of why it is nil. */}
+                {owed.return_type === "gstr3b" && (
+                  <div>
+                    <span className="muted">Interest (s.50)</span>
+                    <strong>{rupees(owed.interest)}</strong>
+                  </div>
+                )}
+                <div>
+                  <span className="muted">Total payable</span>
+                  <strong>{rupees(owed.total_payable)}</strong>
+                </div>
+              </div>
+              <p className="muted small">
+                Payable on the portal alongside the return — the late fee is split
+                {" "}
+                {rupees(owed.late_fee_cgst)} CGST and {rupees(owed.late_fee_sgst)} SGST.
+                {owed.projected
+                  ? " Filing stops the clock; recording it here freezes this figure."
+                  : ""}
               </p>
             </section>
           )}

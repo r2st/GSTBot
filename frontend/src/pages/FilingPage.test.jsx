@@ -95,6 +95,35 @@ function filingStatus(items = []) {
 }
 
 /**
+ * The late-fee answer, defaulting to a return that is not late at all.
+ *
+ * Zero days is what every existing test on this page is entitled to see — none
+ * of them are about a missed deadline — so the panel stays absent unless a test
+ * asks for it, and a default that owed money would put an unexpected figure
+ * into assertions about the return itself.
+ */
+function lateFee(overrides = {}) {
+  return {
+    period: PERIOD,
+    return_type: "gstr1",
+    due_date: "2026-05-11",
+    as_of: "2026-05-06",
+    filed_on: null,
+    days_late: 0,
+    projected: true,
+    is_nil: false,
+    net_tax_liability: "0.00",
+    late_fee_cgst: "0.00",
+    late_fee_sgst: "0.00",
+    late_fee_total: "0.00",
+    late_fee_tier: "upto_1_5_cr",
+    interest: "0.00",
+    total_payable: "0.00",
+    ...overrides,
+  };
+}
+
+/**
  * Route by URL rather than by call order: the page fires a preview fetch on
  * mount and again on every period or return-type change, so a queue of
  * responses would drift the moment a test changes one of them.
@@ -105,6 +134,9 @@ function mockApi({
   status = 200,
   filingStatus: statusBody = filingStatus(),
   filingStatusStatus = 200,
+  lateFee: lateFeeBody = lateFee(),
+  lateFeeStatus = 200,
+  onLateFee,
   onRecordFiled,
   recordFailure,
   exportFailure,
@@ -112,6 +144,19 @@ function mockApi({
   global.fetch = vi.fn(async (url, options) => {
     const href = String(url);
 
+    // Before the preview fallback below, which matches on the return type
+    // alone and would otherwise answer this with a whole GSTR-1.
+    if (href.includes("/late-fee")) {
+      onLateFee?.(href);
+      const body =
+        typeof lateFeeBody === "function" ? lateFeeBody(href) : lateFeeBody;
+      return {
+        ok: lateFeeStatus < 400,
+        status: lateFeeStatus,
+        statusText: lateFeeStatus < 400 ? "OK" : "Error",
+        text: async () => JSON.stringify(body),
+      };
+    }
     if (href.includes("/filing/status")) {
       return {
         ok: filingStatusStatus < 400,
@@ -875,12 +920,27 @@ describe("FilingPage", () => {
             // it is answered immediately and kept out of `pending`. The
             // ordering under test is between the two *previews*; queueing an
             // unrelated third request here would only shift every index.
+            //
+            // The late fee does follow the picker, and so is a genuine second
+            // ordering problem — but it is not this one, and it has its own
+            // test. Answered here rather than queued for the same reason: these
+            // tests index into `pending` to answer the second request before the
+            // first, and an extra entry per change moves every index they name.
             if (String(url).includes("/filing/status")) {
               resolve({
                 ok: true,
                 status: 200,
                 statusText: "OK",
                 text: async () => JSON.stringify(filingStatus()),
+              });
+              return;
+            }
+            if (String(url).includes("/late-fee")) {
+              resolve({
+                ok: true,
+                status: 200,
+                statusText: "OK",
+                text: async () => JSON.stringify(lateFee()),
               });
               return;
             }
@@ -1087,6 +1147,162 @@ describe("FilingPage", () => {
       expect(
         await screen.findByText("Downloaded gstr1_29AAGCB7383J1Z4_042026.json"),
       ).toBeInTheDocument();
+    });
+  });
+
+  describe("what a missed deadline has cost", () => {
+    /**
+     * A late-fee answer that echoes the period and return type it was asked
+     * about, the way the server does.
+     *
+     * The page will not render a figure whose period does not match the picker
+     * — a stale answer for a month the user has left is a number they might go
+     * and pay — so a fixed body would leave every test here asserting on an
+     * empty panel and passing for the wrong reason.
+     */
+    function owedFor(overrides = {}) {
+      return (href) => {
+        // Read off the query string by hand: `beforeEach` replaces the global
+        // `URL` with a plain object carrying the two blob helpers jsdom lacks,
+        // so `new URL(...)` is not a constructor anywhere in this file.
+        const period = /[?&]period=([^&]+)/.exec(href)?.[1];
+        return lateFee({
+          period,
+          return_type: href.includes("/gstr3b/") ? "gstr3b" : "gstr1",
+          days_late: 34,
+          late_fee_cgst: "850.00",
+          late_fee_sgst: "850.00",
+          late_fee_total: "1700.00",
+          interest: "1183.00",
+          total_payable: "2883.00",
+          ...overrides,
+        });
+      };
+    }
+
+    const panel = () => screen.findByRole("heading", { name: "What being late has cost" });
+
+    it("puts a figure on a deadline the business has already missed", async () => {
+      mockApi({ lateFee: owedFor() });
+      renderPage();
+
+      await panel();
+      expect(screen.getByText("₹1,700.00")).toBeInTheDocument();
+      expect(screen.getByText("₹2,883.00")).toBeInTheDocument();
+    });
+
+    it("says the amount is still growing while the return is unfiled", async () => {
+      mockApi({ lateFee: owedFor({ projected: true }) });
+      renderPage();
+
+      expect(await panel()).toBeInTheDocument();
+      expect(screen.getByText(/grows every day until it is filed/)).toBeInTheDocument();
+    });
+
+    it("counts a single day as one day rather than one days", async () => {
+      // The sentence carries a rupee figure a business may act on, so it should
+      // not read as though it were generated.
+      mockApi({ lateFee: owedFor({ days_late: 1 }) });
+      renderPage();
+
+      await panel();
+      expect(screen.getByText(/is 1 day past its/)).toBeInTheDocument();
+    });
+
+    it("stops calling it a projection once the filing has been recorded", async () => {
+      mockApi({ lateFee: owedFor({ projected: false, filed_on: "2026-06-14" }) });
+      renderPage();
+
+      expect(await panel()).toBeInTheDocument();
+      expect(screen.getByText(/Filed 34 days after the/)).toBeInTheDocument();
+      expect(screen.queryByText(/grows every/)).not.toBeInTheDocument();
+    });
+
+    it("counts interest on a GSTR-3B, which is the only return that pays cash", async () => {
+      const user = userEvent.setup();
+      mockApi({ lateFee: owedFor() });
+      renderPage();
+
+      await panel();
+      // Not on the GSTR-1 the page opens on: s.50 interest arises on the tax a
+      // return settles, and a GSTR-1 settles none.
+      expect(screen.queryByText("Interest (s.50)")).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: "GSTR-3B" }));
+      expect(await screen.findByText("Interest (s.50)")).toBeInTheDocument();
+      expect(screen.getByText("₹1,183.00")).toBeInTheDocument();
+    });
+
+    it("says nothing at all about a return that is still inside its deadline", async () => {
+      // The default: zero days late. A panel headed "what being late has cost"
+      // reading nil over a period that is not late reads as a threat.
+      mockApi();
+      renderPage();
+
+      await loaded();
+      expect(
+        screen.queryByRole("heading", { name: "What being late has cost" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("splits the fee the way the portal asks for it", async () => {
+      mockApi({ lateFee: owedFor() });
+      renderPage();
+
+      await panel();
+      expect(screen.getByText(/₹850\.00 CGST and ₹850\.00 SGST/)).toBeInTheDocument();
+    });
+
+    it("asks again after a filing is recorded, so the clock stops on screen", async () => {
+      const user = userEvent.setup();
+      const asked = [];
+      mockApi({ lateFee: owedFor(), onLateFee: (href) => asked.push(href) });
+      renderPage();
+
+      await panel();
+      const before = asked.length;
+
+      await selectCompletedPeriod(user);
+      await user.click(screen.getByRole("button", { name: /Mark GSTR-1 as filed/i }));
+
+      // Recording is the moment the figure stops growing: the same endpoint
+      // answers a running projection while the return is outstanding and the
+      // settled amount once it is not.
+      await waitFor(() => expect(asked.length).toBeGreaterThan(before + 1));
+    });
+
+    it("does not let a late fee it could not load break the export buttons", async () => {
+      // Same trade as the status table's. This panel is a consequence of the
+      // period, not the work the page exists to do.
+      mockApi({ lateFeeStatus: 500 });
+      renderPage();
+
+      await loaded();
+      expect(
+        screen.queryByRole("heading", { name: "What being late has cost" }),
+      ).not.toBeInTheDocument();
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /Download GSTR-1 JSON/i }),
+      ).toBeEnabled();
+    });
+
+    it("never shows a figure belonging to a period the picker has left", async () => {
+      const user = userEvent.setup();
+      // Pinned to the month the page opens on, whatever is asked for — which is
+      // what a superseded response that resolved anyway looks like.
+      const stuck = currentPeriod();
+      mockApi({ lateFee: () => lateFee({ period: stuck, days_late: 34, total_payable: "2883.00" }) });
+      renderPage();
+
+      await panel();
+      await selectCompletedPeriod(user);
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("heading", { name: "What being late has cost" }),
+        ).not.toBeInTheDocument(),
+      );
     });
   });
 });

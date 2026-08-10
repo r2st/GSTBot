@@ -355,9 +355,15 @@ export const api = {
    * and the amount actually run up once `recordFiled` has been called for it.
    * `params` may carry `is_nil` or `previous_year_turnover` to refine the
    * estimate; both are optional.
+   *
+   * Abortable, like every other read a picker drives. It was not, for as long
+   * as nothing called it: two controls choose what this asks about, and the
+   * answers do not come back in the order they were sent — so a stale reply
+   * would land as the amount owed on a month the user has already left, which
+   * is a number they might go and pay.
    */
-  lateFee: (returnType, period, params = {}) =>
-    request(`/filing/${returnType}/late-fee${query({ period, ...params })}`),
+  lateFee: (returnType, period, params = {}, { signal } = {}) =>
+    request(`/filing/${returnType}/late-fee${query({ period, ...params })}`, { signal }),
 
   /** The download URL for an export. Used as an href, not fetched. */
   exportUrl: (returnType, extension, period) =>
