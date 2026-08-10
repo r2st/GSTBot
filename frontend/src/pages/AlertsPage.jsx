@@ -76,7 +76,7 @@ function AlertRow({ alert, busy, onRead, onDismiss }) {
             type="button"
             className="btn btn-ghost"
             disabled={busy}
-            onClick={() => onRead(alert.id)}
+            onClick={onRead}
           >
             Mark as read
           </button>
@@ -86,7 +86,7 @@ function AlertRow({ alert, busy, onRead, onDismiss }) {
             type="button"
             className="btn btn-ghost"
             disabled={busy}
-            onClick={() => onDismiss(alert.id)}
+            onClick={onDismiss}
           >
             Dismiss
           </button>
@@ -177,7 +177,8 @@ export default function AlertsPage() {
    * resolved. Guessing the new status here would show a filed return as
    * "Dismissed" — losing exactly the distinction the two statuses exist for.
    */
-  async function apply(id, action) {
+  async function apply(alert, action) {
+    const id = alert.id;
     const target = scope;
     setPending((prev) => new Set(prev).add(id));
     setError("");
@@ -222,7 +223,14 @@ export default function AlertsPage() {
       // Kept whatever tab is up, unlike the two edits above. This is not a
       // superseded load whose view has gone — the user asked for this action
       // and it failed, and that is worth saying wherever they are standing.
-      setError(err.message);
+      //
+      // Named by the alert's own title rather than left as the bare server
+      // message: `pending` is a set because several rows can be in flight at
+      // once, and a banner that just says "failed to dismiss" over a list of
+      // ten gives no way to tell which one needs a retry. The failed row's
+      // buttons re-enable too, but that only helps someone already looking at
+      // that exact row.
+      setError(`"${alert.title}": ${err.message}`);
     } finally {
       // Only this row's flag. Clearing the whole set here would re-enable the
       // rows still waiting, which is the bug a set exists to stop.
@@ -292,8 +300,8 @@ export default function AlertsPage() {
                 key={alert.id}
                 alert={alert}
                 busy={pending.has(alert.id)}
-                onRead={(id) => apply(id, api.markAlertRead)}
-                onDismiss={(id) => apply(id, api.dismissAlert)}
+                onRead={() => apply(alert, api.markAlertRead)}
+                onDismiss={() => apply(alert, api.dismissAlert)}
               />
             ))}
           </ul>

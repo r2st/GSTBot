@@ -270,6 +270,40 @@ describe("AlertsPage", () => {
     expect(within(row).getByRole("button", { name: "Dismiss" })).toBeEnabled();
   });
 
+  it("names which alert failed when several are on screen", async () => {
+    // `pending` is a set precisely because more than one row can be in flight
+    // at once — so a banner that only repeats the server's message ("Could not
+    // save") gives no way to tell which of several alerts needs a retry.
+    const fetch = vi.fn();
+    fetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: "",
+      text: async () =>
+        JSON.stringify(
+          page([
+            alert({ id: 1, title: "GSTR-3B for 2026-04 is overdue" }),
+            alert({ id: 2, title: "GSTR-1 for 2026-04 is overdue" }),
+          ]),
+        ),
+    });
+    fetch.mockResolvedValueOnce({
+      ok: false,
+      status: 500,
+      statusText: "",
+      text: async () => JSON.stringify({ detail: "Could not save" }),
+    });
+    global.fetch = fetch;
+    renderPage();
+
+    const rows = await screen.findAllByRole("listitem");
+    await userEvent.click(within(rows[1]).getByRole("button", { name: "Dismiss" }));
+
+    const banner = await screen.findByRole("alert");
+    expect(banner).toHaveTextContent(/GSTR-1 for 2026-04 is overdue/);
+    expect(banner).not.toHaveTextContent(/GSTR-3B for 2026-04 is overdue/);
+  });
+
   it("only disables the row being acted on", async () => {
     // Clearing a backlog is one row at a time, so a page-wide busy flag would
     // make every other alert unclickable while one request is in flight.
