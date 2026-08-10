@@ -45,6 +45,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -59,7 +60,7 @@ from app.models.alert import (
 from app.models.business import Business
 from app.models.gstr_return import ReturnType
 from app.services import filing as filing_service
-from app.services import gst_calendar
+from app.services import gst_calendar, itc_deadline
 
 logger = logging.getLogger(__name__)
 
@@ -235,8 +236,20 @@ def sweep_business(
         for period in gst_calendar.completed_periods(today, WINDOW_PERIODS)
         if first is None or period >= first
     ]
+    # The s.16(4) pass is not scoped to that six-period window and runs whether
+    # or not it is empty. Its deadline is up to nineteen months behind the
+    # invoice, so the year it is about has long since dropped out of the
+    # filing sweep's window — scoping it the same way would mean the alert
+    # could only ever fire for credit that was not yet at risk.
+    itc = sweep_itc_deadlines(db, business, today=today)
+
     if not periods:
-        return SweepResult(businesses=1)
+        return SweepResult(
+            businesses=1,
+            raised=itc.raised,
+            reopened=itc.reopened,
+            resolved=itc.resolved,
+        )
 
     standings = filing_service.standings(
         db, business.id, periods=periods, as_of=today
@@ -302,8 +315,180 @@ def sweep_business(
             alert.status = AlertStatus.PENDING
 
     return SweepResult(
-        businesses=1, raised=raised, reopened=reopened, resolved=resolved
+        businesses=1,
+        raised=raised + itc.raised,
+        reopened=reopened + itc.reopened,
+        resolved=resolved + itc.resolved,
     )
+
+
+def _money(amount) -> str:
+    """A rupee figure as a business would read it, to the rupee.
+
+    Paise are dropped on purpose. This number exists to convey scale — "you are
+    about to lose ₹1,42,318" — and two decimal places on a figure that large
+    reads as a false claim to exactness about a total assembled from invoices
+    the product parsed itself.
+    """
+    return f"₹{amount.quantize(Decimal('1')):,}"
+
+
+def itc_wording(row: itc_deadline.LapsingCredit) -> tuple[str, str]:
+    """The title and body for one financial year's lapsing credit.
+
+    States the date and the amount and stops. Unlike a missed filing, there is
+    no discretion left to describe once the day passes — the credit is not
+    recoverable by acting faster, so wording that implies otherwise would be
+    the cruellest kind of wrong.
+    """
+    year = row.financial_year
+    amount = _money(row.total)
+    invoices = _plural(row.invoice_count, "purchase invoice")
+    deadline = row.deadline.isoformat()
+
+    if row.expired:
+        return (
+            f"Input credit for {year} has lapsed",
+            f"{amount} of input tax credit on {invoices} for {year} was never "
+            f"taken into a GSTR-3B, and the deadline under section 16(4) passed "
+            f"on {deadline}. This credit can no longer be claimed. If these "
+            f"returns were in fact filed on the portal, record them here — the "
+            f"credit is only lost if they genuinely were not.",
+        )
+
+    days = row.days_remaining
+    when = "today" if days == 0 else f"in {_plural(days, 'day')}"
+    return (
+        f"Input credit for {year} lapses {when}",
+        f"{amount} of input tax credit on {invoices} for {year} has not been "
+        f"taken into a GSTR-3B. Under section 16(4) it must be claimed by "
+        f"{deadline}, after which it is lost permanently — there is no late fee "
+        f"for this and no way to claim it afterwards. Filing the outstanding "
+        f"GSTR-3B for {', '.join(row.periods) or 'the affected periods'} is what "
+        f"secures it. If your annual return for {year} is filed before that "
+        f"date, the deadline is that date instead.",
+    )
+
+
+def _itc_severity(row: itc_deadline.LapsingCredit) -> AlertSeverity:
+    if row.expired:
+        return AlertSeverity.CRITICAL
+    if row.days_remaining <= itc_deadline.URGENT_DAYS:
+        return AlertSeverity.WARNING
+    return AlertSeverity.INFO
+
+
+def _existing_itc(db: Session, business_id: int) -> dict[str, Alert]:
+    """ITC-lapse alerts already raised, keyed by financial year.
+
+    Unfiltered by period because these alerts carry none: a financial year is
+    not a ``YYYY-MM`` and putting one in that column would break the listing
+    endpoint's period filter, which promises a filing period. The year lives in
+    ``context`` and the whole set is loaded — there is at most one row per
+    financial year per tenant, so this is a handful of rows however long the
+    business has been trading.
+    """
+    rows = db.scalars(
+        select(Alert)
+        .where(
+            Alert.business_id == business_id,
+            Alert.alert_type == AlertType.ITC_AT_RISK,
+            Alert.deleted_at.is_(None),
+        )
+        .order_by(Alert.id)
+    ).all()
+
+    found: dict[str, Alert] = {}
+    for row in rows:
+        year = (row.context or {}).get("financial_year")
+        if isinstance(year, str):
+            found[year] = row
+    return found
+
+
+def sweep_itc_deadlines(
+    db: Session, business: Business, *, today: date
+) -> SweepResult:
+    """Keep one tenant's s.16(4) alerts in step with what is still unclaimed.
+
+    Same three rules as the filing sweep — nothing before signup, nothing
+    outside the lead window, a dismissal is respected — with one difference
+    that matters: severity here escalates to CRITICAL on the day the credit
+    lapses, and that escalation reopens a dismissed alert. Dismissing "lapses
+    in 60 days" is a reasonable thing to do in September; it is not consent to
+    never hear that it happened.
+
+    Adds nothing the caller does not commit, so it shares the filing sweep's
+    per-tenant rollback.
+    """
+    at_risk = itc_deadline.at_risk(
+        db, business.id, as_of=today, since_period=_first_period(business)
+    )
+    existing = _existing_itc(db, business.id)
+
+    raised = reopened = resolved = 0
+    live = {row.financial_year for row in at_risk}
+
+    for row in at_risk:
+        severity = _itc_severity(row)
+        title, message = itc_wording(row)
+        alert = existing.get(row.financial_year)
+
+        if alert is None:
+            db.add(
+                Alert(
+                    business_id=business.id,
+                    alert_type=AlertType.ITC_AT_RISK,
+                    severity=severity,
+                    status=AlertStatus.PENDING,
+                    title=title,
+                    message=message,
+                    due_date=row.deadline,
+                    context={
+                        "financial_year": row.financial_year,
+                        "amount": str(row.total),
+                        "invoice_count": row.invoice_count,
+                        "periods": list(row.periods),
+                    },
+                )
+            )
+            raised += 1
+            continue
+
+        undone = alert.status is AlertStatus.RESOLVED
+        escalated = alert.severity is not severity
+
+        if alert.status in OPEN_STATUSES or undone or escalated:
+            # The amount moves as invoices are added or periods are filed, so
+            # the body is rewritten rather than left saying what was true the
+            # morning it was raised.
+            alert.title = title
+            alert.message = message
+            alert.severity = severity
+            alert.due_date = row.deadline
+            alert.context = {
+                "financial_year": row.financial_year,
+                "amount": str(row.total),
+                "invoice_count": row.invoice_count,
+                "periods": list(row.periods),
+            }
+
+        if undone or (escalated and alert.status not in OPEN_STATUSES):
+            alert.status = AlertStatus.PENDING
+            reopened += 1
+        elif escalated and alert.status is AlertStatus.READ:
+            alert.status = AlertStatus.PENDING
+
+    # A year that has dropped off the list has had its returns recorded — every
+    # invoice that was unclaimed is now in a filed GSTR-3B. Whether that
+    # happened before the deadline or after it, there is nothing further to
+    # ask for, so the alert closes.
+    for year, alert in existing.items():
+        if year not in live and alert.status in OPEN_STATUSES:
+            alert.status = AlertStatus.RESOLVED
+            resolved += 1
+
+    return SweepResult(raised=raised, reopened=reopened, resolved=resolved)
 
 
 def sweep_filing_deadlines(db: Session, *, today: date | None = None) -> SweepResult:

@@ -12,8 +12,14 @@ from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
 from app.models.mixins import MONEY_MAX
-from app.schemas.itc import ITCSummaryOut, Rule37Out, SetOffOut, SetOffRequest
-from app.services import gst_calendar, invoice_service
+from app.schemas.itc import (
+    ITCSummaryOut,
+    LapsingCreditListOut,
+    Rule37Out,
+    SetOffOut,
+    SetOffRequest,
+)
+from app.services import gst_calendar, invoice_service, itc_deadline
 from app.services import itc as itc_service
 
 router = APIRouter(prefix="/itc", tags=["itc"])
@@ -103,6 +109,52 @@ def get_rule_37(
     """
     invoices = itc_service.purchase_invoices(db, business.id)
     return Rule37Out.model_validate(itc_service.rule_37(invoices, as_of=as_of).as_dict())
+
+
+@router.get(
+    "/lapsing",
+    response_model=LapsingCreditListOut,
+    summary="Credit approaching the s.16(4) claim deadline, by financial year",
+    description=(
+        "Input credit on purchases that has not been taken into a GSTR-3B, "
+        "grouped by the financial year whose deadline governs it.\n\n"
+        "Section 16(4) bars credit on an invoice after the 30th of November "
+        "following the end of its financial year. Unlike every other reversal "
+        "this API reports, it is permanent: the credit is not deferred past "
+        "that date, it is extinguished, and no later filing recovers it.\n\n"
+        "Years whose deadline has already passed are included, and flagged "
+        "`expired`. A lapsed year is the most important row here, not the least."
+    ),
+    dependencies=[Depends(_read_limit)],
+)
+def get_lapsing_credit(
+    as_of: date | None = Query(
+        default=None, description="Date the deadline is measured against"
+    ),
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_current_business),
+) -> LapsingCreditListOut:
+    """Unclaimed credit by financial year, soonest s.16(4) deadline first.
+
+    No ``since_period`` floor is passed, unlike the alerting: a business asking
+    this question wants the whole register, including the years from before
+    they signed up. The caution the sweep applies is about interrupting someone
+    with a figure the product cannot stand behind, and nobody is being
+    interrupted here.
+    """
+    rows = itc_deadline.lapsing_credit(db, business.id, as_of=as_of)
+    at_risk = sum(
+        (row.total for row in rows if not row.expired), start=Decimal("0")
+    )
+    expired = sum((row.total for row in rows if row.expired), start=Decimal("0"))
+    return LapsingCreditListOut.model_validate(
+        {
+            "years": [row.as_dict() for row in rows],
+            "total_at_risk": str(at_risk),
+            "total_expired": str(expired),
+            "lead_days": itc_deadline.LEAD_DAYS,
+        }
+    )
 
 
 @router.post(

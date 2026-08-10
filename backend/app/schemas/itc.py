@@ -133,6 +133,33 @@ class ITCSummaryOut(BaseModel):
     unclaimed_count: int
 
 
+class LapsingCreditOut(BaseModel):
+    """One financial year's unclaimed credit, and its s.16(4) deadline."""
+
+    financial_year: str
+    deadline: str
+    days_remaining: int
+    expired: bool
+    tax: TaxHeadsOut
+    invoice_count: int
+    # The periods whose GSTR-3B is not recorded filed. Returned so the screen
+    # can link to them: naming the amount without naming what to file makes
+    # this a warning rather than a task.
+    periods: list[str]
+
+
+class LapsingCreditListOut(BaseModel):
+    """Everything unclaimed, by financial year, soonest deadline first."""
+
+    years: list[LapsingCreditOut]
+    # Summed here rather than in the browser, for the reason every money figure
+    # in this API is a string: the total of four lakh-sized decimals is exactly
+    # where a JavaScript float starts being visibly wrong.
+    total_at_risk: str
+    total_expired: str
+    lead_days: int
+
+
 class SetOffRequest(BaseModel):
     """Ask what a given credit and liability would settle to.
 

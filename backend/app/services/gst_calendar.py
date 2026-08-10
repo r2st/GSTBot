@@ -226,6 +226,63 @@ def gstr3b_due_date(period: str) -> date:
     return _due_on(period, GSTR3B_DUE_DAY)
 
 
+# The Indian financial year starts in April. Every annual GST rule is written
+# against it rather than the calendar year, so an invoice dated March and one
+# dated April are a year apart for the purposes below even though they are a
+# month apart on the wall.
+FY_START_MONTH = 4
+
+# s.16(4): credit on an invoice may not be taken after the 30th of November
+# following the end of the financial year the invoice pertains to. This is the
+# one GST deadline that destroys money rather than costing interest — the
+# credit is not deferred past it, it is gone — which is why it gets its own
+# arithmetic here rather than being derived at a call site.
+ITC_CLAIM_DEADLINE_MONTH = 11
+ITC_CLAIM_DEADLINE_DAY = 30
+
+
+def financial_year(moment: date) -> str:
+    """The Indian financial year *moment* falls in, as ``YYYY-YY``.
+
+    ``2025-26`` for anything from 1 April 2025 to 31 March 2026. The short
+    second half is how the year is written on every Indian tax document, and
+    matching that matters more here than being parseable — this string is shown
+    to a business, and ``2025-2026`` is not what their accountant writes.
+    """
+    start = moment.year if moment.month >= FY_START_MONTH else moment.year - 1
+    return f"{start:04d}-{(start + 1) % 100:02d}"
+
+
+def financial_year_end(moment: date) -> date:
+    """The last day of the financial year *moment* falls in — 31 March."""
+    start = moment.year if moment.month >= FY_START_MONTH else moment.year - 1
+    return date(start + 1, FY_START_MONTH, 1) - timedelta(days=1)
+
+
+def itc_claim_deadline(moment: date) -> date:
+    """The day credit on an invoice dated *moment* stops being claimable.
+
+    s.16(4), and the reason a purchase invoice that never reached a return is
+    worth alerting about long before anyone thinks of it as late: an invoice
+    from April 2025 has until 30 November 2026, so it sits unclaimed for
+    nineteen months looking like nothing is wrong, and then the credit is gone
+    permanently. There is no late fee for this and no way to take it afterwards.
+
+    The statute's other leg — "or furnishing of the relevant annual return,
+    whichever is earlier" — is deliberately not modelled. GSTR-9 is outside
+    what this product handles, so it has no way to know that a business filed
+    one in September and brought their own deadline forward. That makes this
+    date the *outer* bound: it is never later than the true one, so an alert
+    raised against it is never raised too late. A business that files GSTR-9
+    early has less time than this says, not more, and the wording says so.
+    """
+    return date(
+        financial_year_end(moment).year,
+        ITC_CLAIM_DEADLINE_MONTH,
+        ITC_CLAIM_DEADLINE_DAY,
+    )
+
+
 # The returns a business files, and the day each is due. Iterated by the
 # alerting, so a return type added here is one the deadline alerts start
 # covering without a second edit.
