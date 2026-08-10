@@ -320,6 +320,31 @@ describe("api", () => {
     unsubscribe();
   });
 
+  it("keeps the session when the 401 is about a credential in the body", async () => {
+    // Linking another GSTIN submits *that* account's email and password to
+    // prove the caller also holds it, and the endpoint answers 401 when they do
+    // not match. Read as the caller's own token being refused, a typo in the
+    // other registration's password signed the user out of the account they
+    // were signed into — and the token is still perfectly good.
+    setToken("good-token");
+    const told = vi.fn();
+    const unsubscribe = onUnauthorized(told);
+
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse(
+        { detail: "That email and password do not match an active account." },
+        { status: 401 },
+      ),
+    );
+    await expect(api.linkBusiness("other@acme.in", "wrong")).rejects.toThrow(
+      /do not match an active account/,
+    );
+
+    expect(told).not.toHaveBeenCalled();
+    expect(getToken()).toBe("good-token");
+    unsubscribe();
+  });
+
   it("does not let a throwing subscriber become the caller's error", async () => {
     setToken("stale-token");
     const unsubscribe = onUnauthorized(() => {

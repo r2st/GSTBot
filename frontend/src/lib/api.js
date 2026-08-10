@@ -70,7 +70,10 @@ function tokenRejected() {
   }
 }
 
-async function request(path, { method = "GET", body, form, auth = true, signal } = {}) {
+async function request(
+  path,
+  { method = "GET", body, form, auth = true, signal, carriesOtherCredentials = false } = {},
+) {
   const headers = {};
   const token = getToken();
   if (auth && token) headers["Authorization"] = `Bearer ${token}`;
@@ -93,7 +96,17 @@ async function request(path, { method = "GET", body, form, auth = true, signal }
   // A rejected token is a dead token; drop it, and end the session with it, so
   // the app falls back to login rather than retrying with a credential the
   // server has already refused.
-  if (res.status === 401 && auth && token) tokenRejected();
+  //
+  // Unless the request carried a *second* credential, in which case the 401 is
+  // about that one. `POST /businesses/mine/link` submits another account's
+  // email and password to prove the caller also holds it, and answers 401 when
+  // they do not match — so mistyping the other registration's password was
+  // read here as the caller's own token being refused, and signed them out of
+  // the account they were signed into. The rule "a 401 means our bearer token
+  // is dead" only holds while the bearer token is the only credential in the
+  // request; this says when it is not. The same reasoning as `auth: false` on
+  // login, which is why that one never had the problem.
+  if (res.status === 401 && auth && token && !carriesOtherCredentials) tokenRejected();
 
   if (res.status === 204) return null;
 
@@ -452,9 +465,20 @@ export const api = {
   /** The caller's own business, plus every business they have linked. */
   myBusinesses: ({ signal } = {}) => request("/businesses/mine", { signal }),
 
-  /** Links another account's business here, proven by that account's password. */
+  /**
+   * Links another account's business here, proven by that account's password.
+   *
+   * `carriesOtherCredentials` because the 401 this can answer is about the
+   * email and password in the body, not about the caller's own session — see
+   * `request`. Without it, a typo in the other registration's password ended
+   * the session it was typed into.
+   */
   linkBusiness: (email, password) =>
-    request("/businesses/mine/link", { method: "POST", body: { email, password } }),
+    request("/businesses/mine/link", {
+      method: "POST",
+      body: { email, password },
+      carriesOtherCredentials: true,
+    }),
 
   /** Revokes access gained through `linkBusiness`. Never removes your own tenant. */
   unlinkBusiness: (id) => request(`/businesses/mine/${id}`, { method: "DELETE" }),

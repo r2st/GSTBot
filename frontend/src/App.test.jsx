@@ -191,3 +191,56 @@ describe("App routing", () => {
     });
   });
 });
+
+describe("switching to another GSTIN", () => {
+  // Every page loads on mount and holds what it loaded in state, and none of
+  // them watch the business — until the switcher shipped, it could not change
+  // while they were mounted. So the page is thrown away and rebuilt rather than
+  // re-rendered, which is also what re-runs each page's own fetch.
+  function renderFor(businessId) {
+    auth.current = {
+      user: { ...USER, business: { id: businessId, legal_name: "Acme Traders" } },
+      loading: false,
+    };
+    return render(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+  }
+
+  it("rebuilds the page so its data cannot outlive the tenant it was fetched for", () => {
+    const { rerender } = renderFor(1);
+    const before = screen.getByText("Dashboard page");
+
+    auth.current = {
+      user: { ...USER, business: { id: 2, legal_name: "Acme Exports" } },
+      loading: false,
+    };
+    rerender(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    // A new DOM node is the observable half of "unmounted and mounted again".
+    // Left keyed on nothing, React reuses this node and the previous tenant's
+    // figures stay on screen under the new company's name in the header.
+    expect(screen.getByText("Dashboard page")).not.toBe(before);
+  });
+
+  it("keeps the page alive across a re-render that does not change tenant", () => {
+    // The key must not be something that merely changes often: remounting on
+    // every render would refetch each page continuously.
+    const { rerender } = renderFor(1);
+    const before = screen.getByText("Dashboard page");
+
+    rerender(
+      <MemoryRouter initialEntries={["/"]}>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Dashboard page")).toBe(before);
+  });
+});

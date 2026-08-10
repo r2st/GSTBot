@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import BusinessSwitcher from "./BusinessSwitcher";
 
 const LINKS = [
   { to: "/", label: "Dashboard", end: true },
@@ -14,7 +15,7 @@ const LINKS = [
 ];
 
 export default function Shell({ children }) {
-  const { user, logout } = useAuth();
+  const { logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
@@ -91,14 +92,11 @@ export default function Shell({ children }) {
         </nav>
 
         <div className="shell-user">
-          {user?.business && (
-            <div className="shell-business">
-              <span className="shell-business-name">
-                {user.business.trade_name || user.business.legal_name}
-              </span>
-              <span className="shell-gstin">{user.business.gstin}</span>
-            </div>
-          )}
+          {/* Was a static caption of the one business a login could ever act
+              for. It is the natural home for the switcher, because "which GSTIN
+              am I looking at" and "take me to the other one" are the same
+              question asked half a second apart. */}
+          <BusinessSwitcher />
           <button type="button" className="btn btn-ghost" onClick={handleLogout}>
             Sign out
           </button>

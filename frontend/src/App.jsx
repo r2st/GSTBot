@@ -28,9 +28,24 @@ function Protected({ children }) {
   if (!user) return <Navigate to="/login" replace />;
   // The boundary sits inside the Shell rather than around it, so a page that
   // crashes leaves the navigation intact and the user can click away from it.
+  //
+  // Keyed on the tenant, so switching GSTIN throws the page away and builds a
+  // new one rather than re-rendering the old one. Every page here loads on
+  // mount and holds what it loaded in state — invoices, findings, ITC, the
+  // filing preview — and none of them watch the business, because until now it
+  // could not change while they were mounted. Without the key a switch leaves
+  // all of it on screen, now captioned by another company's name in the header:
+  // one registration's credit at risk read as the other's, which is a number
+  // someone acts on. Remounting is also what re-runs each page's own fetch, so
+  // the data catches up with the caption rather than the two being reconciled
+  // page by page.
+  //
+  // `user.business.id` rather than the stored selection: this is the tenant the
+  // server said the last request acted for, and a key that changed on intent
+  // rather than on outcome would clear the screen for a switch that failed.
   return (
     <Shell>
-      <ErrorBoundary>{children}</ErrorBoundary>
+      <ErrorBoundary key={user.business?.id ?? "home"}>{children}</ErrorBoundary>
     </Shell>
   );
 }

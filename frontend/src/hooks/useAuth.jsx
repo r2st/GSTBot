@@ -1,5 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { api, getToken, onUnauthorized, setToken } from "../lib/api";
+import {
+  api,
+  getActiveBusinessId,
+  getToken,
+  onUnauthorized,
+  setActiveBusinessId,
+  setToken,
+} from "../lib/api";
 
 const AuthContext = createContext(null);
 
@@ -20,16 +27,47 @@ export function AuthProvider({ children }) {
 
   // A stored token proves nothing on its own — it may be expired or belong to
   // a deleted user — so the session is confirmed against /auth/me on boot.
+  //
+  // The stored *business* proves nothing either, and it is the one that outlives
+  // its own validity: `setActiveBusinessId` survives in localStorage across
+  // sessions, while the membership behind it can be revoked, or the business
+  // deactivated, at any time from the other side. `/auth/me` resolves through
+  // `get_current_business`, so a selection that is no longer granted answers 403
+  // — and treating that like any other failed session check signs the user out
+  // of an account that is perfectly fine, on a browser that then does it again
+  // on every reload, because the selection causing it is never cleared. Drop the
+  // selection and ask once more as the login's own tenant, which is the tenant
+  // they would have been switched back to anyway.
   useEffect(() => {
     if (!getToken()) {
       setLoading(false);
       return;
     }
-    api
-      .me()
-      .then(setUser)
-      .catch(() => setToken(null))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await api.me();
+        if (!cancelled) setUser(me);
+      } catch (err) {
+        if (err?.status === 403 && getActiveBusinessId()) {
+          setActiveBusinessId(null);
+          try {
+            const home = await api.me();
+            if (!cancelled) setUser(home);
+            return;
+          } catch {
+            // Fall through: the session itself is what is wrong, not the
+            // business it was pointed at.
+          }
+        }
+        setToken(null);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const login = useCallback(async (email, password) => {
@@ -47,8 +85,35 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  /**
+   * Act for another of the businesses this login holds.
+   *
+   * The switch is only real once the server has agreed to it. `X-Business-Id`
+   * is sent on every subsequent request, so writing it before confirming would
+   * point the whole app at a business the backend may refuse — and the refusal
+   * arrives per page, as each one fails on its own, rather than here where
+   * there is something to say about it. So: select, ask `/auth/me` who that
+   * makes us, and put the previous selection back if the answer is no.
+   *
+   * `user.business.id` is what the rest of the app keys off afterwards, because
+   * it is the tenant the server says the request acted for, rather than the
+   * tenant this browser last asked for.
+   */
+  const switchBusiness = useCallback(async (businessId) => {
+    const previous = getActiveBusinessId();
+    setActiveBusinessId(businessId);
+    try {
+      setUser(await api.me());
+    } catch (err) {
+      setActiveBusinessId(previous);
+      throw err;
+    }
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, register, logout, switchBusiness }}
+    >
       {children}
     </AuthContext.Provider>
   );

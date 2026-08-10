@@ -2,7 +2,13 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api, getToken, setToken } from "../lib/api";
+import {
+  api,
+  getActiveBusinessId,
+  getToken,
+  setActiveBusinessId,
+  setToken,
+} from "../lib/api";
 import { AuthProvider, useAuth } from "./useAuth";
 
 const USER = {
@@ -271,5 +277,90 @@ describe("useAuth", () => {
     const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
     expect(() => render(<Probe />)).toThrow(/within AuthProvider/);
     quiet.mockRestore();
+  });
+});
+
+describe("a business selection that outlives the membership behind it", () => {
+  // `setActiveBusinessId` writes to localStorage, so it survives the tab that
+  // set it. The membership it names does not have to: the other side can revoke
+  // it, or the business can be deactivated, at any time. `/auth/me` resolves
+  // through `get_current_business`, so the next boot asks as a business this
+  // login no longer holds and is answered 403.
+  function mockApi({ allow = [] } = {}) {
+    const calls = [];
+    global.fetch = vi.fn(async (url, options = {}) => {
+      const header = options.headers?.["X-Business-Id"];
+      calls.push({ path: String(url), header });
+      const reply = (body, status) => ({
+        ok: status < 400,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(body),
+      });
+      if (header !== undefined && !allow.includes(String(header))) {
+        return reply({ detail: "You do not have access to that business" }, 403);
+      }
+      return reply(USER, 200);
+    });
+    return calls;
+  }
+
+  afterEach(() => localStorage.clear());
+
+  it("falls back to the login's own tenant rather than ending the session", async () => {
+    // The session is fine and the login's own business is still there. Signing
+    // the user out of an account they still hold — and doing it again on every
+    // reload, because nothing clears the selection that causes it — makes a
+    // revoked link look like a broken password.
+    setToken("stored-token");
+    setActiveBusinessId(7);
+    const calls = mockApi();
+    renderWithProvider();
+
+    await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent(USER.email));
+    expect(getToken()).toBe("stored-token");
+    expect(getActiveBusinessId()).toBeNull();
+    // Asked twice: once as the stale business, then once as the login itself.
+    expect(calls.map((c) => c.header)).toEqual(["7", undefined]);
+  });
+
+  it("ends the session when the token is what the server is refusing", async () => {
+    // A 403 while a business is selected is ambiguous on its own. Retrying
+    // without the header is what tells the two apart, and a second refusal
+    // means the credential is the problem, not the selection.
+    setToken("stored-token");
+    setActiveBusinessId(7);
+    global.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 403,
+      statusText: "",
+      text: async () => JSON.stringify({ detail: "Business is inactive" }),
+    }));
+    renderWithProvider();
+
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+    expect(screen.getByTestId("user")).toHaveTextContent("anonymous");
+    expect(getToken()).toBeNull();
+  });
+
+  it("does not retry a 403 that no business selection could have caused", async () => {
+    // With nothing selected there is no header to drop, so a retry would be the
+    // same request a second time.
+    setToken("stored-token");
+    const calls = mockApi({ allow: [] });
+    global.fetch = vi.fn(async (url) => {
+      calls.push({ path: String(url) });
+      return {
+        ok: false,
+        status: 403,
+        statusText: "",
+        text: async () => JSON.stringify({ detail: "Business is inactive" }),
+      };
+    });
+    renderWithProvider();
+
+    await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+    expect(calls).toHaveLength(1);
+    expect(getToken()).toBeNull();
   });
 });
