@@ -35,8 +35,21 @@ def documented(spec):
     }
 
 
+def _real_routes():
+    """The product's own routes.
+
+    ``tests/test_errors.py`` mounts a ``/_test_errors`` router on the shared app
+    to give the exception handlers something to catch, so whether it is in the
+    table depends on which module imported first. The other sweeps in this suite
+    drop the same prefix for the same reason.
+    """
+    return [
+        route for route in collect_api_routes(app) if not route.path.startswith("/_")
+    ]
+
+
 def _schema_routes():
-    return [route for route in collect_api_routes(app) if route.include_in_schema]
+    return [route for route in _real_routes() if route.include_in_schema]
 
 
 def _operations(route):
@@ -97,7 +110,7 @@ class TestUnauthorizedIsDocumentedWhereItCanHappen:
     def test_the_public_allowlist_is_what_it_has_always_been(self):
         """Pins the set, so opening a route to the world is a visible diff."""
         public = sorted(
-            route.path for route in collect_api_routes(app) if not is_guarded(route)
+            route.path for route in _real_routes() if not is_guarded(route)
         )
         assert public == [
             "/",
@@ -136,7 +149,7 @@ class TestRateLimitedIsDocumentedWhereItCanHappen:
 
     def test_it_is_the_only_route_exempt_from_the_limiter(self):
         unmetered = sorted(
-            route.path for route in collect_api_routes(app) if not is_metered(route)
+            route.path for route in _real_routes() if not is_metered(route)
         )
         assert unmetered == ["/api/v1/health/live"]
 
