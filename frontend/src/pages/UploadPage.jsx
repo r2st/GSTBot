@@ -9,6 +9,23 @@ import { INVOICE_EXTENSIONS, MAX_UPLOAD_MB, partitionFiles } from "../lib/valida
 
 const ACCEPT = INVOICE_EXTENSIONS.join(",");
 
+// How many files ride in one request.
+//
+// The server takes fifty. Ten is chosen against the progress line rather than
+// against the server: it can only move between requests, and a batch of fifty
+// is a long time for a page to say nothing while someone watches a folder of
+// scans upload.
+const BULK_CHUNK = 10;
+
+/** One row per file, from the outcome the server reported for that file. */
+function toRows(items) {
+  return items.map((item) =>
+    item.accepted
+      ? { filename: item.filename, status: "ok", invoice: item.invoice }
+      : { filename: item.filename, status: "error", error: item.error },
+  );
+}
+
 // The refusals that stop a batch rather than being carried to the next file.
 // Both are answers about the account rather than about the document, so every
 // file after this one gets the same one — which makes carrying on thirty round
@@ -138,27 +155,41 @@ export default function UploadPage() {
 
     setBusy(true);
     setError("");
-    // Sequential rather than concurrent: each upload costs a model call, and
-    // the free tier rate-limits a burst — which would turn a 40-file batch
-    // into 40 heuristic-only extractions.
-    for (const [index, file] of accepted.entries()) {
-      // Named rather than counted alone: on a long batch the file that is
-      // taking the time is the one the user wants to know about.
-      setProgress({ done: index, total: accepted.length, current: file.name });
+
+    // Sent as batches rather than one request per file.
+    //
+    // The server runs the same checks on each file and answers with one
+    // outcome per file, so nothing about the per-document reporting changes.
+    // What changes is the arithmetic against the upload ceiling, which counts
+    // requests: a 90-file drop is nine of them instead of ninety. Ninety
+    // sequential uploads reliably spent the ceiling partway through and then
+    // refused their own tail — and the files that hit the refusal were exactly
+    // the ones that would have gone through had the batch not spent the budget
+    // hammering the limiter with the first sixty.
+    const groups = [];
+    for (let start = 0; start < accepted.length; start += BULK_CHUNK) {
+      groups.push(accepted.slice(start, start + BULK_CHUNK));
+    }
+
+    let done = 0;
+    for (const group of groups) {
+      setProgress({ done, total: accepted.length, count: group.length });
       try {
-        const response = await api.uploadInvoice(file, invoiceType);
-        setResults((prev) => [
-          { filename: file.name, status: "ok", invoice: response.invoice },
-          ...prev,
-        ]);
+        const response = await api.bulkUploadInvoices(group, invoiceType);
+        // Reversed on the way in, because the list reads newest-first and the
+        // server answers in the order the files were sent.
+        setResults((prev) => [...toRows(response.items ?? []).reverse(), ...prev]);
       } catch (err) {
+        // The whole request failed, so no file in it has an outcome of its own.
         setResults((prev) => [
-          { filename: file.name, status: "error", error: err.message },
+          ...group
+            .map((file) => ({ filename: file.name, status: "error", error: err.message }))
+            .reverse(),
           ...prev,
         ]);
 
         // An allowance that is spent, or a rate limit that is reached, is an
-        // answer about the account rather than about this document — so every
+        // answer about the account rather than about these documents — so every
         // remaining file gets the same one. See HALTING above for why each of
         // the two stops the batch.
         //
@@ -167,7 +198,7 @@ export default function UploadPage() {
         // from forty to twelve is how an invoice goes missing from a return.
         const halt = HALTING[err.status];
         if (halt) {
-          const remaining = accepted.slice(index + 1);
+          const remaining = accepted.slice(done + group.length);
           // The banner says only what the rows cannot: how much of the batch
           // never went. Repeating the server's message here as well would put
           // it on screen twice for a single-file upload, where the row already
@@ -186,6 +217,7 @@ export default function UploadPage() {
           break;
         }
       }
+      done += group.length;
     }
     setProgress(null);
     setBusy(false);
@@ -285,8 +317,13 @@ export default function UploadPage() {
       {busy && (
         <p className="muted upload-progress" role="status">
           <Spinner label="Extracting" />
+          {/* A range, because a request now carries several files and the line
+              can only move between requests — naming one file of the ten in
+              flight would be picking one at random and calling it the slow one. */}
           {progress
-            ? `Extracting ${progress.done + 1} of ${progress.total} — ${progress.current}`
+            ? progress.count === 1
+              ? `Extracting ${progress.done + 1} of ${progress.total}`
+              : `Extracting ${progress.done + 1}–${progress.done + progress.count} of ${progress.total}`
             : "Extracting…"}
         </p>
       )}

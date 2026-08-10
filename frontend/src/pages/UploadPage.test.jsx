@@ -33,6 +33,34 @@ function invoiceResponse(overrides = {}) {
   };
 }
 
+/**
+ * The batch endpoint's shape: one outcome per file, whatever happened to it.
+ *
+ * `accepted` is the field the page switches on, so a rejected file carries an
+ * `error` and no invoice — a bad page in a folder of fifty costs that page
+ * alone, which is the whole reason the endpoint answers this way instead of
+ * failing the request.
+ */
+function bulkResponse(items) {
+  const list = items.map((item) =>
+    item.accepted === false
+      ? { filename: item.filename, accepted: false, error: item.error }
+      : {
+          filename: item.filename ?? "invoice.txt",
+          accepted: true,
+          queued: false,
+          invoice: { ...invoiceResponse(item.invoice ?? {}).invoice },
+        },
+  );
+  const accepted = list.filter((item) => item.accepted).length;
+  return { total: list.length, accepted, rejected: list.length - accepted, items: list };
+}
+
+/** The commonest case: one file, accepted. */
+function oneAccepted(overrides = {}, filename = "invoice.txt") {
+  return bulkResponse([{ filename, invoice: overrides }]);
+}
+
 function file(name = "invoice.txt") {
   return new File(["invoice text"], name, { type: "text/plain" });
 }
@@ -62,7 +90,7 @@ describe("UploadPage", () => {
 
   it("uploads a file and shows what was extracted", async () => {
     const user = userEvent.setup();
-    global.fetch.mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
 
     renderPage();
     await user.upload(screen.getByLabelText("Choose files"), file());
@@ -73,7 +101,7 @@ describe("UploadPage", () => {
 
   it("defaults to a purchase, since that is what ITC is claimed on", async () => {
     const user = userEvent.setup();
-    global.fetch.mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
 
     renderPage();
     expect(screen.getByLabelText("Purchase (claim ITC)")).toBeChecked();
@@ -86,7 +114,7 @@ describe("UploadPage", () => {
 
   it("sends the chosen type when uploading a sales invoice", async () => {
     const user = userEvent.setup();
-    global.fetch.mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
 
     renderPage();
     await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
@@ -100,7 +128,7 @@ describe("UploadPage", () => {
   it("shows extraction warnings rather than hiding them", async () => {
     const user = userEvent.setup();
     global.fetch.mockResolvedValueOnce(
-      jsonResponse(invoiceResponse({ warnings: ["No valid supplier GSTIN found"] })),
+      jsonResponse(oneAccepted({ warnings: ["No valid supplier GSTIN found"] })),
     );
 
     renderPage();
@@ -119,11 +147,15 @@ describe("UploadPage", () => {
     // the fix for a dropped upload is to drop it again, which duplicates it.
     const user = userEvent.setup();
     global.fetch.mockResolvedValueOnce(
-      jsonResponse({
-        queued: false,
-        message: "Invoice processed",
-        invoice: { id: 12, invoice_value: "0.00" },
-      }),
+      jsonResponse(
+        bulkResponse([
+          {
+            filename: "photo.txt",
+            invoice: { id: 12, invoice_value: "0.00", invoice_number: undefined,
+              counterparty_gstin: undefined, invoice_date: undefined },
+          },
+        ]),
+      ),
     );
 
     renderPage();
@@ -141,14 +173,21 @@ describe("UploadPage", () => {
 
   it("reports a per-file failure without losing the batch", async () => {
     const user = userEvent.setup();
-    global.fetch
-      .mockResolvedValueOnce(
-        jsonResponse(
-          { detail: { message: "This file was already uploaded as invoice 3", invoice_id: 3 } },
-          { status: 409 },
-        ),
-      )
-      .mockResolvedValueOnce(jsonResponse(invoiceResponse({ invoice_number: "INV-2" })));
+    // One bad page in a folder of fifty costs that page alone. The server says
+    // so per file, which is why the batch endpoint answers 200 with outcomes
+    // rather than failing the request.
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse(
+        bulkResponse([
+          {
+            filename: "a.txt",
+            accepted: false,
+            error: "This file was already uploaded as invoice 3",
+          },
+          { filename: "b.txt", invoice: { invoice_number: "INV-2" } },
+        ]),
+      ),
+    );
 
     renderPage();
     await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
@@ -157,9 +196,16 @@ describe("UploadPage", () => {
     expect(await screen.findByText("INV-2")).toBeInTheDocument();
   });
 
-  it("uploads a batch one file at a time", async () => {
+  it("sends a batch as one request rather than one request per file", async () => {
+    // The per-minute upload ceiling counts requests. Ninety files sent one at a
+    // time spent it partway through and refused their own tail — and the files
+    // that met the refusal were the ones that would otherwise have gone through.
     const user = userEvent.setup();
-    global.fetch.mockResolvedValue(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValue(
+      jsonResponse(
+        bulkResponse([{ filename: "a.txt" }, { filename: "b.txt" }, { filename: "c.txt" }]),
+      ),
+    );
 
     renderPage();
     await user.upload(screen.getByLabelText("Choose files"), [
@@ -168,9 +214,23 @@ describe("UploadPage", () => {
       file("c.txt"),
     ]);
 
-    // Sequential rather than concurrent: a burst hits the free tier's rate
-    // limit and every invoice after the first falls back to heuristics.
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    expect(global.fetch.mock.calls[0][1].body.getAll("files")).toHaveLength(3);
+  });
+
+  it("splits a drop too big for one request into batches", async () => {
+    // Ten at a time, so the progress line has something to say more often than
+    // once per fifty files.
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValue(jsonResponse(bulkResponse([{ filename: "x.txt" }])));
+
+    renderPage();
+    const many = Array.from({ length: 23 }, (_, i) => file(`file-${i}.txt`));
+    await user.upload(screen.getByLabelText("Choose files"), many);
+
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(3));
+    expect(global.fetch.mock.calls[0][1].body.getAll("files")).toHaveLength(10);
+    expect(global.fetch.mock.calls[2][1].body.getAll("files")).toHaveLength(3);
   });
 
   it("refuses an oversized file without asking the server", async () => {
@@ -202,7 +262,7 @@ describe("UploadPage", () => {
 
   it("accepts a dropped file the parser can read", async () => {
     const { container } = renderPage();
-    global.fetch.mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
 
     fireEvent.drop(container.querySelector(".dropzone"), {
       dataTransfer: { files: [file("dropped.txt")] },
@@ -225,7 +285,7 @@ describe("UploadPage", () => {
 
   it("uploads the good files in a batch and reports the rejected one", async () => {
     const user = userEvent.setup();
-    global.fetch.mockResolvedValue(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValue(jsonResponse(oneAccepted()));
 
     renderPage();
     await user.upload(screen.getByLabelText("Choose files"), [
@@ -236,21 +296,39 @@ describe("UploadPage", () => {
 
     // Dropping the bad file silently is how a 40-file batch quietly becomes 38.
     expect(await screen.findByText(/over the 15 MB limit/)).toBeInTheDocument();
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
+    // The oversized one is refused here and never reaches the request.
+    expect(global.fetch.mock.calls[0][1].body.getAll("files")).toHaveLength(2);
   });
 
-  it("names the file it is working on during a batch", async () => {
+  it("says how far through the drop it is", async () => {
     const user = userEvent.setup();
     let release;
     global.fetch.mockReturnValueOnce(new Promise((resolve) => {
-      release = () => resolve(jsonResponse(invoiceResponse()));
+      release = () => resolve(jsonResponse(bulkResponse([{ filename: "first.txt" }])));
     }));
 
     renderPage();
     await user.upload(screen.getByLabelText("Choose files"), [file("first.txt"), file("second.txt")]);
 
-    // On a long batch the file taking the time is what the user wants to know.
-    expect(await screen.findByText(/Extracting 1 of 2 — first.txt/)).toBeInTheDocument();
+    // A range rather than a filename: several files are in flight at once, and
+    // naming one of them would be picking one at random and calling it the
+    // slow one.
+    expect(await screen.findByText(/Extracting 1–2 of 2/)).toBeInTheDocument();
+    release();
+  });
+
+  it("counts a single file as one, not as a range from itself to itself", async () => {
+    const user = userEvent.setup();
+    let release;
+    global.fetch.mockReturnValueOnce(new Promise((resolve) => {
+      release = () => resolve(jsonResponse(oneAccepted()));
+    }));
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), file("only.txt"));
+
+    expect(await screen.findByText(/Extracting 1 of 1/)).toBeInTheDocument();
     release();
   });
 
@@ -294,7 +372,7 @@ describe("UploadPage", () => {
     });
 
     it("uploads what was dropped", async () => {
-      global.fetch = vi.fn().mockResolvedValue(jsonResponse(invoiceResponse()));
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(oneAccepted()));
       const { container } = renderPage();
 
       fireEvent.drop(dropzone(container), { dataTransfer: { files: [file("dropped.txt")] } });
@@ -305,7 +383,7 @@ describe("UploadPage", () => {
 
     it("clears the highlight once the drop is handled", async () => {
       // Otherwise the zone stays lit after the drop and looks stuck.
-      global.fetch = vi.fn().mockResolvedValue(jsonResponse(invoiceResponse()));
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse(oneAccepted()));
       const { container } = renderPage();
       fireEvent.dragOver(dropzone(container));
 
@@ -324,7 +402,7 @@ describe("UploadPage", () => {
         global.fetch = vi.fn(
           () =>
             new Promise((resolve) => {
-              pending.push(() => resolve(jsonResponse(invoiceResponse())));
+              pending.push(() => resolve(jsonResponse(oneAccepted())));
             }),
         );
         return pending;
@@ -423,32 +501,32 @@ describe("running out of the monthly allowance mid-batch", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
+  /** More files than fit in one request, so there is a "rest of the batch". */
+  function manyFiles(count) {
+    return Array.from({ length: count }, (_, i) => file(`file-${i}.txt`));
+  }
+
   it("stops uploading once the allowance is spent", async () => {
-    // The allowance does not come back partway through a batch, so every
-    // remaining file gets the same 402. Carrying on spends the upload rate
+    // The allowance does not come back partway through a drop, so every
+    // remaining batch gets the same 402. Carrying on spends the upload rate
     // limit on requests that cannot succeed.
     const user = userEvent.setup();
     global.fetch
-      .mockResolvedValueOnce(jsonResponse(invoiceResponse()))
+      .mockResolvedValueOnce(jsonResponse(bulkResponse([{ filename: "a.txt" }])))
       .mockResolvedValueOnce(
         jsonResponse({ detail: "Monthly invoice allowance used up" }, { status: 402 }),
       );
 
     renderPage();
-    await user.upload(screen.getByLabelText("Choose files"), [
-      file("a.txt"),
-      file("b.txt"),
-      file("c.txt"),
-      file("d.txt"),
-    ]);
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(25));
 
     await screen.findByRole("alert");
-    // One success, one refusal, and nothing attempted after it.
+    // One batch through, one refused, and the third never sent.
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
   });
 
   it("lists the files it did not attempt rather than dropping them", async () => {
-    // A batch that quietly shrinks from four to two is how an invoice goes
+    // A drop that quietly shrinks from fifteen to ten is how an invoice goes
     // missing from a return.
     const user = userEvent.setup();
     global.fetch.mockResolvedValueOnce(
@@ -456,15 +534,11 @@ describe("running out of the monthly allowance mid-batch", () => {
     );
 
     renderPage();
-    await user.upload(screen.getByLabelText("Choose files"), [
-      file("a.txt"),
-      file("b.txt"),
-      file("c.txt"),
-    ]);
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(15));
 
-    expect(await screen.findByText("b.txt")).toBeInTheDocument();
-    expect(screen.getByText("c.txt")).toBeInTheDocument();
-    expect(screen.getAllByText(/allowance ran out before this file/)).toHaveLength(2);
+    expect(await screen.findByText("file-14.txt")).toBeInTheDocument();
+    // The five that were never sent, each said to be unattempted.
+    expect(screen.getAllByText(/allowance ran out before this file/)).toHaveLength(5);
   });
 
   it("says how many were left and what to do about it", async () => {
@@ -474,38 +548,30 @@ describe("running out of the monthly allowance mid-batch", () => {
     );
 
     renderPage();
-    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(13));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /1 file\(s\) were not uploaded.*Upgrade the plan/,
+      /3 file\(s\) were not uploaded.*Upgrade the plan/,
     );
   });
 
   // The per-minute upload ceiling is the other answer about the account rather
   // than the document. It differs from the allowance in the direction that
   // matters: carrying on does not merely fail, it spends the budget that would
-  // have let the rest of the batch through, because the limiter counts the
+  // have let the rest of the drop through, because the limiter counts the
   // requests it refuses too.
   it("stops uploading once the upload rate limit is reached", async () => {
     const user = userEvent.setup();
     global.fetch
-      .mockResolvedValueOnce(jsonResponse(invoiceResponse()))
+      .mockResolvedValueOnce(jsonResponse(bulkResponse([{ filename: "a.txt" }])))
       .mockResolvedValueOnce(
         jsonResponse({ detail: "Too many requests. Try again in 45s." }, { status: 429 }),
       );
 
     renderPage();
-    await user.upload(screen.getByLabelText("Choose files"), [
-      file("a.txt"),
-      file("b.txt"),
-      file("c.txt"),
-      file("d.txt"),
-    ]);
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(25));
 
     await screen.findByRole("alert");
-    // One success, one refusal, and nothing attempted after it. Left running,
-    // c and d would have been charged against the same window they were
-    // waiting on.
     await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
   });
 
@@ -516,53 +582,54 @@ describe("running out of the monthly allowance mid-batch", () => {
     );
 
     renderPage();
-    await user.upload(screen.getByLabelText("Choose files"), [
-      file("a.txt"),
-      file("b.txt"),
-      file("c.txt"),
-    ]);
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(15));
 
-    expect(await screen.findByText("b.txt")).toBeInTheDocument();
-    expect(screen.getByText("c.txt")).toBeInTheDocument();
-    expect(screen.getAllByText(/rate limit was reached before this file/)).toHaveLength(2);
+    expect(await screen.findByText("file-14.txt")).toBeInTheDocument();
+    expect(screen.getAllByText(/rate limit was reached before this file/)).toHaveLength(5);
     // Unlike the allowance, this comes good on its own — so the instruction is
     // to wait and retry, not to go and buy something.
     expect(screen.getByRole("alert")).toHaveTextContent(
-      /2 file\(s\) were not uploaded.*drop them again/,
+      /5 file\(s\) were not uploaded.*drop them again/,
     );
     expect(screen.getByRole("alert")).not.toHaveTextContent(/Upgrade the plan/);
   });
 
-  it("leaves the seconds to the row the server answered", async () => {
-    // The banner says only what the rows cannot: how much of the batch never
+  it("leaves the seconds to the rows the server answered", async () => {
+    // The banner says only what the rows cannot: how much of the drop never
     // went. The wait itself is the server's sentence, and it is already on the
-    // row for the file that was actually refused.
+    // rows for the files that were actually refused.
     const user = userEvent.setup();
     global.fetch.mockResolvedValueOnce(
       jsonResponse({ detail: "Too many requests. Try again in 45s." }, { status: 429 }),
     );
 
     renderPage();
-    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(15));
 
-    expect(await screen.findByText("Too many requests. Try again in 45s.")).toBeInTheDocument();
+    expect(
+      await screen.findAllByText("Too many requests. Try again in 45s."),
+    ).toHaveLength(10);
   });
 
   it("keeps going through an ordinary per-file failure", async () => {
-    // A duplicate or an unreadable scan says nothing about the next file, so
-    // only the allowance stops the batch.
+    // A duplicate or an unreadable scan says nothing about the next file, so it
+    // is one rejected row in a batch the server otherwise accepted.
     const user = userEvent.setup();
-    global.fetch
-      .mockResolvedValueOnce(
-        jsonResponse({ detail: { message: "Already on file", invoice_id: 3 } }, { status: 409 }),
-      )
-      .mockResolvedValueOnce(jsonResponse(invoiceResponse()));
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse(
+        bulkResponse([
+          { filename: "a.txt", accepted: false, error: "Already on file" },
+          { filename: "b.txt" },
+        ]),
+      ),
+    );
 
     renderPage();
     await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
 
     expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
-    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("Already on file")).toBeInTheDocument();
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -573,7 +640,7 @@ describe("the invoice type while a batch is running", () => {
     global.fetch = vi.fn(
       () =>
         new Promise((resolve) => {
-          pending.push(() => resolve(jsonResponse(invoiceResponse())));
+          pending.push(() => resolve(jsonResponse(oneAccepted())));
         }),
     );
     return pending;
@@ -620,7 +687,12 @@ describe("the invoice type while a batch is running", () => {
 
     renderPage();
     await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
-    await user.upload(screen.getByLabelText("Choose files"), [file("a.txt"), file("b.txt")]);
+    // More than one request's worth, so there is a second batch to send under
+    // a type the radio could have been moved to in between.
+    await user.upload(
+      screen.getByLabelText("Choose files"),
+      Array.from({ length: 12 }, (_, i) => file(`file-${i}.txt`)),
+    );
 
     await waitFor(() => expect(pending).toHaveLength(1));
     await act(async () => pending[0]());
