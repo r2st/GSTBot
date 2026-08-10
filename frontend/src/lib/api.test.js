@@ -613,6 +613,101 @@ describe("api", () => {
 
       await expect(api.me()).resolves.toBeNull();
     });
+
+    it("does not tell a signed-in user to sign in again when they are refused", async () => {
+      // A 403 here is authorisation, never authentication: a business the
+      // caller is not a member of, or one that has been deactivated. `request`
+      // deliberately keeps their token — only a 401 drops it — so the old
+      // advice sent them to a login page that redirected straight back.
+      setToken("t");
+      global.fetch.mockResolvedValueOnce(jsonResponse(null, { status: 403 }));
+
+      const error = await api.me().catch((err) => err);
+      expect(error.message).toContain("You do not have access to this (403)");
+      expect(error.message).not.toContain("not signed in");
+      // Still signed in, which is the whole reason the sentence changed.
+      expect(getToken()).toBe("t");
+    });
+
+    it("names an expired session on a 401", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse(null, { status: 401 }));
+
+      await expect(api.me()).rejects.toThrow("Your session has expired (401)");
+    });
+
+    it("names a body-less 413 as the file being too big", async () => {
+      // The API's own 413 carries a detail naming MAX_UPLOAD_MB. This one is
+      // the proxy's, which answers before the request reaches the app at all
+      // — and "Request failed (413)" is no help to someone holding a scan.
+      global.fetch.mockResolvedValueOnce(jsonResponse(null, { status: 413 }));
+
+      await expect(api.me()).rejects.toThrow("That file is too large to upload (413)");
+    });
+  });
+
+  describe("a request that never reached the server", () => {
+    it("replaces the browser's word for a network failure", async () => {
+      // What `fetch` rejects with is the browser's: `Failed to fetch` in
+      // Chrome, `Load failed` in Safari, `NetworkError when attempting to
+      // fetch resource` in Firefox. All three went into the error banner
+      // unchanged, and none of them says the request never arrived.
+      global.fetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      const error = await api.me().catch((err) => err);
+      expect(error.message).toBe(
+        "Could not reach the server. Check your connection, or try again in a moment.",
+      );
+      // No status, because nothing answered. A caller that passes over a 404
+      // quietly — a period with no GSTR-2B yet — must not pass over this too.
+      expect(error.status).toBeUndefined();
+    });
+
+    it("says so plainly when the browser knows it is offline", async () => {
+      // `onLine` lives on the prototype, so there is no own descriptor to save
+      // and restore — deleting the shadowing property is what puts it back.
+      // Getting that wrong leaves every later test in this file offline, which
+      // is how it first showed up.
+      Object.defineProperty(navigator, "onLine", { value: false, configurable: true });
+      global.fetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      try {
+        await expect(api.me()).rejects.toThrow("You appear to be offline");
+      } finally {
+        delete navigator.onLine;
+      }
+      expect(navigator.onLine).toBe(true);
+    });
+
+    it("keeps the original rejection as the cause", async () => {
+      // The user gets the readable sentence; a console or an error reporter
+      // still gets what actually happened.
+      const underlying = new TypeError("Load failed");
+      global.fetch.mockRejectedValueOnce(underlying);
+
+      const error = await api.me().catch((err) => err);
+      expect(error.cause).toBe(underlying);
+    });
+
+    it("lets an abort through untouched", async () => {
+      // The app cancels its own superseded requests, and a banner reading
+      // "Could not reach the server" every time a user keeps typing would be
+      // worse than the stale rows the abort exists to prevent.
+      const aborted = new DOMException("aborted", "AbortError");
+      global.fetch.mockRejectedValueOnce(aborted);
+
+      const error = await api.me().catch((err) => err);
+      expect(isAbortError(error)).toBe(true);
+    });
+
+    it("reports a download that never reached the server the same way", async () => {
+      // `downloadExport` carries its own copy of this path, and had its own
+      // copy of the problem.
+      global.fetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+
+      await expect(api.downloadExport("gstr1", "json", "2026-04")).rejects.toThrow(
+        "Could not reach the server",
+      );
+    });
   });
 
   // downloadExport does not go through `request` — it needs the raw response

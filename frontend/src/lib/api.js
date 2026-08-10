@@ -39,7 +39,7 @@ export function setActiveBusinessId(id) {
 // (`useAuth`), the token lives in localStorage, and clearing one without the
 // other means `user` is still set: every page goes on rendering, every request
 // now goes out with no Authorization header at all, and each one comes back
-// "You are not signed in. Please sign in again." — advice the user cannot take,
+// "Your session has expired. Please sign in again." — advice the user cannot take,
 // because `/login` redirects to `/` for as long as `user` is truthy. A token
 // expiring mid-session was therefore a dead end, escapable only by clearing
 // site data. The 24-hour expiry means every user meets it.
@@ -91,7 +91,7 @@ async function request(
     payload = JSON.stringify(body);
   }
 
-  const res = await fetch(`${BASE}${path}`, { method, headers, body: payload, signal });
+  const res = await send(`${BASE}${path}`, { method, headers, body: payload, signal });
 
   // A rejected token is a dead token; drop it, and end the session with it, so
   // the app falls back to login rather than retrying with a credential the
@@ -177,10 +177,68 @@ function statusMessage(res) {
   if (res.status === 429) {
     return `Too many requests (${code}). Please wait a moment and try again.`;
   }
-  if (res.status === 401 || res.status === 403) {
-    return `You are not signed in (${code}). Please sign in again.`;
+  if (res.status === 401) {
+    return `Your session has expired (${code}). Please sign in again.`;
+  }
+  // Not the same sentence as a 401, though it used to be. Every 403 this API
+  // issues is about *authorisation*, not authentication — a business you are
+  // not a member of, a business that has been deactivated, an account that
+  // has. The caller is signed in, and `request` deliberately does not drop
+  // their token on a 403, so "please sign in again" sent them to a login page
+  // that redirected straight back and changed nothing about why they were
+  // refused. A cross-tenant read answers 404 rather than 403 precisely so
+  // this response never means "that record is someone else's".
+  if (res.status === 403) {
+    return (
+      `You do not have access to this (${code}). If you have just been given ` +
+      `access, sign out and back in.`
+    );
+  }
+  // A body-less 413 is the proxy's, not the API's — the API's own carries a
+  // detail naming MAX_UPLOAD_MB. Either way the user picked a file, so say
+  // what to do about it rather than reporting the number.
+  if (res.status === 413) {
+    return `That file is too large to upload (${code}). Try a smaller one.`;
+  }
+  if (res.status === 404) {
+    return `That is not here (${code}). It may have been deleted.`;
   }
   return `Request failed (${code}).`;
+}
+
+/**
+ * The browser's own words for "the request never arrived", replaced.
+ *
+ * `fetch` rejects rather than resolving when the request does not complete: no
+ * network, DNS failure, the API down, a proxy closing the connection, TLS
+ * refused. What it rejects *with* is a `TypeError` whose message is the
+ * browser's — `Failed to fetch` in Chrome, `Load failed` in Safari,
+ * `NetworkError when attempting to fetch resource` in Firefox — and every one
+ * of those went straight into an error banner unchanged.
+ *
+ * That is the most common failure the product has and the least informative
+ * thing it says. "Load failed" above an invoice list reads as the invoices
+ * being unloadable, and the one action that would fix it — check the
+ * connection, wait for the API to come back — is the one the sentence does not
+ * suggest. An `AbortError` is passed through untouched: the app cancels its
+ * own superseded requests, and `isAbortError` is what tells those apart.
+ */
+async function send(input, init) {
+  try {
+    return await fetch(input, init);
+  } catch (err) {
+    if (isAbortError(err)) throw err;
+    const offline = typeof navigator !== "undefined" && navigator.onLine === false;
+    const failure = new Error(
+      offline
+        ? "You appear to be offline. Reconnect and try again."
+        : "Could not reach the server. Check your connection, or try again in a moment.",
+    );
+    // No `status`: nothing answered. Callers that pass over a 404 quietly —
+    // a period with no GSTR-2B imported — must not also pass over this.
+    failure.cause = err;
+    throw failure;
+  }
 }
 
 /** A 2xx whose body was not JSON: the request worked, the answer did not. */
@@ -419,7 +477,7 @@ export const api = {
     const activeBusinessId = getActiveBusinessId();
     if (activeBusinessId) headers["X-Business-Id"] = activeBusinessId;
 
-    const res = await fetch(api.exportUrl(returnType, extension, period), { headers });
+    const res = await send(api.exportUrl(returnType, extension, period), { headers });
     if (res.status === 401 && token) tokenRejected();
     if (!res.ok) {
       // Same two hazards as `request`: an HTML error page from the edge must

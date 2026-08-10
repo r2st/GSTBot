@@ -611,8 +611,17 @@ describe("an action that outlives the tab it was started on", () => {
     await userEvent.click(screen.getByRole("button", { name: "Closed" }));
     await waitFor(() => expect(fetch.mock.calls.at(-1)[0]).toContain("scope=closed"));
 
-    reject(new Error("the network went away"));
+    reject(new TypeError("Failed to fetch"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(/the network went away/);
+    // The banner says what happened, not what the browser called it. A `fetch`
+    // that rejects has not reached the server at all, and `Failed to fetch` —
+    // or `Load failed`, or `NetworkError when attempting to fetch resource`,
+    // depending on whose browser this is — names none of that and suggests
+    // nothing to do about it. What is asserted is still this test's own point:
+    // the failure of something the user asked for outlives the tab they were
+    // on when they asked.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /Could not reach the server/,
+    );
   });
 });
