@@ -39,6 +39,23 @@ router = APIRouter(tags=["health"])
 _gstin_limit = RateLimit("gstin_lookup", "120/minute", by="ip")
 _meta_limit = RateLimit("meta", "60/minute", by="ip")
 
+# The two operator views cost real work per call, unlike the probes below them:
+# ``/health`` runs a database round-trip and a Redis ping, and ``/health/jobs``
+# opens a fresh Redis connection for the queue depth and then blocks the worker
+# thread for up to a second waiting on a Celery broadcast ping. Both are public
+# and have to stay that way — an operator watching the queue has no token to
+# send — but public plus unmetered plus a second of held thread per request is
+# a way to exhaust the pool from off the internet, with no account to disable
+# afterwards. Limited by address, generously: this is a ceiling on abuse, not a
+# polling budget, and a monitor scraping every 15s sits two orders of magnitude
+# under it.
+#
+# Deliberately NOT applied to ``/health/live`` or ``/health/ready``. Those are
+# the orchestrator's, they touch nothing expensive, and a throttled readiness
+# probe reads as an unready instance — which would take pods out of rotation to
+# defend against load that costs nothing to serve.
+_ops_limit = RateLimit("ops_health", "60/minute", by="ip")
+
 
 def _timed(check) -> tuple[bool, float, str | None]:
     """Run *check*, returning ``(ok, milliseconds, error_type)``.
@@ -67,6 +84,7 @@ def _timed(check) -> tuple[bool, float, str | None]:
         200: {"description": "The API is up. `health` says how healthy."},
         503: {"description": "The database is unreachable; this instance cannot serve."},
     },
+    dependencies=[Depends(_ops_limit)],
 )
 def health(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
     """Liveness plus every dependency that can fail independently."""
@@ -144,6 +162,7 @@ def liveness() -> dict[str, str]:
         "the API itself being down, so it is not a 503.\n\n"
         "Public and read-only, like the rest of `/health/*`."
     ),
+    dependencies=[Depends(_ops_limit)],
 )
 def job_status() -> dict[str, Any]:
     """Celery worker reachability, broker queue depth, and job heartbeats."""

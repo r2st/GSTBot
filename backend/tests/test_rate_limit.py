@@ -287,6 +287,89 @@ class TestEnforcement:
         assert client.get("/api/v1/meta/gstin/27AAPFU0939F1ZV").status_code == 200
 
 
+class TestThePublicHealthEndpoints:
+    """The operator views are metered; the orchestrator's probes are not.
+
+    ``/health`` and ``/health/jobs`` are public and stay public — whoever is
+    watching the queue at 3am has no token to send. But they are not free the
+    way the probes are: ``/health`` makes a database round-trip, and
+    ``/health/jobs`` opens a fresh Redis connection and then blocks the worker
+    thread for up to a second waiting on a Celery broadcast ping. Public plus
+    unmetered plus a held thread is a pool-exhaustion vector reachable from off
+    the internet with no account to disable afterwards.
+
+    The paired assertion about ``/health/live`` and ``/health/ready`` is the
+    half that would actually cause an outage if it regressed: throttling a
+    readiness probe reads to the orchestrator as an unready instance, so a
+    limit applied one line too broadly takes pods out of rotation to defend
+    against load that costs nothing to serve.
+    """
+
+    @staticmethod
+    def _meter(monkeypatch, spec):
+        """Tighten the ops budget to *spec* for one test.
+
+        ``_rate`` is parsed once and cached on the dependency instance, so the
+        override alone only lands if nothing has touched the limiter yet this
+        process — which depends on test ordering. Clearing the cache is what
+        makes this deterministic when the file is run on its own and when it is
+        run after something that already hit ``/health``.
+        """
+        from app.core.config import settings
+        from app.routers.misc import _ops_limit
+
+        monkeypatch.setattr(settings, "rate_limit_overrides", f"ops_health={spec}")
+        monkeypatch.setattr(_ops_limit, "_rate", None)
+
+    @pytest.mark.parametrize("path", ["/api/v1/health", "/api/v1/health/jobs"])
+    def test_an_operator_view_runs_out(
+        self, client, rate_limited, pinned_window, monkeypatch, path
+    ):
+        self._meter(monkeypatch, "3/minute")
+
+        statuses = [client.get(path).status_code for _ in range(5)]
+
+        assert statuses[:3] == [200] * 3
+        assert statuses[3:] == [429] * 2
+
+    @pytest.mark.parametrize("path", ["/api/v1/health/live", "/api/v1/health/ready"])
+    def test_a_probe_is_never_throttled(
+        self, client, rate_limited, pinned_window, monkeypatch, path
+    ):
+        # Spend the ops budget several times over first: if the limit had been
+        # hung on the router rather than on the two expensive routes, the probe
+        # would be answering 429 by now and Kubernetes would be restarting the
+        # pod over it.
+        self._meter(monkeypatch, "3/minute")
+        for _ in range(10):
+            client.get("/api/v1/health")
+
+        assert [client.get(path).status_code for _ in range(10)] == [200] * 10
+
+    def test_the_budget_is_tunable_without_a_deploy(
+        self, client, rate_limited, pinned_window, monkeypatch
+    ):
+        """Under the name the limiter registers it as — an operator who has to
+        widen this during an incident cannot be made to ship code first."""
+        self._meter(monkeypatch, "1/minute")
+
+        assert [client.get("/api/v1/health").status_code for _ in range(3)] == [200, 429, 429]
+
+    def test_the_budget_comes_back_when_the_window_rolls(
+        self, client, rate_limited, pinned_window, monkeypatch
+    ):
+        """A health endpoint that latched off after one burst would blind the
+        monitoring it exists to feed."""
+        self._meter(monkeypatch, "2/minute")
+        for _ in range(4):
+            client.get("/api/v1/health")
+        assert client.get("/api/v1/health").status_code == 429
+
+        pinned_window(60)
+
+        assert client.get("/api/v1/health").status_code == 200
+
+
 class TestWindowsRollOver:
     """What happens at a boundary — the half of a fixed window nothing asserted.
 

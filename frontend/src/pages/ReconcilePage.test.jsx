@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -824,5 +824,64 @@ describe("ReconcilePage", () => {
       );
       expect(within(card).getByText("1 / 3")).toBeInTheDocument();
     });
+  });
+
+  /**
+   * The other side of two branches every fixture above enters the same way.
+   *
+   * `run()` carries `itc_at_risk: "90000.00"` and one matched invoice of
+   * three, so every assertion in this file has read the cards in their alarmed
+   * state. A clean period — nothing at risk, everything matched — is the
+   * outcome the product is for, and until here nothing rendered one.
+   */
+  describe("a period with nothing wrong", () => {
+    it("reads the risk card as good when no ITC is at risk", async () => {
+      mockApi({
+        imported2b: imported(),
+        latest: run({ itc_at_risk: "0.00" }),
+      });
+      renderPage();
+
+      const card = (await screen.findByText("ITC at risk", { selector: ".stat-label" })).closest(
+        ".stat-card",
+      );
+      expect(card).toHaveClass("tone-good");
+    });
+
+    it("reads the matched card as good only when every invoice matched", async () => {
+      mockApi({
+        imported2b: imported(),
+        latest: run({ matched_count: 3, total_invoices: 3 }),
+      });
+      renderPage();
+
+      const card = (await screen.findByText("Matched", { selector: ".stat-label" })).closest(
+        ".stat-card",
+      );
+      expect(within(card).getByText("3 / 3")).toBeInTheDocument();
+      expect(card).toHaveClass("tone-good");
+    });
+  });
+
+  it("does nothing when the file picker is dismissed without a file", async () => {
+    // Opening the picker and pressing Cancel fires `change` with an empty
+    // FileList. The guard for it is one line and had never run: every other
+    // upload test here hands over a file. Without it the extension check
+    // reads `undefined.name` and the screen dies on a cancelled dialog.
+    //
+    // fireEvent rather than `user.upload(input, [])` — user-event treats an
+    // empty upload as nothing to do and never dispatches the event, so the
+    // guard would go on being unreached while the test passed.
+    const onPost = vi.fn();
+    mockApi({ imported2b: imported(), latest: run(), onPost });
+    renderPage();
+    await screen.findByText("ITC at risk", { selector: ".stat-label" });
+
+    fireEvent.change(screen.getByLabelText(/Replace GSTR-2B|Import GSTR-2B/), {
+      target: { files: [] },
+    });
+
+    expect(onPost).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 });

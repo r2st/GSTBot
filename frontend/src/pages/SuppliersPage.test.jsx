@@ -763,4 +763,129 @@ describe("SuppliersPage", () => {
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
   });
+
+  /**
+   * The fallbacks that only run on the rows nobody fixtures.
+   *
+   * Every test above builds its suppliers off `supplier()`, which carries a
+   * legal name, a known risk level and a score in the nineties. So the naming
+   * fallback, the unrecognised-risk branch and the warning banner have run
+   * exactly zero times across this file — they are covered by line count
+   * because the components that hold them render, not because anything
+   * asserted what they do. Each one below is reachable from real API data:
+   * the GSTIN lookup returns suppliers with no legal name, `risk_level` is a
+   * string the backend is free to extend, and a score under 60 is the whole
+   * point of scoring.
+   */
+  describe("rows the fixtures do not cover", () => {
+    it("falls back to the trade name when a supplier has no legal name", async () => {
+      mockApi({ items: [supplier({ legal_name: null })] });
+      renderPage();
+      await loaded();
+
+      expect(screen.getByText("Northwind")).toBeInTheDocument();
+    });
+
+    it("shows a dash rather than a blank cell when a supplier has neither name", async () => {
+      // Both names absent is what a supplier first seen in a 2B looks like:
+      // the GSTIN is all the portal gave us. A blank cell there reads as a
+      // rendering bug rather than as missing data.
+      mockApi({ items: [supplier({ legal_name: null, trade_name: null })] });
+      renderPage();
+      await loaded();
+
+      expect(screen.getByText("—")).toBeInTheDocument();
+      expect(screen.getByText("29AAGCB7383J1Z4")).toBeInTheDocument();
+    });
+
+    it("heads the breakdown with the GSTIN when a supplier has no name at all", async () => {
+      // The detail panel has its own fallback chain, ending at the GSTIN
+      // rather than at a dash — a panel titled "—" tells the reader nothing
+      // about which supplier they opened.
+      const user = userEvent.setup();
+      const nameless = { legal_name: null, trade_name: null };
+      mockApi({
+        items: [supplier(nameless)],
+        detail: detail(nameless),
+      });
+      renderPage();
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      await screen.findByRole("heading", { name: "29AAGCB7383J1Z4" });
+    });
+
+    it("prints a scoring component it has no label for under its own name", async () => {
+      // `COMPONENT_LABELS[name] ?? name`. The backend owns the component list
+      // and can add to it; a new one must show up in the breakdown as
+      // `dispute_rate` rather than as an empty cell the reader cannot ask
+      // about.
+      const user = userEvent.setup();
+      mockApi({
+        detail: detail({
+          score_detail: scoreDetail({
+            components: [
+              { name: "dispute_rate", score: 70, weight: 100, detail: "One open dispute" },
+            ],
+          }),
+        }),
+      });
+      renderPage();
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      expect(await screen.findByText("dispute_rate")).toBeInTheDocument();
+    });
+
+    it("labels a risk level it does not recognise as unrated", async () => {
+      // `RISK[level] ?? RISK.unknown`. A backend that adds a `critical` level
+      // before the frontend learns the word must not render an unstyled chip
+      // with no text in it.
+      mockApi({ items: [supplier({ risk_level: "critical" })] });
+      renderPage();
+      await loaded();
+
+      // Scoped to the row: the risk filter above the table offers "Unrated"
+      // as an option, so an unscoped query passes on the dropdown alone.
+      expect(within(screen.getByRole("table")).getByText("Unrated")).toBeInTheDocument();
+    });
+
+    it("warns on the recommendation when the score is below 60", async () => {
+      const user = userEvent.setup();
+      mockApi({
+        items: [supplier({ compliance_score: 41, risk_level: "high" })],
+        detail: detail({
+          score_detail: scoreDetail({
+            score: 41,
+            risk_level: "high",
+            recommendation: "Hold 30% of the credit until this supplier files.",
+          }),
+        }),
+      });
+      renderPage();
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      const banner = await screen.findByRole("status");
+      expect(banner).toHaveTextContent("Hold 30% of the credit");
+      expect(banner).toHaveClass("banner-warn");
+    });
+
+    it("leaves the recommendation neutral when the score clears 60", async () => {
+      // The paired case. Without it, a banner hard-coded to `banner-warn`
+      // would satisfy the test above and mark every supplier as a problem.
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+      await loaded();
+
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      const banner = await screen.findByRole("status");
+      expect(banner).toHaveClass("banner-neutral");
+    });
+  });
 });
