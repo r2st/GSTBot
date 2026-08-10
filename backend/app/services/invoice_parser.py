@@ -703,8 +703,18 @@ _DATE_VALUE = r"(\d{1,4}[-/.\s][A-Za-z0-9]{1,9}[-/.\s]\d{2,4})"
 # is the invoice's own is decided in :func:`_invoice_date_in`, and the explicit
 # pattern needs that as much as the loose one — "E-Way Bill Date" ends in one
 # of the labels here, and "Original Invoice Date" in another.
+#
+# "Date of Issue" belongs here rather than in the loose pattern for the same
+# reason "Date of Invoice" already does: it names the invoice's own date as
+# specifically as "Invoice Date" does, in the wording rule 46(f) itself uses —
+# "date of its issue" — so a template built against the rule text prints this
+# rather than the more colloquial label. Left in the loose pattern's care, "of
+# Issue" is not one of the separator characters between "Date" and the value,
+# so the label did not merely lose its ranking — it failed to match at all, and
+# the field fell through to whatever a due date or an e-way bill printed above
+# it, or to no date if the document had neither.
 _DATE_PATTERN = re.compile(
-    r"(?:invoice\s*date|date\s+of\s+invoice|bill\s*date)[\s:.\-]*" + _DATE_VALUE,
+    r"(?:invoice\s*date|date\s+of\s+(?:invoice|issue)|bill\s*date)[\s:.\-]*" + _DATE_VALUE,
     re.IGNORECASE,
 )
 _LOOSE_DATE_PATTERN = re.compile(

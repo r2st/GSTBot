@@ -725,6 +725,7 @@ class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
             "Invoice Date : 15/04/2026",
             "INVOICE DATE.:15/04/2026",
             "Date of Invoice: 15/04/2026",
+            "Date of Issue: 15/04/2026",
             "Bill Date: 15/04/2026",
             "Date: 15/04/2026",
             "Dated : 15.04.2026",
@@ -745,6 +746,21 @@ class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
             "TAX INVOICE\n"
             "Due Date: 15/05/2026\n"
             "Invoice Date: 15/04/2026\n"
+        )
+        assert parsed.invoice_date == date(2026, 4, 15)
+        assert parsed.period == "2026-04"
+
+    def test_a_due_date_printed_first_does_not_beat_date_of_issue_either(self):
+        """The rule-46(f) wording is as explicit as "Invoice Date", not a fallback.
+
+        A template built against the rule text prints "Date of Issue" rather
+        than "Invoice Date", and it deserves the same priority over a due date
+        printed above it — not the loose pattern's mere leftmost-wins.
+        """
+        parsed = parse_heuristic(
+            "TAX INVOICE\n"
+            "Due Date: 15/05/2026\n"
+            "Date of Issue: 15/04/2026\n"
         )
         assert parsed.invoice_date == date(2026, 4, 15)
         assert parsed.period == "2026-04"
