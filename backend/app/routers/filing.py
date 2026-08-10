@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
-from app.models.gstr_return import GSTRReturn
+from app.models.gstr_return import GSTRReturn, ReturnType
 from app.models.invoice import InvoiceType
 from app.schemas.filing import (
     FiledReturnOut,
@@ -54,6 +54,25 @@ _DIRECTION = {
 
 def _resolve_period(period: str | None) -> str:
     return period or invoice_service.month_of()
+
+
+def _preview_out(
+    db: Session, business: Business, period: str, return_type: ReturnType
+) -> FilingPreviewOut:
+    """Serialize what ``filing_service.preview`` built.
+
+    Both preview routes go through here rather than each composing a build and
+    a validation of their own. That composition is what quietly cost a second
+    read of the period — the two halves want the same invoices, and only the
+    service can hand them the same list.
+    """
+    built = filing_service.preview(db, business, period, return_type)
+    return FilingPreviewOut(
+        period=built.period,
+        return_type=built.return_type,
+        document=built.document,
+        validation=ValidationReportOut.model_validate(built.validation.as_dict()),
+    )
 
 
 @router.get(
@@ -106,15 +125,7 @@ def preview_gstr1(
     business: Business = Depends(get_current_business),
 ) -> FilingPreviewOut:
     """GSTR-1 for a period, in the portal's JSON shape, with its validation."""
-    resolved = _resolve_period(period)
-    return FilingPreviewOut(
-        period=resolved,
-        return_type="gstr1",
-        document=filing_service.build_gstr1(db, business, resolved),
-        validation=ValidationReportOut.model_validate(
-            filing_service.validate_period(db, business, resolved).as_dict()
-        ),
-    )
+    return _preview_out(db, business, _resolve_period(period), ReturnType.GSTR1)
 
 
 @router.get(
@@ -136,15 +147,7 @@ def preview_gstr3b(
     business: Business = Depends(get_current_business),
 ) -> FilingPreviewOut:
     """GSTR-3B pre-filled from the reconciled position, with its validation."""
-    resolved = _resolve_period(period)
-    return FilingPreviewOut(
-        period=resolved,
-        return_type="gstr3b",
-        document=filing_service.build_gstr3b(db, business, resolved),
-        validation=ValidationReportOut.model_validate(
-            filing_service.validate_period(db, business, resolved).as_dict()
-        ),
-    )
+    return _preview_out(db, business, _resolve_period(period), ReturnType.GSTR3B)
 
 
 def _standing_out(standing: filing_service.ReturnStanding) -> FilingStatusItemOut:
