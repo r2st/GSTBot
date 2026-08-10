@@ -110,9 +110,31 @@ a dead Redis must never fail the request it is limiting.
 Public endpoints are keyed by IP — there is no identity before sign-in.
 `/health` and `/health/jobs` are metered because they cost real work per call (a
 database round-trip, a fresh Redis connection, and a Celery ping that holds the
-thread up to a second). `/health/live` and `/health/ready` are deliberately
-unmetered: a throttled readiness probe reads as an unready instance and takes
-pods out of rotation.
+thread up to a second).
+
+There are two layers, and a route can be exempt from one without the other. The
+per-route buckets above are dependencies; underneath them
+`RateLimitMiddleware` counts *every* path outside `_UNLIMITED_PATHS`, which
+today is `/health/live` and `/metrics` alone. Only `/health/live` is genuinely
+unbounded, and only because it touches no dependency — an unlimited flood of it
+costs one dict, while metering it would eventually have an orchestrator kill a
+pod for being healthy.
+
+`/health/ready` carries no bucket of its own but is still counted globally, and
+that is deliberate rather than an oversight: it runs the same `SELECT 1` on the
+pooled connection that `/health` does, so exempting it would leave an
+unauthenticated route that can be hammered without bound into the pool every
+tenant is served from. At the default 300/minute per address a load balancer
+probing every five seconds spends twelve, so real probes never meet it. See
+`_UNLIMITED_PATHS` in `core/middleware.py` and
+`tests/test_request_guards.py::TestTheHealthProbesAndTheGlobalLimit`.
+
+What a route can answer is derived from these two facts rather than declared:
+`core/openapi.py` documents 401 only for routes that actually depend on
+`get_current_user`/`get_current_business`, and 429 only for routes something
+actually counts. `tests/test_openapi_contract.py` sweeps that the published
+spec still matches. A new route earns a correct spec by having correct
+dependencies.
 
 ## Database and migrations
 

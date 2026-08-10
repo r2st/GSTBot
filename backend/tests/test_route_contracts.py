@@ -18,7 +18,7 @@ Both failures are structural, so the checks sweep every route rather than
 naming the ones that happen to be wrong today.
 
 Sweeping is itself the fragile part, and it has already broken once: see
-``_collect_api_routes`` for why ``app.routes`` is not the list it looks like.
+``app.core.routes`` for why ``app.routes`` is not the list it looks like.
 """
 from __future__ import annotations
 
@@ -27,11 +27,11 @@ from io import BytesIO
 import pytest
 from fastapi import Request
 from fastapi.dependencies.utils import get_dependant, get_typed_signature
-from fastapi.routing import APIRoute
 from starlette.status import HTTP_204_NO_CONTENT, HTTP_304_NOT_MODIFIED
 
 from app.core import params
 from app.core.rate_limit import RateLimit
+from app.core.routes import collect_api_routes
 from app.main import app
 from app.services import gst_calendar
 from tests.conftest import SUPPLIER_GSTIN_SAME_STATE, TEST_EMAIL, TEST_PASSWORD
@@ -58,45 +58,11 @@ EXPECTED_PATHS = frozenset(
 )
 
 
-def _descend(candidates, collected: list) -> None:
-    for item in candidates:
-        if hasattr(item, "effective_candidates"):
-            _descend(item.effective_candidates(), collected)
-        else:
-            collected.append(item)
-
-
-def _collect_api_routes(application) -> list:
-    """Every route the app serves, resolved to the path it answers on.
-
-    ``app.routes`` is not a flat list of the routes an app serves. Since
-    FastAPI 0.141 ``include_router`` no longer copies the router's routes into
-    the parent; it appends one lazy ``_IncludedRouter`` node that materialises
-    its children — with the prefix, tags and dependencies already applied — on
-    demand. Filtering ``app.routes`` for ``APIRoute`` therefore finds exactly
-    one route here, the bare ``/``, which is how every sweep in this file
-    quietly stopped sweeping anything while still passing.
-
-    The materialised children are not ``APIRoute`` instances but they carry the
-    same attributes these checks read (``path``, ``methods``, ``status_code``,
-    ``response_model``, ``dependant``, ``endpoint``, ``include_in_schema``), so
-    both shapes are collected interchangeably — which also keeps this working
-    against a FastAPI that still flattens.
-    """
-    collected: list = []
-    for route in application.routes:
-        if hasattr(route, "effective_candidates"):
-            # A node's low-priority list already contains its descendants',
-            # so it is read here rather than inside the recursion, which
-            # would collect those routes once per level.
-            collected.extend(route.effective_low_priority_routes())
-            _descend(route.effective_candidates(), collected)
-        elif isinstance(route, APIRoute):
-            collected.append(route)
-    return collected
-
-
-API_ROUTES = _collect_api_routes(app)
+# The walk moved to ``app.core.routes`` when app code needed it too: the
+# OpenAPI customisation derives 401 and 429 from the same assembled table these
+# sweeps read, and two copies of a walk this easy to get silently wrong is one
+# too many. The reasoning that used to live here is in that module's docstring.
+API_ROUTES = collect_api_routes(app)
 
 
 def _route_id(route) -> str:
@@ -312,14 +278,14 @@ class TestEveryPeriodParameterNamesARealMonth:
         # assertion below without checking anything.
         total = sum(
             len(self._period_schemas(route))
-            for route in _collect_api_routes(app)
+            for route in collect_api_routes(app)
             if hasattr(route, "dependant")
         )
         assert total >= 10, f"only found {total} period parameters — sweep is broken"
 
     def test_every_period_parameter_carries_the_canonical_pattern(self):
         offenders = []
-        for route in _collect_api_routes(app):
+        for route in collect_api_routes(app):
             if not hasattr(route, "dependant"):
                 continue
             for field_info in self._period_schemas(route):
@@ -437,7 +403,7 @@ class TestEveryBareIntegerInAUrlIsBounded:
         # A collector that finds nothing passes everything below.
         names = {
             name
-            for route in _collect_api_routes(app)
+            for route in collect_api_routes(app)
             if hasattr(route, "dependant")
             for name, _ in self._int_params(route)
         }
@@ -445,7 +411,7 @@ class TestEveryBareIntegerInAUrlIsBounded:
 
     def test_every_row_id_in_a_path_is_bounded(self):
         offenders = []
-        for route in _collect_api_routes(app):
+        for route in collect_api_routes(app):
             if not hasattr(route, "dependant"):
                 continue
             for param in route.dependant.path_params:
@@ -462,7 +428,7 @@ class TestEveryBareIntegerInAUrlIsBounded:
 
     def test_every_pagination_parameter_is_bounded(self):
         offenders = []
-        for route in _collect_api_routes(app):
+        for route in collect_api_routes(app):
             if not hasattr(route, "dependant"):
                 continue
             for name, field_info in self._int_params(route):
@@ -480,7 +446,7 @@ class TestEveryBareIntegerInAUrlIsBounded:
         # negative number, so an id wide enough to overflow the column reached
         # the lookup anyway as long as it was negative.
         offenders = []
-        for route in _collect_api_routes(app):
+        for route in collect_api_routes(app):
             if not hasattr(route, "dependant"):
                 continue
             for param in route.dependant.path_params:
@@ -499,7 +465,7 @@ class TestEveryBareIntegerInAUrlIsBounded:
         # Every primary key here is an autoincrementing Integer, so the
         # sequence starts at 1 and nothing at or below zero names a row.
         assert params.MIN_ID == 1
-        for route in _collect_api_routes(app):
+        for route in collect_api_routes(app):
             if not hasattr(route, "dependant"):
                 continue
             for param in route.dependant.path_params:
@@ -518,7 +484,7 @@ class TestEveryBareIntegerInAUrlIsBounded:
         # 2**31-1 is both the largest id that can exist and comfortably inside
         # what an OFFSET clause accepts.
         assert params.MAX_ID == 2**31 - 1
-        for route in _collect_api_routes(app):
+        for route in collect_api_routes(app):
             if not hasattr(route, "dependant"):
                 continue
             for name, field_info in self._int_params(route):

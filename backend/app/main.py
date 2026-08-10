@@ -22,6 +22,7 @@ from app.core.middleware import (
     RequestSizeLimitMiddleware,
     SecurityHeadersMiddleware,
 )
+from app.core.openapi import install_openapi
 from app.core.redis_client import close as redis_close
 from app.core.redis_client import ping as redis_ping
 from app.routers import (
@@ -264,9 +265,11 @@ def create_app() -> FastAPI:
         openapi_url=openapi_url,
         contact={"name": "GSTBot", "url": "https://gstbot.aiknol.com"},
         license_info={"name": "Proprietary"},
+        # Only the code every route can really answer. 401 and 429 were here
+        # too, which published them for the public allowlist and for the one
+        # probe exempt from the limiter; they are derived per route by
+        # ``install_openapi`` below. See app/core/openapi.py.
         responses={
-            401: {"description": "Missing, malformed or expired bearer token."},
-            429: {"description": "Rate limit exceeded. See the `Retry-After` header."},
             500: {"description": "Unexpected error. Quote `correlation_id` to support."},
         },
     )
@@ -354,6 +357,10 @@ def create_app() -> FastAPI:
             "docs": docs_url,
             "health": f"{prefix}/health",
         }
+
+    # After the routers, though the walk itself is lazy: the spec is derived
+    # from the assembled table, so it has to be able to see all of it.
+    install_openapi(application)
 
     return application
 
