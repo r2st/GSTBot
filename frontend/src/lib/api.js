@@ -311,7 +311,14 @@ export const api = {
   validateGstin: (gstin) =>
     request(`/meta/gstin/${encodeURIComponent(gstin)}`, { auth: false }),
   states: () => request("/meta/states", { auth: false }),
-  health: () => request("/health", { auth: false }),
+  /**
+   * Every dependency with its latency. Read by the status page.
+   *
+   * Answers 503 when the database is unreachable, so this is one of the few
+   * calls whose *failure* is the result worth showing rather than an error to
+   * report — see `StatusPage`, which keeps the two probes' outcomes apart.
+   */
+  health: ({ signal } = {}) => request("/health", { auth: false, signal }),
 
   // ---- Invoices ----
   uploadInvoice(file, invoiceType = "purchase") {
@@ -551,8 +558,15 @@ export const api = {
   unlinkBusiness: (id) => request(`/businesses/mine/${id}`, { method: "DELETE" }),
 
   // ---- Background jobs (operational, not tenant data) ----
-  /** Worker reachability, broker queue depth, and scheduled-job heartbeats. */
-  jobHealth: () => request("/health/jobs", { auth: false }),
+  /**
+   * Worker reachability, broker queue depth, and scheduled-job heartbeats.
+   *
+   * Holds the server thread for up to a second waiting on a Celery broadcast
+   * ping, which is why the status page runs it alongside `health` rather than
+   * after it, and why it takes a signal — a user who navigates away should not
+   * leave a request of that cost in flight.
+   */
+  jobHealth: ({ signal } = {}) => request("/health/jobs", { auth: false, signal }),
 };
 
 /** Build a `?a=1&b=2` suffix, dropping empty values. Returns "" when empty. */

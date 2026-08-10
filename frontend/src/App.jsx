@@ -11,6 +11,7 @@ import InvoicesPage from "./pages/InvoicesPage";
 import ITCPage from "./pages/ITCPage";
 import LoginPage from "./pages/LoginPage";
 import ReconcilePage from "./pages/ReconcilePage";
+import StatusPage from "./pages/StatusPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import UploadPage from "./pages/UploadPage";
 
@@ -128,6 +129,19 @@ export default function App() {
         element={
           <Protected>
             <AlertsPage />
+          </Protected>
+        }
+      />
+      {/* Behind `Protected` even though both probes it reads are public. They
+          are public so an operator with no account can watch the queue; this
+          page is for a signed-in business asking why its uploads are quiet,
+          and putting it outside the shell would mean a nav-less page reachable
+          from nowhere. */}
+      <Route
+        path="/status"
+        element={
+          <Protected>
+            <StatusPage />
           </Protected>
         }
       />
