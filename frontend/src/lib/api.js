@@ -317,15 +317,24 @@ export const api = {
       body: tolerance === undefined ? { period } : { period, tolerance },
     }),
 
-  listReconciliations: (params = {}) => {
+  /**
+   * Past runs for a period, newest first — counts only, no report.
+   *
+   * Abortable, like every other read the period picker drives. Runs accumulate
+   * rather than overwrite: a period is reconciled again each time a supplier
+   * files late and the 2B is regenerated, so this is the list of what was known
+   * and when.
+   */
+  listReconciliations: (params = {}, { signal } = {}) => {
     const query = new URLSearchParams(
       Object.entries(params).filter(([, v]) => v !== undefined && v !== null && v !== ""),
     );
     const suffix = query.toString();
-    return request(`/reconciliation${suffix ? `?${suffix}` : ""}`);
+    return request(`/reconciliation${suffix ? `?${suffix}` : ""}`, { signal });
   },
 
-  getReconciliation: (id) => request(`/reconciliation/${id}`),
+  /** One past run with its full per-invoice report. */
+  getReconciliation: (id, { signal } = {}) => request(`/reconciliation/${id}`, { signal }),
   latestReconciliation: (period, { signal } = {}) =>
     request(`/reconciliation/latest?period=${encodeURIComponent(period)}`, { signal }),
 

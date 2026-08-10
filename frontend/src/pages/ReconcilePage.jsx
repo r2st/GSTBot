@@ -5,11 +5,16 @@ import { SkeletonText } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
+import { api, isAbortError } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
 import { GSTR2B_EXTENSIONS, fileError } from "../lib/validate";
 
 const ACCEPT = GSTR2B_EXTENSIONS.join(",");
+
+// A period is re-reconciled as suppliers file late, which is a handful of times
+// over the life of a return rather than hundreds. Enough to cover that without
+// putting a year of a busy tenant's runs into the header of the page.
+const HISTORY_LIMIT = 12;
 
 /** The last 12 filing periods, newest first. */
 function recentPeriodOptions(now = new Date()) {
@@ -58,6 +63,24 @@ const CATEGORY_ORDER = [
   "missing_in_books",
   "matched",
 ];
+
+/**
+ * When a run happened, to the minute.
+ *
+ * The minute is what distinguishes them: a period is re-reconciled when a
+ * supplier files, which is often twice in a day, and two rows both labelled
+ * "14 May 2026" are two rows nobody can tell apart.
+ *
+ * `completed_at` is null on a run that queued or failed, and that run is still
+ * listed — the row is the only place it can be seen at all — so it falls back
+ * to when it was asked for.
+ */
+function runLabel(item) {
+  const stamp = item?.completed_at || item?.created_at;
+  if (!stamp) return "an unrecorded time";
+  const at = new Date(stamp);
+  return `${dateLabel(stamp.slice(0, 10))}, ${at.toTimeString().slice(0, 5)}`;
+}
 
 function FindingRow({ finding }) {
   const meta = CATEGORIES[finding.category] ?? { label: finding.category, tone: "neutral" };
@@ -134,6 +157,16 @@ export default function ReconcilePage() {
   // month on screen changes no state the load effect depends on, so without
   // this there is nothing for it to react to.
   const [reloadToken, setReloadToken] = useState(0);
+  // Past runs for the period, and which one is being read instead of the
+  // latest. A period is reconciled again every time a supplier files late and
+  // the 2B is regenerated, so "what did this look like in June, before they
+  // filed" is the question an ITC reversal turns on months later — and until
+  // now every run but the newest was stored and unreachable.
+  const [history, setHistory] = useState([]);
+  const [historyUnknown, setHistoryUnknown] = useState(false);
+  // {id, run} while an earlier run is on screen, null while the latest is.
+  const [viewed, setViewed] = useState(null);
+  const [historyToken, setHistoryToken] = useState(0);
   const inputRef = useRef(null);
   // The month the picker is showing, readable from a callback that has been
   // waiting on the network. `period` closed over at click time is the month the
@@ -190,9 +223,54 @@ export default function ReconcilePage() {
   useEffect(() => {
     const controller = new AbortController();
     shownPeriod.current = period;
+    // An earlier run of the month being left has nothing to say about the month
+    // being arrived at, and every figure it fills in is captioned by the picker.
+    setViewed(null);
     load(period, { signal: controller.signal });
     return () => controller.abort();
   }, [load, period, reloadToken]);
+
+  // Its own read, so its own effect: the list is a third thing that can fail on
+  // its own, and it is refetched after a run without disturbing the two panels
+  // above — reusing the load effect for that would put the whole page back into
+  // skeletons a moment after the findings appeared.
+  useEffect(() => {
+    const controller = new AbortController();
+    (async () => {
+      try {
+        const data = await api.listReconciliations(
+          { period, limit: HISTORY_LIMIT },
+          { signal: controller.signal },
+        );
+        setHistory(data.items ?? []);
+        setHistoryUnknown(false);
+      } catch (err) {
+        // A superseded list writes nothing, for the same reason the pair above
+        // does not: it is captioned by the picker.
+        if (isAbortError(err)) return;
+        // Empty and unknown are different answers, and only one of them means
+        // "this period has never been reconciled".
+        setHistory([]);
+        setHistoryUnknown(true);
+      }
+    })();
+    return () => controller.abort();
+  }, [period, reloadToken, historyToken]);
+
+  async function handleView(item) {
+    // The row already carries the counts; what it does not carry is the report,
+    // which is the whole reason for opening one.
+    setBusy(true);
+    setError("");
+    try {
+      const detail = await api.getReconciliation(item.id);
+      if (shownPeriod.current === item.period) setViewed({ id: item.id, run: detail });
+    } catch (err) {
+      setError(`Could not open the run from ${dateLabel(item.created_at?.slice(0, 10))}: ${err.message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleImport(files) {
     const file = Array.from(files ?? [])[0];
@@ -252,7 +330,15 @@ export default function ReconcilePage() {
       // Dropped rather than aborted. The run is already stored by the time it
       // answers, so it is waiting on the period when the user returns to it —
       // the confirmation below names its own month for that reason.
-      if (shownPeriod.current === target) setRun(result);
+      if (shownPeriod.current === target) {
+        setRun(result);
+        // The new run is the latest, so an earlier one being read is no longer
+        // what the user asked to see.
+        setViewed(null);
+      }
+      // The run just stored is a new row in the list, whichever month is on
+      // screen now — so the list is refetched rather than left a run short.
+      setHistoryToken((token) => token + 1);
       setNotice(`Reconciled ${periodLabel(target)}`);
     } catch (err) {
       // Named for the same reason the confirmation above names itself. The
@@ -265,7 +351,13 @@ export default function ReconcilePage() {
     }
   }
 
-  const findings = run?.report?.findings ?? [];
+  // Everything below reads the run being *shown*, which is the latest unless an
+  // earlier one has been opened. Named once here rather than at each use: the
+  // stat cards, the chips and the findings table have to agree about which run
+  // they are describing, and three separate `viewed ?? run` expressions is how
+  // one of them ends up describing the other.
+  const shown = viewed?.run ?? run;
+  const findings = shown?.report?.findings ?? [];
   const visible =
     filter === "all" ? findings : findings.filter((f) => f.category === filter);
 
@@ -376,25 +468,45 @@ export default function ReconcilePage() {
         </div>
       </section>
 
-      {run && (
+      {shown && (
         <>
+          {/* Said plainly, and above the figures rather than beside them. Every
+              number under this heading is a past state of the period — an ITC
+              at risk that has since been resolved reads exactly like one that
+              has not, and it is a figure people act on. */}
+          {viewed && (
+            <div className="banner banner-neutral" role="status">
+              <span>
+                Showing the run from{" "}
+                <strong>{runLabel(viewed.run)}</strong>, not the latest.
+              </span>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setViewed(null)}
+              >
+                Back to the latest run
+              </button>
+            </div>
+          )}
+
           <section className="stat-grid">
             <StatCard
               label="ITC eligible"
-              value={rupees(run.itc_eligible)}
+              value={rupees(shown.itc_eligible)}
               sub="Safe to claim"
               tone="good"
             />
             <StatCard
               label="ITC at risk"
-              value={rupees(run.itc_at_risk)}
+              value={rupees(shown.itc_at_risk)}
               sub="Unfiled or over-claimed"
-              tone={Number(run.itc_at_risk) > 0 ? "bad" : "good"}
+              tone={Number(shown.itc_at_risk) > 0 ? "bad" : "good"}
             />
             <StatCard
               label="ITC claimed"
-              value={rupees(run.itc_claimed)}
-              sub={`${run.total_invoices} purchase invoices`}
+              value={rupees(shown.itc_claimed)}
+              sub={`${shown.total_invoices} purchase invoices`}
             />
             {/* The run's own counter, not the chip tally below. Both are
                 right about different questions: this card is "how much of
@@ -404,9 +516,11 @@ export default function ReconcilePage() {
                 "4 / 3". */}
             <StatCard
               label="Matched"
-              value={`${run.matched_count ?? 0} / ${run.total_invoices}`}
-              sub={`Last run ${dateLabel(run.completed_at?.slice(0, 10))}`}
-              tone={(run.matched_count ?? 0) === run.total_invoices ? "good" : "warn"}
+              value={`${shown.matched_count ?? 0} / ${shown.total_invoices}`}
+              /* "Last run" is a claim about which run this is, and it stops
+                 being true the moment an earlier one is opened. */
+              sub={`${viewed ? "Run" : "Last run"} ${dateLabel(shown.completed_at?.slice(0, 10))}`}
+              tone={(shown.matched_count ?? 0) === shown.total_invoices ? "good" : "warn"}
             />
           </section>
 
@@ -480,6 +594,90 @@ export default function ReconcilePage() {
         <p className="muted">
           GSTR-2B is loaded. Run the reconciliation to see what matches.
         </p>
+      )}
+
+      {/* Runs accumulate rather than overwrite each other, and every one but
+          the newest was stored and unreachable. What makes the older ones worth
+          keeping is that they are evidence: a credit claimed in June on a
+          supplier who had not filed, and the run that said so at the time, is
+          the answer to a reversal raised in November.
+
+          Shown only once there is more than one, because a single entry is the
+          run already on screen, listed again under a heading calling it
+          history. */}
+      {(history.length > 1 || historyUnknown) && (
+        <section className="panel">
+          <h2>Earlier runs</h2>
+          {historyUnknown ? (
+            <p className="muted">
+              Could not load the earlier runs for {periodLabel(period)}.
+            </p>
+          ) : (
+            <>
+              <p className="muted small">
+                Each run is what GSTR-2B said at the time. Suppliers file late and
+                the statement is regenerated, so a period is reconciled more than
+                once and the figures move.
+              </p>
+              <TableScroll label="Earlier reconciliation runs">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Run</th>
+                      <th scope="col">Matched</th>
+                      <th scope="col">ITC at risk</th>
+                      <th scope="col">ITC eligible</th>
+                      <th scope="col" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {history.map((item, index) => {
+                      // The newest row is the one the page shows by default, so
+                      // it is marked rather than offered as something to open.
+                      const isLatest = index === 0;
+                      const isShown = viewed ? viewed.id === item.id : isLatest;
+                      return (
+                        <tr key={item.id}>
+                          <td>
+                            {runLabel(item)}
+                            {isLatest && (
+                              <span className="chip chip-neutral"> Latest</span>
+                            )}
+                          </td>
+                          <td>
+                            {item.matched_count ?? 0} / {item.total_invoices}
+                          </td>
+                          <td className="numeric">{rupees(item.itc_at_risk)}</td>
+                          <td className="numeric">{rupees(item.itc_eligible)}</td>
+                          <td>
+                            {isShown ? (
+                              <span className="muted small">Showing</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="btn btn-ghost"
+                                disabled={busy}
+                                onClick={() =>
+                                  isLatest ? setViewed(null) : handleView(item)
+                                }
+                              >
+                                View
+                                <span className="visually-hidden">
+                                  {" "}
+                                  the run from {runLabel(item)}
+                                </span>
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </TableScroll>
+            </>
+          )}
+        </section>
       )}
     </div>
   );

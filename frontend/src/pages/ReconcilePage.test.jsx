@@ -101,7 +101,7 @@ function run(overrides = {}) {
 }
 
 /** Route fetches by URL so the page's two parallel loads resolve independently. */
-function mockApi({ imported2b, latest, onPost, fail } = {}) {
+function mockApi({ imported2b, latest, onPost, fail, history, detail } = {}) {
   global.fetch = vi.fn(async (url, options = {}) => {
     const ok = (body) => ({
       ok: true,
@@ -123,6 +123,13 @@ function mockApi({ imported2b, latest, onPost, fail } = {}) {
     if (fail) return refused(fail.status, fail.message);
     if (url.includes("/gstr2b/")) return imported2b ? ok(imported2b) : notFound();
     if (url.includes("/latest")) return latest ? ok(latest) : notFound();
+    // The list of past runs. Answered empty by default so that the tests about
+    // the two panels above do not each have to describe a history they are not
+    // asserting on; `history` is for the ones that are.
+    if (/\/reconciliation\?/.test(url)) return ok({ items: history ?? [], total: 0 });
+    if (/\/reconciliation\/\d+$/.test(url)) {
+      return detail ? ok(detail) : refused(500, "Could not load that run.");
+    }
     return notFound();
   });
 }
@@ -144,12 +151,26 @@ function renderPage() {
  *
  * This page sends two requests per period rather than one, so `pending`
  * fills two at a time and the URL is what says which of the pair is which.
+ *
+ * The list of past runs is a third read, and it is answered immediately rather
+ * than queued: these tests are about the ordering of the pair that fills the
+ * panels, and holding a third request would shift every index in them without
+ * asserting anything new. The list has its own tests, abort included.
  */
 function deferredFetch() {
   const pending = [];
   global.fetch = vi.fn(
     (url, options = {}) =>
       new Promise((resolve, reject) => {
+        if (/\/reconciliation\?/.test(String(url))) {
+          resolve({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: async () => JSON.stringify({ items: [], total: 0 }),
+          });
+          return;
+        }
         pending.push({
           url: String(url),
           method: options.method ?? "GET",
@@ -1021,5 +1042,204 @@ describe("a finding assembled from what the parser could not read", () => {
     renderPage();
 
     expect(await screen.findByText("Could not load this period.")).toBeInTheDocument();
+  });
+});
+
+describe("the runs a period accumulates", () => {
+  // Runs do not overwrite each other. A period is reconciled again each time a
+  // supplier files late and the 2B is regenerated, and every run but the newest
+  // was stored and unreachable — which matters because the older ones are the
+  // evidence: credit claimed in June against a supplier who had not filed, and
+  // the run that said so at the time, is the answer to a reversal in November.
+  // The picker opens on the current month, and an earlier run is only applied
+  // when it belongs to the month still on screen — so these have to be it.
+  const SHOWN = currentPeriod();
+  const LATEST = {
+    id: 9,
+    period: SHOWN,
+    total_invoices: 3,
+    matched_count: 3,
+    itc_at_risk: "0.00",
+    itc_eligible: "162000.00",
+    completed_at: "2026-06-02T09:30:00Z",
+    created_at: "2026-06-02T09:30:00Z",
+  };
+  const EARLIER = {
+    id: 7,
+    period: SHOWN,
+    total_invoices: 3,
+    matched_count: 1,
+    itc_at_risk: "90000.00",
+    itc_eligible: "72000.00",
+    completed_at: "2026-05-14T10:01:02Z",
+    created_at: "2026-05-14T10:01:00Z",
+  };
+
+  function renderWithHistory(options = {}) {
+    mockApi({
+      imported2b: imported(),
+      latest: run({ id: 9, matched_count: 3, itc_at_risk: "0.00" }),
+      history: [LATEST, EARLIER],
+      ...options,
+    });
+    return render(
+      <MemoryRouter>
+        <ReconcilePage />
+      </MemoryRouter>,
+    );
+  }
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it("lists what each earlier run found, so the figures can be seen to have moved", async () => {
+    renderWithHistory();
+    const table = await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+
+    // The point of the list is the pair of numbers side by side: the same
+    // period, two dates, and ₹90,000 of credit that stopped being at risk.
+    expect(within(table).getByText("₹90,000.00")).toBeInTheDocument();
+    expect(within(table).getByText("1 / 3")).toBeInTheDocument();
+    expect(within(table).getByText("3 / 3")).toBeInTheDocument();
+  });
+
+  it("says nothing about history when the period has only ever been run once", async () => {
+    // A single entry is the run already on screen, listed again under a heading
+    // calling it history.
+    renderWithHistory({ history: [LATEST] });
+    await screen.findByText(/invoices imported/);
+    expect(
+      screen.queryByRole("region", { name: "Earlier reconciliation runs" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens an earlier run's own findings, not the latest one's", async () => {
+    const user = userEvent.setup();
+    renderWithHistory({
+      detail: run({ id: 7, itc_at_risk: "90000.00", completed_at: "2026-05-14T10:01:02Z" }),
+    });
+    await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+
+    await user.click(screen.getByRole("button", { name: /View the run from/ }));
+
+    // The findings come from the run that was opened; the counts change with it.
+    expect(await screen.findByText("GHOST-1")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent(/not the latest/i);
+  });
+
+  it("does not go on calling an earlier run the last run", async () => {
+    // "Last run" is a claim about which run this is, and every figure beside it
+    // is a past state of the period — an ITC at risk that has since been
+    // resolved reads exactly like one that has not.
+    const user = userEvent.setup();
+    renderWithHistory({ detail: run({ id: 7, completed_at: "2026-05-14T10:01:02Z" }) });
+    await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+    expect(screen.getByText(/Last run/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /View the run from/ }));
+
+    await waitFor(() => expect(screen.queryByText(/Last run/)).not.toBeInTheDocument());
+  });
+
+  it("goes back to the latest run", async () => {
+    const user = userEvent.setup();
+    renderWithHistory({ detail: run({ id: 7, itc_at_risk: "90000.00" }) });
+    await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+    await user.click(screen.getByRole("button", { name: /View the run from/ }));
+    await screen.findByRole("status");
+
+    await user.click(screen.getByRole("button", { name: /Back to the latest run/ }));
+
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    expect(screen.getByText(/Last run/)).toBeInTheDocument();
+  });
+
+  it("says why an earlier run would not open", async () => {
+    // The row carries the counts but not the report, so opening one is a
+    // request of its own and can fail on its own. Silently doing nothing looks
+    // like a dead button on the screen that decides which credit is safe.
+    const user = userEvent.setup();
+    renderWithHistory({ detail: undefined });
+    await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+
+    await user.click(screen.getByRole("button", { name: /View the run from/ }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Could not open the run/);
+  });
+
+  it("still lists a run whose timestamps did not survive the round trip", async () => {
+    // A queued or failed run has no completed_at, and the row is the only place
+    // it can be seen at all — labelling it by a blank date would render
+    // "Invalid Date" in the table this page is read from.
+    renderWithHistory({
+      history: [{ ...LATEST, completed_at: null, created_at: null }, EARLIER],
+    });
+    const table = await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+    expect(within(table).getByText(/an unrecorded time/)).toBeInTheDocument();
+  });
+
+  it("says the earlier runs could not be loaded rather than showing none", async () => {
+    // Empty and unknown are different answers, and only one of them means the
+    // period has been reconciled once.
+    mockApi({ imported2b: imported(), latest: run(), fail: undefined });
+    global.fetch = vi.fn(async (url) => {
+      const body = (b, status = 200) => ({
+        ok: status < 400,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(b),
+      });
+      if (/\/reconciliation\?/.test(String(url))) return body({ detail: "boom" }, 500);
+      if (String(url).includes("/gstr2b/")) return body(imported());
+      if (String(url).includes("/latest")) return body(run());
+      return body({ detail: "Not found" }, 404);
+    });
+    render(
+      <MemoryRouter>
+        <ReconcilePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Could not load the earlier runs/)).toBeInTheDocument();
+  });
+
+  it("drops an earlier run that lands after the user has changed month", async () => {
+    // Every figure on this screen is captioned by the period picker, so a run
+    // belonging to another month has nowhere honest to go.
+    const user = userEvent.setup();
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    global.fetch = vi.fn(async (url) => {
+      const body = (b, status = 200) => ({
+        ok: status < 400,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(b),
+      });
+      const path = String(url);
+      if (/\/reconciliation\/\d+$/.test(path)) {
+        await held;
+        return body(run({ id: 7, itc_at_risk: "90000.00" }));
+      }
+      if (/\/reconciliation\?/.test(path)) {
+        return body({ items: [LATEST, EARLIER], total: 2 });
+      }
+      if (path.includes("/gstr2b/")) return body(imported());
+      if (path.includes("/latest")) return body(run({ id: 9, itc_at_risk: "0.00" }));
+      return body({ detail: "Not found" }, 404);
+    });
+    render(
+      <MemoryRouter>
+        <ReconcilePage />
+      </MemoryRouter>,
+    );
+    await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+    await user.click(screen.getByRole("button", { name: /View the run from/ }));
+
+    await selectPreviousPeriod(user);
+    release();
+
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
   });
 });
