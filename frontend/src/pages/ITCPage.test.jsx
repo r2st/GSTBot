@@ -65,13 +65,57 @@ function summary(overrides = {}) {
   };
 }
 
-function mockApi(body, { status = 200 } = {}) {
-  global.fetch = vi.fn(async () => ({
-    ok: status < 400,
-    status,
-    statusText: status < 400 ? "OK" : "Error",
-    text: async () => JSON.stringify(body),
-  }));
+/**
+ * The s.16(4) answer, defaulting to nothing outstanding.
+ *
+ * An empty `years` renders no panel at all, which is what every existing test
+ * on this page is entitled to see — none of them are about credit expiring, and
+ * a default carrying a year would put unexpected rupee figures into assertions
+ * about the period's own position.
+ */
+function lapsing(overrides = {}) {
+  return {
+    years: [],
+    total_at_risk: "0.00",
+    total_expired: "0.00",
+    lead_days: 90,
+    ...overrides,
+  };
+}
+
+function lapsingYear(overrides = {}) {
+  return {
+    financial_year: "2024-25",
+    deadline: "2025-11-30",
+    days_remaining: 45,
+    expired: false,
+    tax: { igst: "9000.00", cgst: "0.00", sgst: "0.00", cess: "0.00", total: "9000.00" },
+    invoice_count: 4,
+    periods: ["2024-07", "2024-08"],
+    ...overrides,
+  };
+}
+
+function mockApi(body, { status = 200, lapsing: lapsingBody = lapsing() } = {}) {
+  global.fetch = vi.fn(async (url) => {
+    // Routed by URL: the page asks for the period summary and the s.16(4)
+    // position independently, and answering both with the same body would let a
+    // test pass on a panel reading the wrong endpoint's data.
+    if (String(url).includes("/itc/lapsing")) {
+      return {
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        text: async () => JSON.stringify(lapsingBody),
+      };
+    }
+    return {
+      ok: status < 400,
+      status,
+      statusText: status < 400 ? "OK" : "Error",
+      text: async () => JSON.stringify(body),
+    };
+  });
 }
 
 function renderPage() {
@@ -385,6 +429,20 @@ describe("ITCPage", () => {
       global.fetch = vi.fn(
         (url, options = {}) =>
           new Promise((resolve, reject) => {
+            // The s.16(4) panel fetches once on mount and never follows the
+            // picker, so it is answered immediately and kept out of `pending`.
+            // The ordering under test is between two *period* summaries, and
+            // these tests answer them by index — an unrelated entry would move
+            // every index they name.
+            if (String(url).includes("/itc/lapsing")) {
+              resolve({
+                ok: true,
+                status: 200,
+                statusText: "OK",
+                text: async () => JSON.stringify(lapsing()),
+              });
+              return;
+            }
             pending.push({
               url: String(url),
               signal: options.signal,
@@ -658,5 +716,128 @@ describe("a period whose liability no credit reaches", () => {
     expect(
       await screen.findByText("No credit could be applied to this period’s liability."),
     ).toBeInTheDocument();
+  });
+
+  describe("credit that expires under section 16(4)", () => {
+    const panel = () =>
+      screen.findByRole("heading", { name: "Section 16(4) — credit that expires" });
+
+    it("names the credit a financial year is about to lose for good", async () => {
+      mockApi(summary(), { lapsing: lapsing({ years: [lapsingYear()], total_at_risk: "9000.00" }) });
+      renderPage();
+
+      await panel();
+      const table = screen.getByRole("region", {
+        name: "Credit approaching its section 16(4) deadline",
+      });
+      expect(within(table).getByText("2024-25")).toBeInTheDocument();
+      expect(within(table).getByText("45d left")).toBeInTheDocument();
+      // The row's own figure. It repeats in the total beneath the table, which
+      // is why this is scoped rather than asked of the whole page.
+      expect(within(table).getByText("₹9,000.00")).toBeInTheDocument();
+    });
+
+    it("names a year already lost rather than counting down past zero", async () => {
+      // An expired year is the most important row here, not the least — a
+      // negative countdown would read as a deadline still worth chasing.
+      mockApi(summary(), {
+        lapsing: lapsing({
+          years: [lapsingYear({ expired: true, days_remaining: -12, financial_year: "2022-23" })],
+          total_expired: "9000.00",
+        }),
+      });
+      renderPage();
+
+      await panel();
+      expect(screen.getByText("Lapsed")).toBeInTheDocument();
+      expect(screen.queryByText("-12d left")).not.toBeInTheDocument();
+    });
+
+    it("says which returns to file, not just how much is at stake", async () => {
+      // The amount without the task is a warning; the periods are what make it
+      // something a business can act on, which is why the API returns them.
+      mockApi(summary(), { lapsing: lapsing({ years: [lapsingYear()] }) });
+      renderPage();
+
+      await panel();
+      expect(screen.getByText("July 2024, August 2024")).toBeInTheDocument();
+    });
+
+    it("copes with a year that has no unfiled period left to name", async () => {
+      mockApi(summary(), { lapsing: lapsing({ years: [lapsingYear({ periods: [] })] }) });
+      renderPage();
+
+      await panel();
+      expect(screen.getByText("—")).toBeInTheDocument();
+    });
+
+    it("stays out of the way entirely when nothing is expiring", async () => {
+      mockApi(summary());
+      renderPage();
+
+      await screen.findByRole("heading", { name: "Rule 37 — unpaid suppliers" });
+      expect(
+        screen.queryByRole("heading", { name: "Section 16(4) — credit that expires" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("survives a period whose own summary could not be loaded", async () => {
+      // The whole point of fetching it separately: a lapsing deadline is the
+      // one figure on this screen that cannot be recovered later, so it must
+      // not be hidden by an unrelated failure on the month being viewed.
+      mockApi(summary(), {
+        status: 500,
+        lapsing: lapsing({ years: [lapsingYear()], total_at_risk: "9000.00" }),
+      });
+      renderPage();
+
+      expect(await panel()).toBeInTheDocument();
+      const table = screen.getByRole("region", {
+        name: "Credit approaching its section 16(4) deadline",
+      });
+      expect(within(table).getByText("₹9,000.00")).toBeInTheDocument();
+    });
+
+    it("does not raise a banner when only the lapsing panel fails", async () => {
+      global.fetch = vi.fn(async (url) => {
+        if (String(url).includes("/itc/lapsing")) {
+          return { ok: false, status: 500, statusText: "Error", text: async () => "{}" };
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          text: async () => JSON.stringify(summary()),
+        };
+      });
+      renderPage();
+
+      await screen.findByRole("heading", { name: "Rule 37 — unpaid suppliers" });
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    });
+
+    it("asks for the whole register rather than the month on screen", async () => {
+      // s.16(4) governs a financial year, and the credit closest to being lost
+      // is on invoices from a year the picker cannot reach.
+      const user = userEvent.setup();
+      mockApi(summary(), { lapsing: lapsing({ years: [lapsingYear()] }) });
+      renderPage();
+
+      await panel();
+      const asked = global.fetch.mock.calls.filter(([url]) =>
+        String(url).includes("/itc/lapsing"),
+      );
+      expect(asked).toHaveLength(1);
+      expect(String(asked[0][0])).toBe("/api/v1/itc/lapsing");
+
+      const select = await screen.findByLabelText("Period");
+      await user.selectOptions(select, select.options[1].value);
+
+      await waitFor(() =>
+        expect(
+          global.fetch.mock.calls.filter(([url]) => String(url).includes("/itc/lapsing")),
+        ).toHaveLength(1),
+      );
+    });
   });
 });

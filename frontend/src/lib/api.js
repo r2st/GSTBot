@@ -322,6 +322,20 @@ export const api = {
 
   rule37: (asOf) => request(`/itc/rule37${query({ as_of: asOf })}`),
 
+  /**
+   * Unclaimed credit by financial year, against its s.16(4) deadline.
+   *
+   * The one reversal in this product that is permanent. Rules 37, 42 and 43 all
+   * defer credit — pay the supplier, or the proportion changes, and it comes
+   * back. Section 16(4) extinguishes it: after the 30th of November following
+   * the financial year, credit on that invoice is gone and no later filing
+   * recovers it. So this is the figure with a date on it that cannot be missed,
+   * and it is not part of the period summary — a lapsing year is answered for
+   * the whole register, not for whichever month is on screen.
+   */
+  lapsingCredit: (asOf, { signal } = {}) =>
+    request(`/itc/lapsing${query({ as_of: asOf })}`, { signal }),
+
   setOff: (payload) => request("/itc/set-off", { method: "POST", body: payload }),
 
   // ---- Filing ----

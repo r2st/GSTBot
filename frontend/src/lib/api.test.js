@@ -205,6 +205,29 @@ describe("api", () => {
       expect(options.signal).toBeUndefined();
     });
 
+    it("asks for the lapsing credit of the whole register, not a period", async () => {
+      // s.16(4) governs a financial year. Omitting `as_of` asks about today,
+      // and an empty one would be a different question — so it stays out of the
+      // query string rather than going in blank.
+      global.fetch.mockResolvedValueOnce(jsonResponse({ years: [] }));
+      const controller = new AbortController();
+
+      await api.lapsingCredit(undefined, { signal: controller.signal });
+
+      const [url, options] = global.fetch.mock.calls[0];
+      expect(String(url)).toBe("/api/v1/itc/lapsing");
+      expect(options.signal).toBe(controller.signal);
+    });
+
+    it("measures the lapsing deadline against a date when given one", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse({ years: [] }));
+
+      await api.lapsingCredit("2026-11-01");
+
+      const [url] = global.fetch.mock.calls[0];
+      expect(String(url)).toBe("/api/v1/itc/lapsing?as_of=2026-11-01");
+    });
+
     it("still works for a caller that does not want to cancel", async () => {
       global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
 

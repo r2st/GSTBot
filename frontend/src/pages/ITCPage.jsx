@@ -78,6 +78,7 @@ export default function ITCPage() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [lapsing, setLapsing] = useState(null);
 
   const load = useCallback(async (target, { signal } = {}) => {
     setLoading(true);
@@ -102,6 +103,28 @@ export default function ITCPage() {
     load(period, { signal: controller.signal });
     return () => controller.abort();
   }, [load, period]);
+
+  // Fetched once, not per period, because s.16(4) is not a question about a
+  // month: the deadline governs a whole financial year, and the credit closest
+  // to being lost is on invoices from a year the picker cannot reach. Tying it
+  // to the picker would hide the answer behind the one control guaranteed not
+  // to be pointing at it.
+  //
+  // Its failure is swallowed like the other secondary panels' — the page's job
+  // is this period's position, and a banner about the lapsing panel would sit
+  // over a set-off table that loaded perfectly.
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .lapsingCredit(undefined, { signal: controller.signal })
+      .then((data) => {
+        if (!controller.signal.aborted) setLapsing(data);
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setLapsing(null);
+      });
+    return () => controller.abort();
+  }, []);
 
   const rule37 = summary?.rule_37;
   const proportionate = summary?.proportionate;
@@ -372,6 +395,83 @@ export default function ITCPage() {
             />
           </section>
         </>
+      )}
+
+      {/* Outside the period block above, and deliberately. Every panel in it
+          describes the month the picker is on; this one describes a deadline
+          that does not care which month that is. Leaving it inside would also
+          mean a period whose summary failed to load hid the one figure on this
+          screen that cannot be recovered later. */}
+      {lapsing?.years?.length > 0 && (
+        <section className="panel">
+          <h2>Section 16(4) — credit that expires</h2>
+          <p className="muted small">
+            Credit on a purchase must be taken into a GSTR-3B by the 30th of November
+            after its financial year ends. Unlike Rules 37, 42 and 43, this one does not
+            defer the credit — past the date it is gone, and no later filing brings it
+            back.
+          </p>
+
+          <TableScroll label="Credit approaching its section 16(4) deadline">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">Financial year</th>
+                  <th scope="col">Deadline</th>
+                  <th scope="col">Standing</th>
+                  <th scope="col">To file</th>
+                  <th scope="col" className="numeric">
+                    Invoices
+                  </th>
+                  <th scope="col" className="numeric">
+                    Credit
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {lapsing.years.map((year) => (
+                  <tr key={year.financial_year}>
+                    <td>{year.financial_year}</td>
+                    <td>{dateLabel(year.deadline)}</td>
+                    <td>
+                      {/* An expired year is the most important row here, not
+                          the least — so it is named as lost rather than shown
+                          as a countdown that has gone negative. */}
+                      <span className={year.expired ? "chip chip-bad" : "chip chip-warn"}>
+                        {year.expired ? "Lapsed" : `${year.days_remaining}d left`}
+                      </span>
+                    </td>
+                    <td className="small">
+                      {/* Naming the amount without naming what to file makes
+                          this a warning rather than a task, which is why the
+                          API returns the periods at all. */}
+                      {year.periods.length > 0
+                        ? year.periods.map((item) => periodLabel(item)).join(", ")
+                        : "—"}
+                    </td>
+                    <td className="numeric">{year.invoice_count}</td>
+                    <td className="numeric">{rupees(year.tax.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </TableScroll>
+
+          <div className="kv">
+            <div>
+              <span className="muted">Still claimable</span>
+              <strong>{rupees(lapsing.total_at_risk)}</strong>
+            </div>
+            <div>
+              <span className="muted">Already lapsed</span>
+              <strong>{rupees(lapsing.total_expired)}</strong>
+            </div>
+          </div>
+          <p className="muted small">
+            File the GSTR-3B for the periods named above and the credit is claimed.{" "}
+            <Link to="/filing">Filing preparation</Link> builds them.
+          </p>
+        </section>
       )}
     </div>
   );
