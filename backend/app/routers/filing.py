@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
@@ -17,11 +18,13 @@ from app.schemas.filing import (
     FilingPreviewOut,
     FilingStatusItemOut,
     FilingStatusOut,
+    LateFeeOut,
     RecordFilingIn,
     ValidationReportOut,
 )
 from app.services import filing as filing_service
 from app.services import gst_calendar, invoice_service
+from app.services import late_fee as late_fee_service
 
 router = APIRouter(prefix="/filing", tags=["filing"])
 
@@ -188,6 +191,67 @@ def filing_status(
         # they came to look at.
         items=[_standing_out(line) for line in reversed(lines)],
     )
+
+
+@router.get(
+    "/{return_type}/late-fee",
+    response_model=LateFeeOut,
+    summary="Late fee and interest owed on a period's return",
+    description=(
+        "`return_type` is `gstr1` or `gstr3b`. Section 47's late fee applies to "
+        "both; Section 50's interest applies only to GSTR-3B, since that is the "
+        "only return a cash payment runs through.\n\n"
+        "While the return is unfiled, this is a running projection as of today "
+        "that grows by the day — `projected` is true and `filed_on` is null. "
+        "Once `POST /filing/{return_type}/filed` has recorded it, the same "
+        "figures are the amount actually run up, frozen at the filing date.\n\n"
+        "`previous_year_turnover` sets which late-fee cap applies; omitted, the "
+        "highest cap is used so the estimate is never understated. `is_nil` "
+        "overrides the nil-return guess this makes from the period's invoice "
+        "counts, for a business that knows it filed nil despite invoices still "
+        "on file."
+    ),
+    responses={404: {"description": "Unknown return type."}},
+    dependencies=[Depends(_read_limit)],
+)
+def late_fee(
+    return_type: str,
+    period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
+    is_nil: bool | None = Query(default=None),
+    previous_year_turnover: str | None = Query(
+        default=None, description="Decimal rupees. Omitted uses the highest cap tier."
+    ),
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_current_business),
+) -> LateFeeOut:
+    """Late fee and interest owed on a period's return, as of today."""
+    kind = _FILABLE.get(return_type.lower())
+    if kind is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unknown return type '{return_type}'. Expected one of: "
+            + ", ".join(sorted(_FILABLE)),
+        )
+
+    turnover: Decimal | None = None
+    if previous_year_turnover is not None:
+        try:
+            turnover = Decimal(previous_year_turnover)
+        except InvalidOperation as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"'{previous_year_turnover}' is not a number.",
+            ) from exc
+
+    result = late_fee_service.estimate(
+        db,
+        business,
+        _resolve_period(period),
+        kind,
+        is_nil=is_nil,
+        previous_year_turnover=turnover,
+    )
+    return LateFeeOut(**result.as_dict())
 
 
 @router.post(

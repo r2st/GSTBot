@@ -29,6 +29,7 @@ from app.core.database import check_database, get_db, pool_status
 from app.core.rate_limit import RateLimit
 from app.core.redis_client import ping as redis_ping
 from app.services import gstin as gstin_service
+from app.services import job_health
 from app.services.openrouter_client import is_configured
 
 router = APIRouter(tags=["health"])
@@ -128,6 +129,58 @@ def health(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
 )
 def liveness() -> dict[str, str]:
     return {"status": "alive", "app": settings.app_name, "version": settings.app_version}
+
+
+@router.get(
+    "/health/jobs",
+    summary="Background job health: workers, queue depth, and scheduled-job heartbeats",
+    description=(
+        "Whether a Celery worker answers a ping, how many messages are "
+        "waiting in the broker's queue, and how long ago each scheduled job "
+        "last finished versus how often it is supposed to run.\n\n"
+        "Returns 200 even when degraded — read the `health` field. A stale "
+        "job or an empty worker pool means the deadline sweep and the stalled-"
+        "parse reaper are not running, which is worth paging on; it is not "
+        "the API itself being down, so it is not a 503.\n\n"
+        "Public and read-only, like the rest of `/health/*`."
+    ),
+)
+def job_status() -> dict[str, Any]:
+    """Celery worker reachability, broker queue depth, and job heartbeats."""
+    workers = job_health.worker_status()
+    queue = job_health.queue_status()
+    jobs = job_health.job_statuses()
+    stale_jobs = [j.name for j in jobs if j.stale]
+
+    degraded = (
+        (settings.celery_enabled and not workers.reachable)
+        or not queue.reachable
+        or bool(stale_jobs)
+    )
+
+    return {
+        "health": "degraded" if degraded else "ok",
+        "celery_enabled": settings.celery_enabled,
+        "workers": {
+            "reachable": workers.reachable,
+            "names": workers.workers,
+            **({"error": workers.error} if workers.error else {}),
+        },
+        "queue": {
+            "name": job_health.DEFAULT_QUEUE,
+            "reachable": queue.reachable,
+            "depth": queue.depth,
+            **({"error": queue.error} if queue.error else {}),
+        },
+        "jobs": [
+            {
+                "name": j.name,
+                "last_run": j.last_run.isoformat() if j.last_run else None,
+                "stale": j.stale,
+            }
+            for j in jobs
+        ],
+    }
 
 
 @router.get(

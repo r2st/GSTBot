@@ -23,6 +23,8 @@ from app.models.invoice import (
     InvoiceType,
 )
 from app.schemas.invoice import (
+    InvoiceBulkUploadItemOut,
+    InvoiceBulkUploadResponse,
     InvoiceDetailOut,
     InvoiceListOut,
     InvoiceOut,
@@ -108,6 +110,86 @@ def _owned_invoice(db: Session, business: Business, invoice_id: int) -> Invoice:
     return invoice
 
 
+def _check_file_shape(filename: str, content_type: str | None, content: bytes) -> None:
+    """The three checks every upload has to pass before it touches the database.
+
+    Shared between the single and bulk endpoints so a file that would be
+    refused alone is refused identically inside a batch, rather than the two
+    paths drifting apart on which error a bad file gets.
+    """
+    lowered = filename.lower()
+    if content_type not in ALLOWED_CONTENT_TYPES and not lowered.endswith(ALLOWED_EXTENSIONS):
+        raise HTTPException(
+            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            detail=f"Unsupported file type: {content_type or filename}",
+        )
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty"
+        )
+    max_bytes = settings.max_upload_mb * 1024 * 1024
+    if len(content) > max_bytes:
+        raise HTTPException(
+            # Literal rather than the constant: Starlette renamed this to
+            # HTTP_413_CONTENT_TOO_LARGE and deprecated the old spelling, so
+            # either name ties us to a version range. The number does not move.
+            status_code=413,
+            detail=f"File exceeds the {settings.max_upload_mb} MB limit",
+        )
+
+
+def _store_and_extract(
+    db: Session,
+    business: Business,
+    *,
+    content: bytes,
+    filename: str,
+    content_type: str | None,
+    invoice_type: InvoiceType,
+) -> tuple[Invoice, bool]:
+    """Commit an upload and extract it, exactly as ``upload_invoice`` always has.
+
+    Raises :class:`HTTPException` for a plan limit or a duplicate — the two
+    ways storing the file itself can fail — so both callers report them the
+    same way: as the request's own failure when there is only one file, and as
+    one line in a batch when there are many.
+    """
+    try:
+        invoice = invoice_service.create_pending_invoice(
+            db,
+            business,
+            content=content,
+            filename=filename,
+            content_type=content_type,
+            invoice_type=invoice_type,
+            source=InvoiceSource.UPLOAD,
+        )
+    except invoice_service.PlanLimitExceeded as exc:
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)) from exc
+    except invoice_service.DuplicateInvoice as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"message": str(exc), "invoice_id": exc.invoice_id},
+        ) from exc
+
+    queued = False
+    if settings.celery_enabled:
+        from app.tasks.invoice_tasks import parse_invoice_task
+
+        try:
+            parse_invoice_task.delay(invoice.id)
+            queued = True
+        except Exception as exc:  # noqa: BLE001 - a dead broker must not lose the file
+            # The row is already committed, so falling back to inline parsing
+            # costs latency rather than the upload.
+            logger.warning("Could not queue invoice %s, parsing inline: %s", invoice.id, exc)
+
+    if not queued:
+        invoice = invoice_service.process_invoice(db, invoice)
+
+    return invoice, queued
+
+
 @router.post(
     "/upload",
     response_model=InvoiceUploadResponse,
@@ -161,65 +243,114 @@ async def upload_invoice(
     # The name reaches a filesystem path, a Content-Disposition header and the
     # UI, so it is reduced to something safe before any of that.
     filename = safe_filename(file.filename, fallback="invoice")
-    lowered = filename.lower()
-    if file.content_type not in ALLOWED_CONTENT_TYPES and not lowered.endswith(ALLOWED_EXTENSIONS):
-        raise HTTPException(
-            status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported file type: {file.content_type or filename}",
-        )
-
     content = await file.read()
-    if not content:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty"
-        )
-    max_bytes = settings.max_upload_mb * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            # Literal rather than the constant: Starlette renamed this to
-            # HTTP_413_CONTENT_TOO_LARGE and deprecated the old spelling, so
-            # either name ties us to a version range. The number does not move.
-            status_code=413,
-            detail=f"File exceeds the {settings.max_upload_mb} MB limit",
-        )
+    _check_file_shape(filename, file.content_type, content)
 
-    try:
-        invoice = invoice_service.create_pending_invoice(
-            db,
-            business,
-            content=content,
-            filename=filename,
-            content_type=file.content_type,
-            invoice_type=invoice_type,
-            source=InvoiceSource.UPLOAD,
-        )
-    except invoice_service.PlanLimitExceeded as exc:
-        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(exc)) from exc
-    except invoice_service.DuplicateInvoice as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"message": str(exc), "invoice_id": exc.invoice_id},
-        ) from exc
-
-    queued = False
-    if settings.celery_enabled:
-        from app.tasks.invoice_tasks import parse_invoice_task
-
-        try:
-            parse_invoice_task.delay(invoice.id)
-            queued = True
-        except Exception as exc:  # noqa: BLE001 - a dead broker must not lose the file
-            # The row is already committed, so falling back to inline parsing
-            # costs latency rather than the upload.
-            logger.warning("Could not queue invoice %s, parsing inline: %s", invoice.id, exc)
-
-    if not queued:
-        invoice = invoice_service.process_invoice(db, invoice)
+    invoice, queued = _store_and_extract(
+        db,
+        business,
+        content=content,
+        filename=filename,
+        content_type=file.content_type,
+        invoice_type=invoice_type,
+    )
 
     return InvoiceUploadResponse(
         invoice=InvoiceDetailOut.from_invoice(invoice),
         queued=queued,
         message="Invoice queued for extraction" if queued else "Invoice processed",
+    )
+
+
+# A bulk request is a person dragging a folder in, not a script — bounded well
+# below what abuse would need and well above what a month's paperwork is.
+MAX_BULK_FILES = 50
+
+
+@router.post(
+    "/bulk",
+    response_model=InvoiceBulkUploadResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload a batch of invoices in one request",
+    description=(
+        "The same checks and the same extraction path as `POST /invoices/upload`, "
+        "run once per file — an unreadable type, an empty file, a duplicate or a "
+        "plan limit rejects that file alone rather than the whole batch, so one "
+        "bad page in a folder of fifty does not cost the other forty-nine.\n\n"
+        f"Capped at {MAX_BULK_FILES} files per request, which the whole request "
+        "is refused for exceeding — past that point the honest answer is several "
+        "requests, not a batch a browser tab has to hold open until the last file "
+        "is parsed.\n\n"
+        "Once the plan's monthly allowance is used up, every file after that "
+        "point in the batch is rejected the same way — files earlier in the "
+        "batch that already fit under the limit are kept."
+    ),
+    responses={
+        200: {"description": "Every file was attempted; check each item's `accepted`."},
+        413: {"description": "More than the per-file or per-batch limit."},
+    },
+    dependencies=[Depends(_upload_limit)],
+)
+async def upload_invoices_bulk(
+    files: list[UploadFile] = File(..., description="One or more invoices"),
+    invoice_type: InvoiceType = Form(
+        InvoiceType.PURCHASE,
+        description="Applied to every file in the batch.",
+    ),
+    db: Session = Depends(get_db),
+    business: Business = Depends(get_current_business),
+) -> InvoiceBulkUploadResponse:
+    """Upload several invoices in one request, each validated and reported on its own."""
+    if len(files) > MAX_BULK_FILES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"A batch is limited to {MAX_BULK_FILES} files; this one has {len(files)}.",
+        )
+
+    items: list[InvoiceBulkUploadItemOut] = []
+    for upload in files:
+        filename = safe_filename(upload.filename, fallback="invoice")
+        try:
+            content = await upload.read()
+            _check_file_shape(filename, upload.content_type, content)
+            invoice, queued = _store_and_extract(
+                db,
+                business,
+                content=content,
+                filename=filename,
+                content_type=upload.content_type,
+                invoice_type=invoice_type,
+            )
+        except HTTPException as exc:
+            detail = exc.detail
+            duplicate_id = None
+            if isinstance(detail, dict):
+                message = str(detail.get("message", ""))
+                duplicate_id = detail.get("invoice_id")
+            else:
+                message = str(detail)
+            items.append(
+                InvoiceBulkUploadItemOut(
+                    filename=filename,
+                    accepted=False,
+                    error=message,
+                    duplicate_of_invoice_id=duplicate_id,
+                )
+            )
+            continue
+
+        items.append(
+            InvoiceBulkUploadItemOut(
+                filename=filename,
+                accepted=True,
+                invoice=InvoiceDetailOut.from_invoice(invoice),
+                queued=queued,
+            )
+        )
+
+    accepted = sum(1 for item in items if item.accepted)
+    return InvoiceBulkUploadResponse(
+        total=len(items), accepted=accepted, rejected=len(items) - accepted, items=items
     )
 
 

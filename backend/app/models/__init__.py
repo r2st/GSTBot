@@ -5,6 +5,7 @@ what Alembic autogenerate and the test fixtures' ``create_all`` both rely on.
 """
 from app.models.alert import Alert, AlertSeverity, AlertStatus, AlertType
 from app.models.business import Business, BusinessPlan
+from app.models.business_membership import BusinessMembership, MembershipRole
 from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
 from app.models.invoice import Invoice, InvoiceSource, InvoiceStatus, InvoiceType
 from app.models.reconciliation_run import (
@@ -21,6 +22,7 @@ __all__ = [
     "AlertStatus",
     "AlertType",
     "Business",
+    "BusinessMembership",
     "BusinessPlan",
     "GSTRReturn",
     "Invoice",
@@ -28,6 +30,7 @@ __all__ = [
     "InvoiceStatus",
     "InvoiceType",
     "MatchCategory",
+    "MembershipRole",
     "ReconciliationRun",
     "ReconciliationStatus",
     "ReturnStatus",

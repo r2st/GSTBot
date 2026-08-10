@@ -37,6 +37,14 @@ os.environ.setdefault("UPLOAD_DIR", tempfile.mkdtemp(prefix="gstbot-uploads-"))
 os.environ.setdefault(
     "REDIS_URL", "unix:///nonexistent/gstbot-tests-must-not-reach-redis.sock"
 )
+# Same reasoning, for the same failure mode: app.services.job_health reads the
+# broker's queue depth by connecting to this URL directly rather than through
+# Celery, so it is a second way these tests could reach a real Redis if a
+# developer happens to have one listening on the default port — independently
+# of CELERY_ENABLED, which only governs whether *this process* queues tasks.
+os.environ.setdefault(
+    "CELERY_BROKER_URL", "unix:///nonexistent/gstbot-tests-must-not-reach-redis.sock"
+)
 # Off by default. The suite registers a business per test, and a 10/hour
 # sign-up limit would fail the twentieth test rather than the code under it.
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")

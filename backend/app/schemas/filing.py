@@ -115,3 +115,27 @@ class FilingStatusOut(BaseModel):
 
     as_of: date
     items: list[FilingStatusItemOut]
+
+
+class LateFeeOut(BaseModel):
+    """What ss.47 and 50 cost one return, as of one date.
+
+    ``projected`` is true while the return sits unfiled: the figures are a
+    running estimate that grows by the day rather than a settled amount.
+    """
+
+    period: str
+    return_type: str
+    due_date: date
+    as_of: date
+    filed_on: date | None = None
+    days_late: int
+    projected: bool
+    is_nil: bool
+    net_tax_liability: Decimal
+    late_fee_cgst: Decimal
+    late_fee_sgst: Decimal
+    late_fee_total: Decimal
+    late_fee_tier: str
+    interest: Decimal
+    total_payable: Decimal

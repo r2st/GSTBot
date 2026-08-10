@@ -81,6 +81,10 @@ class TestSetOffNeedsAToken:
             "/api/v1/health",
             "/api/v1/health/live",
             "/api/v1/health/ready",
+            # Same reasoning as /health: an operator watching the job queue
+            # has no token to send, and the figures here are operational
+            # (worker/queue/heartbeat state) rather than any tenant's data.
+            "/api/v1/health/jobs",
             "/api/v1/meta/states",
             "/api/v1/meta/gstin/{gstin}",
             # Authentication is what these two hand out; they cannot require it.

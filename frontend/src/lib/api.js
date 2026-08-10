@@ -3,6 +3,7 @@
 
 const BASE = "/api/v1";
 const TOKEN_KEY = "gstbot_token";
+const ACTIVE_BUSINESS_KEY = "gstbot_active_business_id";
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -11,6 +12,24 @@ export function getToken() {
 export function setToken(token) {
   if (token) localStorage.setItem(TOKEN_KEY, token);
   else localStorage.removeItem(TOKEN_KEY);
+}
+
+/**
+ * Which business a request acts for, beyond the caller's own tenant.
+ *
+ * Most logins never set this — every request acts for the caller's own
+ * business by default, exactly as it always has. It only exists for a login
+ * that has linked another GSTIN registration with `api.linkBusiness` and
+ * wants a request to act for that one instead; see `X-Business-Id` on
+ * `app.core.deps.get_current_business` in the backend.
+ */
+export function getActiveBusinessId() {
+  return localStorage.getItem(ACTIVE_BUSINESS_KEY);
+}
+
+export function setActiveBusinessId(id) {
+  if (id) localStorage.setItem(ACTIVE_BUSINESS_KEY, String(id));
+  else localStorage.removeItem(ACTIVE_BUSINESS_KEY);
 }
 
 // Told when a credential this client actually sent comes back refused.
@@ -55,6 +74,11 @@ async function request(path, { method = "GET", body, form, auth = true, signal }
   const headers = {};
   const token = getToken();
   if (auth && token) headers["Authorization"] = `Bearer ${token}`;
+  // Sent only once a business has actually been switched to — see
+  // `getActiveBusinessId`. An anonymous or single-business request never
+  // carries this header, so the backend sees exactly what it always has.
+  const activeBusinessId = auth ? getActiveBusinessId() : null;
+  if (activeBusinessId) headers["X-Business-Id"] = activeBusinessId;
 
   let payload;
   if (form) {
@@ -205,6 +229,9 @@ export const api = {
 
   logout() {
     setToken(null);
+    // A stale "acting as" business must not survive into the next session on
+    // this browser — the next sign-in may be a different login entirely.
+    setActiveBusinessId(null);
   },
 
   me: () => request("/auth/me"),
@@ -221,6 +248,20 @@ export const api = {
     form.append("file", file);
     form.append("invoice_type", invoiceType);
     return request("/invoices/upload", { method: "POST", form });
+  },
+
+  /**
+   * Upload a batch of invoices in one request.
+   *
+   * Never rejects for one bad file among many — the response's `items` carry
+   * one outcome per file, `accepted`/`rejected` unmatched or otherwise, so a
+   * caller shows a per-file result rather than an all-or-nothing error.
+   */
+  bulkUploadInvoices(files, invoiceType = "purchase") {
+    const form = new FormData();
+    for (const file of files) form.append("files", file);
+    form.append("invoice_type", invoiceType);
+    return request("/invoices/bulk", { method: "POST", form });
   },
 
   listInvoices(params = {}, { signal } = {}) {
@@ -307,6 +348,17 @@ export const api = {
   recordFiled: (returnType, payload) =>
     request(`/filing/${returnType}/filed`, { method: "POST", body: payload }),
 
+  /**
+   * Late fee (s.47) and interest (s.50) owed on a period's return.
+   *
+   * A running projection while the return is unfiled — it grows by the day —
+   * and the amount actually run up once `recordFiled` has been called for it.
+   * `params` may carry `is_nil` or `previous_year_turnover` to refine the
+   * estimate; both are optional.
+   */
+  lateFee: (returnType, period, params = {}) =>
+    request(`/filing/${returnType}/late-fee${query({ period, ...params })}`),
+
   /** The download URL for an export. Used as an href, not fetched. */
   exportUrl: (returnType, extension, period) =>
     `${BASE}/filing/export/${returnType}.${extension}${query({ period })}`,
@@ -322,6 +374,8 @@ export const api = {
     const headers = {};
     const token = getToken();
     if (token) headers["Authorization"] = `Bearer ${token}`;
+    const activeBusinessId = getActiveBusinessId();
+    if (activeBusinessId) headers["X-Business-Id"] = activeBusinessId;
 
     const res = await fetch(api.exportUrl(returnType, extension, period), { headers });
     if (res.status === 401 && token) tokenRejected();
@@ -366,6 +420,28 @@ export const api = {
   getSupplier: (id, period) => request(`/suppliers/${id}${query({ period })}`),
   rescoreSuppliers: (period) =>
     request(`/suppliers/rescore${query({ period })}`, { method: "POST" }),
+
+  // ---- Businesses (multi-GSTIN) ----
+  //
+  // A GSTBot sign-up is one GSTIN, so a company with several registrations —
+  // or an accountant with several clients — ends up with one login per
+  // business. These are what let one of those logins reach the others: link
+  // a second account by proving you also hold its password, then switch
+  // which business a request acts for with `setActiveBusinessId`.
+
+  /** The caller's own business, plus every business they have linked. */
+  myBusinesses: ({ signal } = {}) => request("/businesses/mine", { signal }),
+
+  /** Links another account's business here, proven by that account's password. */
+  linkBusiness: (email, password) =>
+    request("/businesses/mine/link", { method: "POST", body: { email, password } }),
+
+  /** Revokes access gained through `linkBusiness`. Never removes your own tenant. */
+  unlinkBusiness: (id) => request(`/businesses/mine/${id}`, { method: "DELETE" }),
+
+  // ---- Background jobs (operational, not tenant data) ----
+  /** Worker reachability, broker queue depth, and scheduled-job heartbeats. */
+  jobHealth: () => request("/health/jobs", { auth: false }),
 };
 
 /** Build a `?a=1&b=2` suffix, dropping empty values. Returns "" when empty. */

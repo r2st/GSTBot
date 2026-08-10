@@ -124,6 +124,32 @@ def _a_run(auth_client, db_session, business) -> int:
     return run.id
 
 
+def _a_linked_business(auth_client, db_session, business) -> int:
+    """A third business, linked to *this* tenant's owner via membership.
+
+    Unlike the other factories, the row this route addresses is not owned by
+    ``business`` at all — a membership is deliberately not a row scoped to any
+    tenant's own data, it is what widens *access* to one. What must still be
+    true is the same shape: the rival tenant's owner has no membership row
+    naming this business, so the route 404s for them exactly as the others do.
+    Returns the linked business's id, the unlink route's path parameter.
+    """
+    from app.models.business import Business
+    from app.models.business_membership import BusinessMembership, MembershipRole
+    from app.models.user import User
+
+    linked = Business(gstin="27AAGCB7383J2Z7", legal_name="Linked Co", state_code="27")
+    db_session.add(linked)
+    db_session.flush()
+
+    owner = db_session.query(User).filter_by(business_id=business.id).one()
+    db_session.add(
+        BusinessMembership(user_id=owner.id, business_id=linked.id, role=MembershipRole.OWNER)
+    )
+    db_session.commit()
+    return linked.id
+
+
 # Keyed by path, because the two alert routes and the four invoice routes each
 # address the same kind of row and differ only in what they do to it.
 FACTORIES = {
@@ -133,6 +159,7 @@ FACTORIES = {
     "/api/v1/alerts/{alert_id}/dismiss": _an_alert,
     "/api/v1/suppliers/{supplier_id}": _a_supplier,
     "/api/v1/reconciliation/{run_id}": _a_run,
+    "/api/v1/businesses/mine/{business_id}": _a_linked_business,
 }
 
 # A body that passes validation, so a 404 is the ownership check answering and

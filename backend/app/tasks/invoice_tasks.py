@@ -11,7 +11,7 @@ import logging
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
 from app.models.invoice import Invoice
-from app.services import invoice_service
+from app.services import invoice_service, job_health
 
 logger = logging.getLogger(__name__)
 
@@ -67,6 +67,7 @@ def reap_stalled_parses_task(self) -> dict:
     db = SessionLocal()
     try:
         reaped = invoice_service.reap_stalled_parses(db)
+        job_health.record_heartbeat("stalled-parse-sweep")
         return {"reaped": reaped}
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
         logger.exception("reap_stalled_parses_task failed")

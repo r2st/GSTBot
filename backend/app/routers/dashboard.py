@@ -12,6 +12,7 @@ from app.core.deps import get_current_business
 from app.core.rate_limit import RateLimit
 from app.models.alert import OPEN_STATUSES, Alert
 from app.models.business import Business
+from app.models.gstr_return import ReturnType
 from app.models.invoice import Invoice, InvoiceStatus, InvoiceType
 from app.schemas.dashboard import (
     DashboardOut,
@@ -22,6 +23,7 @@ from app.schemas.dashboard import (
     TaxBucket,
 )
 from app.services import gst_calendar, invoice_service, reconciliation
+from app.services import late_fee as late_fee_service
 from app.services.gst_calendar import gstr3b_due_date
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -200,6 +202,20 @@ def get_dashboard(
     limit = invoice_service.plan_limit(business)
     used = invoice_service.monthly_usage(db, business.id)
 
+    # Only worth pricing once the return is actually overdue: on every other
+    # load — the common case — there is nothing running on the period. Priced
+    # from the summary already scanned above rather than a fresh tax_summary
+    # call, so the dashboard's one-scan-of-invoices guarantee holds even on
+    # the one load that also prices a fee.
+    late_fee_estimate: dict | None = None
+    due_date = gstr3b_due_date(period)
+    if gst_calendar.today_ist() > due_date:
+        estimate = late_fee_service.estimate_from_summary(
+            db, business, period, ReturnType.GSTR3B, summary
+        )
+        if estimate.days_late > 0:
+            late_fee_estimate = estimate.as_dict()
+
     return DashboardOut(
         business_gstin=business.gstin,
         business_name=business.trade_name or business.legal_name,
@@ -220,7 +236,8 @@ def get_dashboard(
         ),
         recent_periods=recent,
         open_alerts=open_alerts,
-        next_due_date=gstr3b_due_date(period),
+        next_due_date=due_date,
+        late_fee_estimate=late_fee_estimate,
         last_reconciliation=(
             {
                 "id": last_run.id,

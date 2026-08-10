@@ -13,7 +13,7 @@ import logging
 
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
-from app.services import alert_delivery, alerting
+from app.services import alert_delivery, alerting, job_health
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,9 @@ def sweep_filing_deadlines_task(self) -> dict:
     """
     db = SessionLocal()
     try:
-        return alerting.sweep_filing_deadlines(db).as_dict()
+        result = alerting.sweep_filing_deadlines(db).as_dict()
+        job_health.record_heartbeat("filing-deadline-sweep")
+        return result
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
         logger.exception("Filing deadline sweep failed")
         raise self.retry(exc=exc) from exc
@@ -67,7 +69,9 @@ def send_pending_alert_emails_task(self) -> dict:
     """
     db = SessionLocal()
     try:
-        return alert_delivery.send_pending_alerts(db).as_dict()
+        result = alert_delivery.send_pending_alerts(db).as_dict()
+        job_health.record_heartbeat("filing-deadline-alert-emails")
+        return result
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
         logger.exception("Alert email digest failed")
         raise self.retry(exc=exc) from exc

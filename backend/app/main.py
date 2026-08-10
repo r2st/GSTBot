@@ -27,6 +27,7 @@ from app.core.redis_client import ping as redis_ping
 from app.routers import (
     alerts,
     auth,
+    businesses,
     dashboard,
     filing,
     invoices,
@@ -336,6 +337,7 @@ def create_app() -> FastAPI:
     prefix = settings.api_v1_prefix
     application.include_router(misc.router, prefix=prefix)
     application.include_router(auth.router, prefix=prefix)
+    application.include_router(businesses.router, prefix=prefix)
     application.include_router(invoices.router, prefix=prefix)
     application.include_router(dashboard.router, prefix=prefix)
     application.include_router(reconciliation.router, prefix=prefix)

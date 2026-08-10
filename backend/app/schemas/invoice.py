@@ -106,6 +106,35 @@ class InvoiceUploadResponse(BaseModel):
     message: str
 
 
+class InvoiceBulkUploadItemOut(BaseModel):
+    """One file's outcome within a bulk upload.
+
+    A batch never fails as a whole — see ``POST /invoices/bulk`` — so every
+    file gets one of these rather than the request getting one status code for
+    fifty documents. ``filename`` is what the caller sent, not what was stored,
+    so a rejection can be matched back to the file that caused it without a
+    second round trip.
+    """
+
+    filename: str
+    accepted: bool
+    invoice: InvoiceDetailOut | None = None
+    queued: bool = False
+    error: str | None = None
+    # Set alongside a duplicate error, so a client can link straight to the
+    # invoice already on file instead of making the user search for it.
+    duplicate_of_invoice_id: int | None = None
+
+
+class InvoiceBulkUploadResponse(BaseModel):
+    """The outcome of a whole batch: one line per file, plus the totals."""
+
+    total: int
+    accepted: int
+    rejected: int
+    items: list[InvoiceBulkUploadItemOut]
+
+
 class InvoiceUpdate(BaseModel):
     """Reviewer corrections to an extracted invoice.
 

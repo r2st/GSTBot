@@ -94,3 +94,7 @@ class DashboardOut(BaseModel):
     open_alerts: int = 0
     next_due_date: date | None = None
     last_reconciliation: dict | None = None
+    # Only set once the GSTR-3B for `period` is actually overdue and still
+    # unfiled — see app.services.late_fee. A period that is on time, or
+    # already recorded filed, has nothing running on it to show here.
+    late_fee_estimate: dict | None = None
