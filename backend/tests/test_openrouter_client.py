@@ -46,6 +46,9 @@ MESSAGES = [{"role": "user", "content": "Read this invoice"}]
 # Captured at import, before the autouse fixture below can stub it out — the
 # only way for a test to assert anything about the real jitter.
 _REAL_JITTER = openrouter_client._jitter
+# Same reason, for the same fixture: every retry test replaces ``_sleep``, so
+# this is the only reference left that still reaches its body.
+_REAL_SLEEP = openrouter_client._sleep
 
 
 class _FakeResponse:
@@ -1024,3 +1027,19 @@ class TestAContentPartThatIsNotText:
         )
         with pytest.raises(OpenRouterError):
             chat_json(MESSAGES)
+
+
+def test_the_backoff_sleep_is_a_real_sleep():
+    """Every retry test replaces ``_sleep``, so nothing else runs its body.
+
+    The indirection exists so the schedule can be asserted without waiting it
+    out, which means the one thing never exercised is that the seam actually
+    sleeps. A ``_sleep`` that quietly did nothing would turn the backoff into
+    three immediate retries against a provider that just asked for a pause.
+    """
+    import time as _time
+
+    before = _time.perf_counter()
+    _REAL_SLEEP(0.01)
+
+    assert _time.perf_counter() - before >= 0.005

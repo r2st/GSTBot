@@ -88,6 +88,20 @@ def test_compute_check_digit_rejects_wrong_length():
         gstin_service.compute_check_digit("27AAPFU0939F1")
 
 
+@pytest.mark.parametrize("body", ["27AAPFU0939F1-", "27aapfu0939f1z", "27AAPFU0939F1 "])
+def test_compute_check_digit_rejects_a_character_outside_the_alphabet(body):
+    """Right length, wrong alphabet.
+
+    ``str.find`` answers -1 for a character that is not there, and -1 is a
+    number the weighting arithmetic accepts without complaint. Left unchecked
+    it produces a check digit rather than an error, so a lowercase or
+    punctuated GSTIN would validate against a checksum computed from nonsense.
+    """
+    assert len(body) == 14
+    with pytest.raises(gstin_service.InvalidGSTIN):
+        gstin_service.compute_check_digit(body)
+
+
 # ---------------------------------------------------------------------------
 # The check digit, pinned to the specification rather than to three examples
 # ---------------------------------------------------------------------------

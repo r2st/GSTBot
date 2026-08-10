@@ -196,3 +196,66 @@ class TestConfigureLogging:
         configure_logging("DEBUG", "console")
         assert logging.getLogger("sqlalchemy.engine").level == logging.WARNING
         configure_logging("INFO", "console")
+
+
+class TestJsonFormatterEdges:
+    """The shapes ``extra=`` can carry that ``json.dumps`` would refuse."""
+
+    def test_a_list_of_values_survives_as_a_list(self):
+        # The sweeps log the periods they touched, so a sequence in ``extra``
+        # is routine rather than exotic. Flattening it to ``str`` would make
+        # the field unqueryable in whatever ingests these lines.
+        record = _record(periods=["2026-04", "2026-05"])
+        payload = json.loads(JsonFormatter().format(record))
+
+        assert payload["periods"] == ["2026-04", "2026-05"]
+
+    def test_a_set_becomes_a_list_rather_than_failing_to_serialise(self):
+        record = _record(states={"27"})
+        payload = json.loads(JsonFormatter().format(record))
+
+        assert payload["states"] == ["27"]
+
+    def test_a_secret_nested_inside_a_list_of_dicts_is_still_redacted(self):
+        """Redaction has to reach the value wherever it is, not just at the top.
+
+        A single-element list is exactly how a batch of one arrives, and a
+        password that is safe at depth 0 and leaked at depth 2 is worse than
+        no redaction at all — nobody would think to check.
+        """
+        record = _record(accounts=[{"user": "ops", "password": "hunter2"}])
+        payload = json.loads(JsonFormatter().format(record))
+
+        assert "hunter2" not in json.dumps(payload)
+        assert payload["accounts"][0]["user"] == "ops"
+
+    def test_a_stack_trace_is_carried_on_its_own_key(self):
+        # ``stack_info=True`` is what a "this should not have happened" log
+        # asks for, and dropping the stack makes that line useless.
+        record = _record()
+        record.stack_info = 'Stack (most recent call last):\n  File "x.py", line 1\n'
+        payload = json.loads(JsonFormatter().format(record))
+
+        assert "x.py" in payload["stack"]
+
+    def test_an_object_json_cannot_encode_is_stringified_not_raised(self):
+        """A formatter that raises loses the line it was trying to write."""
+        record = _record(supplier=object())
+        payload = json.loads(JsonFormatter().format(record))
+
+        assert payload["supplier"].startswith("<object object at")
+
+
+class TestCorrelationIdFilterLeavesAnExplicitIdAlone:
+    def test_an_id_already_on_the_record_is_not_overwritten(self):
+        """The Celery task stamps the publishing request's id onto the record.
+
+        Overwriting it with the worker's own context would break the only
+        thread tying a queued task back to the request that queued it.
+        """
+        bind_correlation_id("from-the-api")
+        record = _record(correlation_id="from-the-publisher")
+
+        CorrelationIdFilter().filter(record)
+
+        assert record.correlation_id == "from-the-publisher"

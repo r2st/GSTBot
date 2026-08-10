@@ -120,6 +120,46 @@ class TestQueueStatus:
         assert result.reachable is False
         assert "not Redis" in result.error
 
+    def test_a_broker_that_refuses_the_connection_is_reported_not_raised(
+        self, monkeypatch
+    ):
+        """The queue depth is one field of a health response, not the response.
+
+        This runs inside ``/health/jobs``, which exists to be readable when
+        things are broken. An unreachable broker is precisely the condition it
+        is asked about, so the error becomes a field and the other checks — the
+        heartbeats, the worker ping — still get to answer.
+        """
+        monkeypatch.setattr(
+            job_health.settings, "celery_broker_url", "redis://localhost:6379/1"
+        )
+
+        class _Refusing:
+            def llen(self, _queue):
+                raise ConnectionError("Error 111 connecting to localhost:6379")
+
+        _install_fake_redis_module(monkeypatch, _Refusing())
+
+        result = job_health.queue_status()
+
+        assert result.reachable is False
+        assert result.depth is None
+        # Typed, because "ConnectionError" and "TimeoutError" send an operator
+        # to different places and the bare message often says neither.
+        assert result.error.startswith("ConnectionError: ")
+
+    def test_a_broker_url_redis_cannot_parse_is_reported_not_raised(self, monkeypatch):
+        # The failure lands on ``from_url`` rather than on the command, which
+        # is a different line inside the same try. Both have to be caught.
+        monkeypatch.setattr(
+            job_health.settings, "celery_broker_url", "redis://:@@:notaport/x"
+        )
+
+        result = job_health.queue_status()
+
+        assert result.reachable is False
+        assert result.error
+
 
 # ---------------------------------------------------------------------------
 # Workers

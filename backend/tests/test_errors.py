@@ -323,3 +323,31 @@ def test_a_404_from_a_route_keeps_its_own_wording(auth_client):
     body = auth_client.get("/api/v1/invoices/999999").json()
     assert body["detail"] != ""
     assert "went wrong on our side" not in body["detail"]
+
+
+def test_a_detail_that_is_neither_string_list_nor_dict_still_gets_a_message():
+    """``HTTPException(detail=...)`` takes any object, and one gets raised.
+
+    The envelope promises ``error.message`` is always a string. A detail that
+    is a bare scalar — a count, an enum, an exception object — reaches the
+    summariser having matched none of its shapes, and the fallback is what
+    keeps the promise instead of putting a non-string in a string field.
+    """
+    body = error_body(409, detail=42)
+
+    assert body["error"]["message"] == "42"
+    assert isinstance(body["error"]["message"], str)
+
+
+def test_a_list_of_plain_strings_is_joined_rather_than_repr_d():
+    body = error_body(422, detail=["first problem", "second problem"])
+
+    assert body["error"]["message"] == "first problem; second problem"
+
+
+def test_a_dict_detail_without_a_message_key_falls_back_to_the_whole_dict():
+    # Better a readable dict than an empty message: the caller still has to be
+    # able to tell one 409 from another.
+    body = error_body(409, detail={"conflict": "arn already recorded"})
+
+    assert "arn already recorded" in body["error"]["message"]

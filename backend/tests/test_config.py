@@ -225,6 +225,24 @@ class TestStartupWarnings:
         )
         assert any("SQLite" in w for w in warnings)
 
+    def test_email_alerts_turned_on_without_an_smtp_host_warns(self):
+        """The switch is on and there is nowhere to send. Alerts stay in-app.
+
+        A warning rather than a refusal because the product still works — the
+        alerts are on the dashboard either way. What must not happen is the
+        operator believing email is on because they set the flag.
+        """
+        warnings = validate_startup_config(
+            Settings(**prod(alerts_email_enabled=True, smtp_host=""))
+        )
+        assert any("SMTP_HOST" in w for w in warnings)
+
+    def test_email_alerts_with_a_host_configured_says_nothing(self):
+        warnings = validate_startup_config(
+            Settings(**prod(alerts_email_enabled=True, smtp_host="smtp.example.com"))
+        )
+        assert not any("SMTP_HOST" in w for w in warnings)
+
     def test_production_with_console_logs_warns(self):
         warnings = validate_startup_config(Settings(**prod(log_format="console")))
         assert any("LOG_FORMAT" in w for w in warnings)
