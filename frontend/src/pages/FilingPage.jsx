@@ -4,6 +4,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
+import ValidationIssues from "../components/ValidationIssues";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
@@ -106,29 +107,6 @@ function latenessLine(owed) {
   return (
     `Filed ${days} after the ${dateLabel(owed.due_date)} deadline. ` +
     `This is what that came to.`
-  );
-}
-
-function IssueRow({ issue }) {
-  return (
-    <tr>
-      <td>
-        <span className={issue.severity === "error" ? "chip chip-bad" : "chip chip-warn"}>
-          {issue.severity === "error" ? "Error" : "Warning"}
-        </span>
-      </td>
-      <td>
-        {issue.invoice_id ? (
-          <Link to={`/invoices/${issue.invoice_id}`}>
-            {issue.invoice_number || "(no number)"}
-          </Link>
-        ) : (
-          issue.invoice_number || "(no number)"
-        )}
-      </td>
-      <td>{issue.field.replace(/_/g, " ")}</td>
-      <td>{issue.message}</td>
-    </tr>
   );
 }
 
@@ -590,26 +568,7 @@ export default function FilingPage() {
                 portal needs.
               </p>
             ) : (
-              <TableScroll label="Validation issues">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th scope="col">Severity</th>
-                      <th scope="col">Invoice</th>
-                      <th scope="col">Field</th>
-                      <th scope="col">Problem</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {validation.issues.map((issue, index) => (
-                      <IssueRow
-                        key={`${issue.invoice_id ?? "x"}-${issue.field}-${index}`}
-                        issue={issue}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </TableScroll>
+              <ValidationIssues issues={validation.issues} label="Validation issues" />
             )}
           </section>
         </>

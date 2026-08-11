@@ -101,7 +101,7 @@ function run(overrides = {}) {
 }
 
 /** Route fetches by URL so the page's two parallel loads resolve independently. */
-function mockApi({ imported2b, latest, onPost, fail, history, detail } = {}) {
+function mockApi({ imported2b, latest, onPost, fail, history, detail, register } = {}) {
   global.fetch = vi.fn(async (url, options = {}) => {
     const ok = (body) => ({
       ok: true,
@@ -118,6 +118,14 @@ function mockApi({ imported2b, latest, onPost, fail, history, detail } = {}) {
     const notFound = () => refused(404, "Not found");
 
     if (options.method === "POST") return ok(await onPost(url, options));
+    // The purchase-register check, answered before `fail` because it is not
+    // one of the reads that failure is about: the tests below that break the
+    // server are asserting on the 2B and the run, and a register panel
+    // appearing or vanishing in the middle of them is noise. Refused unless a
+    // test asked for one, which is the branch that renders no panel at all.
+    if (url.includes("/filing/validate")) {
+      return register ? ok(register) : refused(503, "Not checked");
+    }
     // `fail` stands in for the server being unable to answer at all, which is
     // the case a 404 must not be confused with.
     if (fail) return refused(fail.status, fail.message);
@@ -162,6 +170,20 @@ function deferredFetch() {
   global.fetch = vi.fn(
     (url, options = {}) =>
       new Promise((resolve, reject) => {
+        // The register check is a fourth read and is refused immediately, for
+        // the same reason the list is answered immediately: these tests are
+        // about the ordering of the pair that fills the panels, and holding
+        // this one would shift every index in them without asserting
+        // anything new. It has its own tests, abort included.
+        if (String(url).includes("/filing/validate")) {
+          resolve({
+            ok: false,
+            status: 503,
+            statusText: "",
+            text: async () => JSON.stringify({ detail: "Not checked" }),
+          });
+          return;
+        }
         if (/\/reconciliation\?/.test(String(url))) {
           resolve({
             ok: true,
@@ -1241,5 +1263,202 @@ describe("the runs a period accumulates", () => {
     release();
 
     await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+  });
+});
+
+
+// The register's own problems are the ones the matcher cannot report. A
+// supplier GSTIN that is missing or does not checksum comes back from a run
+// as "missing in 2B", which is the same row a supplier who never filed
+// produces — and the two are fixed in different places.
+describe("the purchase register check", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  // Defaults to the month the picker opens on, unlike the fixtures above:
+  // the panel is guarded on the report's period matching the one on screen,
+  // so a report for another month is the "arrived late" case rather than
+  // the ordinary one.
+  function report(overrides = {}) {
+    const issues = overrides.issues ?? [];
+    return {
+      period: currentPeriod(),
+      ok: issues.every((issue) => issue.severity !== "error"),
+      invoice_count: 3,
+      error_count: issues.filter((issue) => issue.severity === "error").length,
+      warning_count: issues.filter((issue) => issue.severity === "warning").length,
+      ...overrides,
+      issues,
+    };
+  }
+
+  const MISSING_GSTIN = {
+    invoice_id: 21,
+    invoice_number: "DH/451",
+    field: "counterparty_gstin",
+    severity: "error",
+    message: "Supplier GSTIN is missing; ITC cannot be claimed without it",
+  };
+  const MISSING_HSN = {
+    invoice_id: 22,
+    invoice_number: "NW/9",
+    field: "hsn_code",
+    severity: "warning",
+    message: "HSN code is missing",
+  };
+
+  it("blames the books rather than the supplier for a GSTIN that is missing", async () => {
+    mockApi({ imported2b: imported(), register: report({ issues: [MISSING_GSTIN] }) });
+    renderPage();
+
+    expect(await screen.findByText(/will stop an invoice matching/)).toBeInTheDocument();
+    const table = screen.getByRole("region", {
+      name: `Purchase register problems for ${periodLabel(currentPeriod())}`,
+    });
+    expect(
+      within(table).getByText(/Supplier GSTIN is missing/),
+    ).toBeInTheDocument();
+    // The row is fixed by opening the invoice, so the number is a way in.
+    expect(within(table).getByRole("link", { name: "DH/451" })).toHaveAttribute(
+      "href",
+      "/invoices/21",
+    );
+  });
+
+  it("asks for the purchase register to be checked before the run, not after", async () => {
+    mockApi({ imported2b: imported(), register: report({ issues: [MISSING_GSTIN] }) });
+    renderPage();
+
+    expect(
+      await screen.findByText(/Fix these first, then run the reconciliation/),
+    ).toBeInTheDocument();
+  });
+
+  it("lists the rows that block a match above the ones that merely ought to be fixed", async () => {
+    // The server answers in invoice order, which buries the one row that
+    // has to be corrected among a dozen that need not be.
+    mockApi({
+      imported2b: imported(),
+      register: report({ issues: [MISSING_HSN, MISSING_GSTIN] }),
+    });
+    renderPage();
+
+    const table = await screen.findByRole("region", {
+      name: `Purchase register problems for ${periodLabel(currentPeriod())}`,
+    });
+    const severities = within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getAllByRole("cell")[0].textContent);
+    expect(severities).toEqual(["Error", "Warning"]);
+  });
+
+  it("does not say a warning will stop an invoice matching", async () => {
+    // A missing HSN code is worth fixing before the credit is filed and has
+    // nothing to do with whether 2B finds the row. Wording it as a blocker
+    // would send someone to correct invoices that were going to match.
+    mockApi({ imported2b: imported(), register: report({ issues: [MISSING_HSN] }) });
+    renderPage();
+
+    expect(
+      await screen.findByText(/worth a look before you file the credit/),
+    ).toBeInTheDocument();
+    // The instruction is what must not appear: there is nothing to fix before
+    // running, and the count above it would be zero.
+    expect(
+      screen.queryByText(/Fix these first, then run the reconciliation/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("counts the rows that block a match, not every issue in the register", async () => {
+    mockApi({
+      imported2b: imported(),
+      register: report({
+        issues: [MISSING_GSTIN, MISSING_HSN, { ...MISSING_GSTIN, invoice_id: 23 }],
+      }),
+    });
+    renderPage();
+
+    const line = await screen.findByText(/will stop an invoice matching/);
+    expect(line.textContent).toMatch(/2 problems/);
+  });
+
+  it("says the unmatched rows are the supplier's side when the books are clean", async () => {
+    mockApi({ imported2b: imported(), register: report({ issues: [] }) });
+    renderPage();
+
+    expect(
+      await screen.findByText(/Anything unmatched below is the supplier's side/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/will stop an invoice matching/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not call a period's books clean when nothing is booked in it", async () => {
+    // An empty register matches nothing, and "all your invoices check out"
+    // over zero invoices is a reassurance about work that was never done.
+    mockApi({
+      imported2b: imported(),
+      register: report({ issues: [], invoice_count: 0 }),
+    });
+    renderPage();
+
+    expect(
+      await screen.findByText(/No purchase invoices booked for/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(/carry a supplier GSTIN that checks out/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("says nothing at all when the register could not be checked", async () => {
+    // The default mock refuses this endpoint. Silence is the honest answer:
+    // announcing a clean register on the strength of never having read it
+    // sends someone chasing a supplier over a GSTIN they mistyped.
+    mockApi({ imported2b: imported() });
+    renderPage();
+
+    await screen.findByText(/invoices imported/);
+    expect(screen.queryByText(/Your purchase register/)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Anything unmatched below is the supplier's side/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not caption one month's register problems with another month's name", async () => {
+    // The check follows the picker, and a slow answer for the month being
+    // left would otherwise land under the month being arrived at — reporting
+    // April's missing GSTIN as May's.
+    const user = userEvent.setup();
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    global.fetch = vi.fn(async (url) => {
+      const body = (b, status = 200) => ({
+        ok: status < 400,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(b),
+      });
+      const path = String(url);
+      if (path.includes("/filing/validate")) {
+        await held;
+        return body(report({ period: currentPeriod(), issues: [MISSING_GSTIN] }));
+      }
+      if (/\/reconciliation\?/.test(path)) return body({ items: [], total: 0 });
+      if (path.includes("/gstr2b/")) return body(imported());
+      return body({ detail: "Not found" }, 404);
+    });
+    renderPage();
+
+    const period = await selectPreviousPeriod(user);
+    expect(period).not.toBe(currentPeriod());
+    release();
+
+    await waitFor(() =>
+      expect(screen.queryByText(/will stop an invoice matching/)).not.toBeInTheDocument(),
+    );
   });
 });

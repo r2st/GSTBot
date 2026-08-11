@@ -426,8 +426,20 @@ export const api = {
   setOff: (payload) => request("/itc/set-off", { method: "POST", body: payload }),
 
   // ---- Filing ----
-  validateFiling: (period, invoiceType) =>
-    request(`/filing/validate${query({ period, invoice_type: invoiceType })}`),
+  /**
+   * What would stop a period being filed, for one direction of invoice.
+   *
+   * The sales side arrives with the return already — `gstr1` and `gstr3b`
+   * carry the same report — so this is asked for the purchase side, which no
+   * return is built from and nothing else validates. A supplier GSTIN that
+   * does not checksum is not a filing problem, it is a credit that will never
+   * match in GSTR-2B, and until the reconciliation screen said so the only
+   * evidence of it was a row that kept coming back "missing in 2B".
+   *
+   * Abortable: the period picker drives it.
+   */
+  validateFiling: (period, invoiceType, { signal } = {}) =>
+    request(`/filing/validate${query({ period, invoice_type: invoiceType })}`, { signal }),
 
   gstr1: (period, { signal } = {}) => request(`/filing/gstr1${query({ period })}`, { signal }),
   gstr3b: (period, { signal } = {}) => request(`/filing/gstr3b${query({ period })}`, { signal }),

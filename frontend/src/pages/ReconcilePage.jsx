@@ -4,6 +4,7 @@ import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonText } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
+import ValidationIssues from "../components/ValidationIssues";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
@@ -167,6 +168,11 @@ export default function ReconcilePage() {
   // {id, run} while an earlier run is on screen, null while the latest is.
   const [viewed, setViewed] = useState(null);
   const [historyToken, setHistoryToken] = useState(0);
+  // What is wrong with the purchase register itself, before it is matched
+  // against anything. Null while it is unknown — which is not the same as a
+  // clean register, and is why this is not just an empty issue list. See the
+  // panel below for why the difference matters here more than most.
+  const [register, setRegister] = useState(null);
   const inputRef = useRef(null);
   // The month the picker is showing, readable from a callback that has been
   // waiting on the network. `period` closed over at click time is the month the
@@ -256,6 +262,38 @@ export default function ReconcilePage() {
     })();
     return () => controller.abort();
   }, [period, reloadToken, historyToken]);
+
+  // The purchase register's own problems, which are the ones the matcher
+  // cannot tell you about. A supplier GSTIN that does not checksum, or is
+  // missing altogether, comes back from the reconciliation as "missing in 2B"
+  // — indistinguishable from a supplier who genuinely has not filed, and the
+  // two have opposite remedies: one is a field to retype, the other is a
+  // phone call. So it is read before the run rather than explained after it.
+  //
+  // Refetched on `reloadToken` along with the panels above, because an import
+  // is not the only thing that bumps it: the invoice list changes under this
+  // page as uploads are parsed, and a register checked once on arrival would
+  // go on reporting a GSTIN that has since been fixed.
+  //
+  // Its failure is swallowed, like the history list's. This is a warning about
+  // work still to do, not the work itself — a banner saying the register could
+  // not be checked would sit above an import and a run that both work.
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .validateFiling(period, "purchase", { signal: controller.signal })
+      .then((data) => {
+        if (!controller.signal.aborted) setRegister(data);
+      })
+      .catch(() => {
+        // Back to unknown rather than to an empty report. "Nothing wrong with
+        // your register" is a claim, and this is the branch where we did not
+        // find out — asserting it here would send someone chasing a supplier
+        // over a GSTIN they had mistyped themselves.
+        if (!controller.signal.aborted) setRegister(null);
+      });
+    return () => controller.abort();
+  }, [period, reloadToken]);
 
   async function handleView(item) {
     // The row already carries the counts; what it does not carry is the report,
@@ -384,6 +422,16 @@ export default function ReconcilePage() {
     },
   );
 
+  // Errors first, then warnings, each keeping the order the server sent — the
+  // report comes back in invoice order, which mixes a missing supplier GSTIN
+  // in among a dozen missing HSN codes and buries the one row that has to be
+  // fixed before anything will match. `sort` is stable, so within a severity
+  // the register's own order survives.
+  const registerProblems = [...(register?.issues ?? [])].sort(
+    (a, b) => (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1),
+  );
+  const registerErrorCount = register?.error_count ?? 0;
+
   return (
     <div className="page">
       <div className="page-head">
@@ -467,6 +515,55 @@ export default function ReconcilePage() {
           </button>
         </div>
       </section>
+
+      {/* Guarded on the period as well as on there being a report, so the
+          figure on screen is never the last selection's answer arriving late —
+          the abort handles the common case, a resolved-then-superseded
+          response is what this catches. `register` stays null when the check
+          could not be run, and the whole panel is then absent: silence is the
+          only honest thing to say about a register nobody managed to read. */}
+      {register?.period === period && (
+        <section className="panel">
+          <h2>Your purchase register</h2>
+          {registerProblems.length === 0 ? (
+            <p className="muted">
+              {register.invoice_count === 0
+                ? `No purchase invoices booked for ${periodLabel(period)} yet. Upload them before reconciling — GSTR-2B is matched against your books, so an empty register matches nothing.`
+                : `All ${register.invoice_count} purchase invoices carry a supplier GSTIN that checks out and an invoice number. Anything unmatched below is the supplier's side, not yours.`}
+            </p>
+          ) : (
+            <>
+              <p className="muted small">
+                {/* The count is of errors alone, because an error is by
+                    definition a field the portal could not accept — and 2B is
+                    generated from what suppliers filed on that same portal.
+                    Warnings are listed too, below the errors, but they are not
+                    what this sentence is about. */}
+                {registerErrorCount > 0 ? (
+                  <>
+                    <strong>{registerErrorCount}</strong>{" "}
+                    {registerErrorCount === 1 ? "problem" : "problems"} in your own books
+                    will stop an invoice matching, however diligently the supplier filed.
+                    GSTR-2B is matched on the supplier&rsquo;s GSTIN and the invoice
+                    number, so a row missing either comes back &ldquo;missing in 2B&rdquo;
+                    — which reads as the supplier&rsquo;s fault and is not. Fix these
+                    first, then run the reconciliation.
+                  </>
+                ) : (
+                  <>
+                    Nothing here will stop an invoice matching, but these are worth a look
+                    before you file the credit.
+                  </>
+                )}
+              </p>
+              <ValidationIssues
+                issues={registerProblems}
+                label={`Purchase register problems for ${periodLabel(period)}`}
+              />
+            </>
+          )}
+        </section>
+      )}
 
       {shown && (
         <>
