@@ -683,6 +683,109 @@ class TestExposureCountsOnlyRowsThatWereActuallyRead:
         assert result.tax_total == Decimal("18000.00")
 
 
+class TestExposureIsFourTotalsRatherThanTheInvoicesBehindThem:
+    """The screen wants four numbers, so four numbers is what it reads.
+
+    Loading the rows to add them up in Python is a read with no ceiling: the
+    supplier a business buys from every week is exactly the one whose detail
+    page gets opened, and the page has to stay the same cost after five years
+    of buying from them.
+    """
+
+    def supplier(self, db, business):
+        row = Supplier(business_id=business.id, gstin=SUPPLIER_GSTIN_OTHER_STATE)
+        db.add(row)
+        db.commit()
+        return row
+
+    def test_the_invoices_are_never_fetched(self, db_session, business):
+        from sqlalchemy import event
+
+        supplier = self.supplier(db_session, business)
+        for n in range(3):
+            book(db_session, business.id, invoice_number=f"A-{n}")
+
+        statements: list[str] = []
+        engine = db_session.get_bind()
+
+        def _record(conn, cursor, statement, parameters, context, executemany):
+            squashed = " ".join(statement.split()).lower()
+            if "from invoices" in squashed:
+                statements.append(squashed)
+
+        event.listen(engine, "before_cursor_execute", _record)
+        try:
+            scoring.exposure(db_session, business.id, supplier)
+        finally:
+            event.remove(engine, "before_cursor_execute", _record)
+
+        assert len(statements) == 1, f"{len(statements)} scans:\n" + "\n".join(statements)
+        # Aggregates, not rows: a SELECT naming the money columns would be the
+        # old shape back, and it would still pass a count of one.
+        assert "sum(" in statements[0]
+        assert "invoices.taxable_value" not in statements[0]
+
+    def test_the_totals_are_exact_to_the_paisa(self, db_session, business):
+        """The half of the rewrite that could quietly cost money.
+
+        SQLite sums a NUMERIC column through a float, so three ten-paisa rows
+        come back as 0.30000000000000004 unless the result is brought into
+        Decimal through its string form. Adding a tenth three times is the
+        oldest way to see it, and the figures here are what a business is told
+        is resting on a supplier.
+        """
+        supplier = self.supplier(db_session, business)
+        for n in range(3):
+            book(
+                db_session,
+                business.id,
+                invoice_number=f"PAISA-{n}",
+                taxable_value=Decimal("0.10"),
+                igst=Decimal("0.10"),
+                total_value=Decimal("0.20"),
+                status=InvoiceStatus.MISSING_IN_2B,
+            )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.tax_total == Decimal("0.30")
+        assert result.tax_at_risk == Decimal("0.30")
+        # Not merely equal — a float that has drifted still compares equal to
+        # more decimal places than money has.
+        assert str(result.tax_total) in ("0.3", "0.30")
+
+    def test_a_supplier_with_nothing_booked_totals_zero_rather_than_none(
+        self, db_session, business
+    ):
+        """``SUM`` over no rows is NULL, and the screen renders what it is given."""
+        supplier = self.supplier(db_session, business)
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.invoice_count == 0
+        assert result.unpaid_count == 0
+        assert result.tax_total == Decimal("0")
+        assert result.tax_at_risk == Decimal("0")
+
+    def test_every_tax_head_reaches_the_total(self, db_session, business):
+        """Four columns are added in SQL now; leaving one out would be silent."""
+        supplier = self.supplier(db_session, business)
+        book(
+            db_session,
+            business.id,
+            igst=Decimal("0.00"),
+            cgst=Decimal("900.00"),
+            sgst=Decimal("900.00"),
+            cess=Decimal("100.00"),
+            status=InvoiceStatus.MISSING_IN_2B,
+        )
+
+        result = scoring.exposure(db_session, business.id, supplier)
+
+        assert result.tax_total == Decimal("1900.00")
+        assert result.tax_at_risk == Decimal("1900.00")
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------

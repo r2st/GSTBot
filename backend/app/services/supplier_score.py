@@ -46,7 +46,7 @@ import statistics
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.invoice import (
@@ -555,29 +555,56 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
     here, and counted nowhere else. This screen is where a business decides
     whether to hold a payment, and it was quoting a supplier's exposure from
     rows the return it is about to file does not contain.
+
+    Four figures, so four aggregates and no rows. This used to load every one
+    of the supplier's invoices into the session to add up four columns, which
+    is a read with no ceiling on it: the supplier a business buys from every
+    week is exactly the one whose detail page someone opens, and after a few
+    years that is tens of thousands of ORM objects built to produce four
+    numbers. Expressed in SQL it is one round trip whatever the history.
+
+    The two flags behind :attr:`~app.models.invoice.Invoice.claims_credit` are
+    re-stated here in SQL rather than read off the property, the same way
+    ``invoice_service`` states them for its grouped scan. That is a second copy
+    of a rule this module's own docstring warns about having four of — it is
+    kept honest by ``test_it_agrees_with_what_the_reconciliation_put_at_risk``,
+    which asserts this figure against the reconciliation's ``itc_at_risk``,
+    reached the other way.
     """
-    invoices = db.scalars(
-        select(Invoice).where(
+    tax = (
+        func.coalesce(Invoice.igst, 0)
+        + func.coalesce(Invoice.cgst, 0)
+        + func.coalesce(Invoice.sgst, 0)
+        + func.coalesce(Invoice.cess, 0)
+    )
+    at_risk = and_(
+        Invoice.status == InvoiceStatus.MISSING_IN_2B,
+        Invoice.itc_eligible.is_(True),
+        Invoice.reverse_charge.is_(False),
+    )
+
+    invoice_count, tax_total, tax_at_risk, unpaid_count = db.execute(
+        select(
+            func.count(Invoice.id),
+            func.coalesce(func.sum(tax), 0),
+            func.coalesce(func.sum(case((at_risk, tax), else_=0)), 0),
+            func.count(case((Invoice.paid_at.is_(None), Invoice.id))),
+        ).where(
             Invoice.business_id == business_id,
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.PURCHASE,
             Invoice.counterparty_gstin == supplier.gstin,
             Invoice.status.not_in(UNREADABLE_STATUSES),
         )
-    ).all()
+    ).one()
 
-    result = SupplierExposure()
-    for invoice in invoices:
-        tax = (
-            (invoice.igst or ZERO)
-            + (invoice.cgst or ZERO)
-            + (invoice.sgst or ZERO)
-            + (invoice.cess or ZERO)
-        )
-        result.invoice_count += 1
-        result.tax_total += tax
-        if invoice.status == InvoiceStatus.MISSING_IN_2B and invoice.claims_credit:
-            result.tax_at_risk += tax
-        if invoice.paid_at is None:
-            result.unpaid_count += 1
-    return result
+    # Through ``str`` rather than straight into ``Decimal``: SQLite hands a sum
+    # over a NUMERIC column back as a float, and ``Decimal(float)`` would carry
+    # the binary approximation into money. Same conversion, same reason, as
+    # ``invoice_service._summarise``.
+    return SupplierExposure(
+        invoice_count=int(invoice_count),
+        tax_total=Decimal(str(tax_total)),
+        tax_at_risk=Decimal(str(tax_at_risk)),
+        unpaid_count=int(unpaid_count),
+    )
