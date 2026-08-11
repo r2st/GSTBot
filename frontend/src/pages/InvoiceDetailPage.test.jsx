@@ -236,6 +236,30 @@ describe("InvoiceDetailPage", () => {
     expect(await screen.findByText("Corrections saved.")).toBeInTheDocument();
   });
 
+  it("warns about a sales number the portal will reject the return over", async () => {
+    // Rule 46(b) allows letters, digits, '-' and '/'. Said here, while the
+    // paper is still in the reviewer's hand; left to the filing screen it is a
+    // line in a report a month later, after the upload has been refused.
+    const user = userEvent.setup();
+    await renderPage(invoice({ invoice_type: "sales" }));
+
+    await retype(user, "Invoice number", "INV#42");
+
+    expect(await screen.findByText(/Rule 46\(b\)/)).toBeInTheDocument();
+  });
+
+  it("leaves a supplier's own numbering alone", async () => {
+    // The fixture is a purchase. That serial is the supplier's, it is what
+    // GSTR-2B carries, and the buyer cannot renumber someone else's invoice.
+    const user = userEvent.setup();
+    await renderPage();
+
+    await retype(user, "Invoice number", "INV#42");
+    await user.tab();
+
+    expect(screen.queryByText(/Rule 46\(b\)/)).not.toBeInTheDocument();
+  });
+
   it("warns when a supply is both interstate and intrastate", async () => {
     const user = userEvent.setup();
     await renderPage();

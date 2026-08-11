@@ -185,6 +185,17 @@ class ValidationReport:
         }
 
 
+# Rule 46(b) of the CGST Rules: a serial number "not exceeding sixteen
+# characters ... containing alphabets or numerals or special characters hyphen
+# or dash and slash". A space, a hash or a rupee sign is not one of them, and
+# the portal rejects the return rather than the line.
+RULE_46_INVOICE_NUMBER = re.compile(r"[A-Za-z0-9/-]+")
+# The same set, one character at a time, so a message can name what it found
+# rather than telling someone their number is wrong and leaving them to spot
+# which of sixteen characters did it.
+_RULE_46_CHAR = re.compile(r"[A-Za-z0-9/-]")
+
+
 def validate_invoice(
     invoice: Invoice, *, business_state: str | None, period: str
 ) -> list[ValidationIssue]:
@@ -207,13 +218,38 @@ def validate_invoice(
     # ---- Identity ----
     if not invoice.invoice_number:
         add("invoice_number", Severity.ERROR, "Invoice number is missing")
-    elif len(invoice.invoice_number) > 16:
-        # The portal caps invoice numbers at 16 characters.
-        add(
-            "invoice_number",
-            Severity.ERROR,
-            f"Invoice number is {len(invoice.invoice_number)} characters; the portal allows 16",
-        )
+    else:
+        if len(invoice.invoice_number) > 16:
+            # The portal caps invoice numbers at 16 characters.
+            add(
+                "invoice_number",
+                Severity.ERROR,
+                f"Invoice number is {len(invoice.invoice_number)} characters; the portal allows 16",
+            )
+        # Rule 46(b) allows letters, digits, hyphen and slash, and nothing
+        # else. So "INV#42" and "INV 42" are numbers the portal refuses the
+        # whole return over — one line rejects the upload, not the invoice.
+        #
+        # Reported alongside the length rather than instead of it: they are
+        # two independent things wrong with the same string, and an "elif"
+        # sends someone back to the portal a second time to be told about the
+        # half they were not shown.
+        #
+        # Sales only. On a purchase this string is the supplier's serial, copied
+        # off their document — it is what GSTR-2B will carry too, so it matches
+        # exactly as well as a compliant one, and complaining about it would be
+        # asking a business to correct a number it has no authority to change.
+        if is_sales and not RULE_46_INVOICE_NUMBER.fullmatch(invoice.invoice_number):
+            offending = sorted(
+                {c for c in invoice.invoice_number if not _RULE_46_CHAR.fullmatch(c)}
+            )
+            add(
+                "invoice_number",
+                Severity.ERROR,
+                f"Invoice number '{invoice.invoice_number}' contains "
+                + ", ".join(f"'{c}'" for c in offending)
+                + ". Rule 46(b) allows letters, digits, '-' and '/' only.",
+            )
 
     if invoice.invoice_date is None:
         add("invoice_date", Severity.ERROR, "Invoice date is missing")

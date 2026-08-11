@@ -159,7 +159,12 @@ export default function InvoiceDetailPage() {
   // assume the URL still names.
   const shownId = useRef(id);
 
-  const { errors, warnings } = invoiceDraftErrors(draft);
+  // The direction is not on the form — it is not a field anyone corrects —
+  // but one warning turns on it: Rule 46(b) governs the numbers this business
+  // issues, not the ones its suppliers do.
+  const { errors, warnings } = invoiceDraftErrors(draft, {
+    invoiceType: invoice?.invoice_type,
+  });
   const hasErrors = Object.keys(errors).length > 0;
 
   // Named by invoice number once it arrives, so browser history and the tab

@@ -688,4 +688,70 @@ describe("invoiceDraftErrors with the ledger fields", () => {
     const { warnings } = invoiceDraftErrors({ tax_rate: "18" }, { today });
     expect(warnings.join(" ")).not.toContain("not a GST rate");
   });
+
+  // Rule 46(b): letters, digits, hyphen and slash, up to sixteen characters.
+  // The portal rejects the whole return over one offending line, so this is
+  // worth saying at the box rather than in a filing report a month later.
+  describe("an invoice number the portal will not take", () => {
+    /** The identity fields alone: nothing here is about the money. */
+    const numbered = (invoice_number) => ({
+      counterparty_gstin: "27AAPFU0939F1ZV",
+      invoice_number,
+      invoice_date: "2026-04-15",
+      hsn_code: "8471",
+    });
+
+    it("warns about a character Rule 46 forbids without blocking the save", () => {
+      const { errors, warnings } = invoiceDraftErrors(
+        numbered("INV#42"),
+        { today, invoiceType: "sales" },
+      );
+      // Not an error: a business that issued the number that way still has to
+      // be able to record what the paper says.
+      expect(errors.invoice_number).toBeUndefined();
+      expect(warnings.join(" ")).toContain("Rule 46(b)");
+      expect(warnings.join(" ")).toContain("'#'");
+    });
+
+    it("names every character that has to go, once each", () => {
+      const { warnings } = invoiceDraftErrors(
+        numbered("IN V#4#2"),
+        { today, invoiceType: "sales" },
+      );
+      const line = warnings.find((w) => w.includes("Rule 46(b)"));
+      expect(line).toContain("' '");
+      expect(line).toContain("'#'");
+      expect(line.match(/'#'/g)).toHaveLength(1);
+    });
+
+    it("leaves a supplier's own serial alone", () => {
+      // It is what GSTR-2B carries too, so it reconciles either way — and the
+      // buyer has no authority to renumber someone else's invoice.
+      const { warnings } = invoiceDraftErrors(
+        numbered("INV#42"),
+        { today, invoiceType: "purchase" },
+      );
+      expect(warnings.join(" ")).not.toContain("Rule 46(b)");
+    });
+
+    it("says nothing about a number that is only hyphens and slashes", () => {
+      const { warnings } = invoiceDraftErrors(
+        numbered("INV/2026-0042"),
+        { today, invoiceType: "sales" },
+      );
+      expect(warnings).toEqual([]);
+    });
+
+    it("warns past sixteen characters whichever way the invoice runs", () => {
+      // The cap is the portal's, and a purchase longer than it is a number
+      // the supplier cannot have filed — so it is the books that are wrong.
+      for (const invoiceType of ["sales", "purchase"]) {
+        const { warnings } = invoiceDraftErrors(
+          numbered("INV-2026-000000042"),
+          { today, invoiceType },
+        );
+        expect(warnings.join(" ")).toContain("16 characters");
+      }
+    });
+  });
 });

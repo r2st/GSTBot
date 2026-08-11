@@ -38,6 +38,14 @@ const GST_EPOCH = "2017-07-01";
 
 // Max lengths from InvoiceUpdate in app/schemas/invoice.py.
 const MAX_INVOICE_NUMBER = 64;
+// What Rule 46(b) of the CGST Rules actually allows in an invoice serial:
+// letters, digits, hyphen and slash, up to sixteen characters. The column
+// takes 64 and the API accepts them, which is why these are warnings rather
+// than errors — but the portal refuses the whole return over one line, so a
+// reviewer should hear about it while the paper is still in their hand rather
+// than from a validation report a month later.
+const RULE_46_CHAR = /[A-Za-z0-9/-]/;
+const PORTAL_INVOICE_NUMBER = 16;
 const MAX_COUNTERPARTY_NAME = 255;
 const MAX_HSN = 8;
 
@@ -381,7 +389,7 @@ export function invoiceDraftErrors(draft, options = {}) {
     set(field, amountError(draft[field], label));
   }
 
-  return { errors, warnings: invoiceDraftWarnings(draft, errors) };
+  return { errors, warnings: invoiceDraftWarnings(draft, errors, options) };
 }
 
 /**
@@ -390,8 +398,32 @@ export function invoiceDraftErrors(draft, options = {}) {
  * Skipped for any field that already has a hard error, so a half-typed amount
  * does not also produce "the total does not add up".
  */
-function invoiceDraftWarnings(draft, errors) {
+function invoiceDraftWarnings(draft, errors, options = {}) {
   const warnings = [];
+
+  // The identity first, because it is the one field on this form that can
+  // make the portal reject a return that is otherwise perfect.
+  const number = String(draft.invoice_number ?? "").trim();
+  if (number.length > PORTAL_INVOICE_NUMBER) {
+    warnings.push(
+      `The portal allows ${PORTAL_INVOICE_NUMBER} characters in an invoice number; this is ${number.length}.`,
+    );
+  }
+  // Sales only. On a purchase this serial is the supplier's, copied off their
+  // document — it is what GSTR-2B carries too, so it reconciles exactly as
+  // well as a compliant one, and it is not a number the buyer has any
+  // authority to change. Matches `validate_invoice` in app/services/filing.py,
+  // which raises the error on the same side.
+  if (options.invoiceType === "sales" && number) {
+    const offending = [...new Set([...number].filter((c) => !RULE_46_CHAR.test(c)))];
+    if (offending.length > 0) {
+      warnings.push(
+        `Invoice numbers may contain letters, digits, '-' and '/' only (Rule 46(b)). ` +
+          `This one has ${offending.map((c) => `'${c}'`).join(", ")}.`,
+      );
+    }
+  }
+
   const num = (field) => {
     if (errors[field]) return null;
     const raw = String(draft[field] ?? "").trim();

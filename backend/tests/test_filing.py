@@ -109,6 +109,61 @@ def test_an_over_long_invoice_number_is_an_error():
     assert issues_for(sale(invoice_number="X" * 17))["invoice_number"] is Severity.ERROR
 
 
+def test_a_sale_numbered_with_a_character_rule_46_forbids_is_an_error():
+    """Rule 46(b) allows letters, digits, '-' and '/'. A hash is not one."""
+    assert issues_for(sale(invoice_number="INV#42"))["invoice_number"] is Severity.ERROR
+
+
+def test_a_space_in_a_sale_number_is_an_error():
+    """The one a person types without noticing, and the portal refuses."""
+    assert issues_for(sale(invoice_number="INV 42"))["invoice_number"] is Severity.ERROR
+
+
+def test_the_characters_rule_46_does_allow_raise_nothing():
+    for number in ("INV-2026/0042", "S001", "2026/04-9"):
+        assert issues_for(sale(invoice_number=number)) == {}, number
+
+
+def test_the_message_names_the_character_that_has_to_go():
+    """A number is up to sixteen characters. "It is wrong" is not a fix."""
+    found = filing_service.validate_invoice(
+        sale(invoice_number="INV#42"), business_state="27", period=PERIOD
+    )
+    message = next(i.message for i in found if i.field == "invoice_number")
+    assert "'#'" in message
+    assert "Rule 46(b)" in message
+
+
+def test_a_number_that_is_both_too_long_and_illegal_says_both():
+    """Two independent things wrong with one string.
+
+    Reported together rather than one after the other: a business that fixes
+    the length and re-uploads only to be told about the character has been
+    sent to the portal twice by a screen that knew both the first time.
+    """
+    found = filing_service.validate_invoice(
+        sale(invoice_number="INV#" + "X" * 20), business_state="27", period=PERIOD
+    )
+    messages = [i.message for i in found if i.field == "invoice_number"]
+    assert len(messages) == 2
+    assert any("the portal allows 16" in m for m in messages)
+    assert any("Rule 46(b)" in m for m in messages)
+
+
+def test_a_supplier_serial_rule_46_forbids_is_not_the_buyers_problem():
+    """The number on a purchase is the supplier's, copied off their document.
+
+    It is what GSTR-2B will carry too, so it matches exactly as well as a
+    compliant one — and correcting it is not something the buyer has the
+    authority to do. Complaining would be an error nobody can clear.
+    """
+    found = issues_for(sale(invoice_type=InvoiceType.PURCHASE, invoice_number="INV#42"))
+    # Only the number is in question here — a purchase built from a sale
+    # fixture raises its own complaints about the tax split, which the
+    # purchase-side tests below are about.
+    assert "invoice_number" not in found
+
+
 def test_missing_date_is_an_error():
     assert issues_for(sale(invoice_date=None))["invoice_date"] is Severity.ERROR
 
