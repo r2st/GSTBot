@@ -27,6 +27,29 @@ function recentPeriodOptions(now = new Date()) {
   return options;
 }
 
+/**
+ * The months this picker offers, newest first.
+ *
+ * The last twelve, plus every period that actually has a statement on file,
+ * plus whichever one is selected. The three are different sets and each is
+ * there for a reason:
+ *
+ * - A period with a 2B older than a year was unreachable. The runs are kept as
+ *   evidence for a reversal raised months later — that is the whole reason
+ *   they accumulate — and the screen that holds them could not be pointed at
+ *   the period they belong to.
+ * - The selected one, because the server decides an import's period from the
+ *   file and may hand back a month neither list holds yet. A `<select>` whose
+ *   value matches no option renders blank, so the month a user has just
+ *   imported into would vanish from the control naming it.
+ *
+ * String sort, because `YYYY-MM` is zero-padded and so sorts in calendar order.
+ */
+function periodChoices(imported, selected, now = new Date()) {
+  const all = new Set([...recentPeriodOptions(now), ...imported, selected]);
+  return [...all].filter(Boolean).sort().reverse();
+}
+
 // Each outcome implies a different action, so they are labelled by what the
 // user has to do about them rather than by the enum name.
 const CATEGORIES = {
@@ -173,6 +196,9 @@ export default function ReconcilePage() {
   // clean register, and is why this is not just an empty issue list. See the
   // panel below for why the difference matters here more than most.
   const [register, setRegister] = useState(null);
+  // Which months have a statement at all. The picker offers twelve, of which a
+  // new tenant has imported one — and nothing on the control said which.
+  const [importedPeriods, setImportedPeriods] = useState([]);
   const inputRef = useRef(null);
   // The month the picker is showing, readable from a callback that has been
   // waiting on the network. `period` closed over at click time is the month the
@@ -294,6 +320,34 @@ export default function ReconcilePage() {
       });
     return () => controller.abort();
   }, [period, reloadToken]);
+
+  // Marks the picker, and reaches back past its twelve months. A 2B imported
+  // more than a year ago had no option to select and so no way back to the
+  // runs stored against it — which is precisely the period a reversal raised
+  // this November is about.
+  //
+  // Refetched on `reloadToken` so an import marks its own month straight away.
+  // Its failure leaves the picker exactly as it was before this existed: the
+  // last twelve months, unmarked, all still selectable.
+  useEffect(() => {
+    const controller = new AbortController();
+    api
+      .importedPeriods({ signal: controller.signal })
+      .then((data) => {
+        // Guarded rather than trusted. Everything this list does is decorate
+        // the picker and reach past its twelve months, and it renders through
+        // a spread and a `Set` — so a payload that is not an array would take
+        // the whole screen down over a marker, on the page where the import
+        // and the run live.
+        if (!controller.signal.aborted) {
+          setImportedPeriods(Array.isArray(data) ? data : []);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setImportedPeriods([]);
+      });
+    return () => controller.abort();
+  }, [reloadToken]);
 
   async function handleView(item) {
     // The row already carries the counts; what it does not carry is the report,
@@ -431,6 +485,7 @@ export default function ReconcilePage() {
     (a, b) => (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1),
   );
   const registerErrorCount = register?.error_count ?? 0;
+  const onFile = new Set(importedPeriods);
 
   return (
     <div className="page">
@@ -445,9 +500,14 @@ export default function ReconcilePage() {
         <label className="period-picker">
           <span>Period</span>
           <select value={period} onChange={(e) => setPeriod(e.target.value)}>
-            {recentPeriodOptions().map((option) => (
+            {periodChoices(importedPeriods, period).map((option) => (
               <option key={option} value={option}>
                 {periodLabel(option)}
+                {/* Said in the option itself rather than as a separate hint.
+                    The picker is how someone finds the month their statement
+                    is in, and stepping through twelve to look for it is the
+                    thing this screen made people do. */}
+                {onFile.has(option) ? " · 2B on file" : ""}
               </option>
             ))}
           </select>

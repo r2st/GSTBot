@@ -101,7 +101,16 @@ function run(overrides = {}) {
 }
 
 /** Route fetches by URL so the page's two parallel loads resolve independently. */
-function mockApi({ imported2b, latest, onPost, fail, history, detail, register } = {}) {
+function mockApi({
+  imported2b,
+  latest,
+  onPost,
+  fail,
+  history,
+  detail,
+  register,
+  periods,
+} = {}) {
   global.fetch = vi.fn(async (url, options = {}) => {
     const ok = (body) => ({
       ok: true,
@@ -129,6 +138,11 @@ function mockApi({ imported2b, latest, onPost, fail, history, detail, register }
     // `fail` stands in for the server being unable to answer at all, which is
     // the case a 404 must not be confused with.
     if (fail) return refused(fail.status, fail.message);
+    // Ahead of the single-period read below, which its path is a prefix of.
+    // Answered empty by default: which months have a statement marks the
+    // picker, and every test that is not about the picker would otherwise have
+    // to describe one.
+    if (url.includes("/gstr2b/periods")) return ok(periods ?? []);
     if (url.includes("/gstr2b/")) return imported2b ? ok(imported2b) : notFound();
     if (url.includes("/latest")) return latest ? ok(latest) : notFound();
     // The list of past runs. Answered empty by default so that the tests about
@@ -175,6 +189,15 @@ function deferredFetch() {
         // about the ordering of the pair that fills the panels, and holding
         // this one would shift every index in them without asserting
         // anything new. It has its own tests, abort included.
+        if (String(url).includes("/gstr2b/periods")) {
+          resolve({
+            ok: true,
+            status: 200,
+            statusText: "OK",
+            text: async () => JSON.stringify([]),
+          });
+          return;
+        }
         if (String(url).includes("/filing/validate")) {
           resolve({
             ok: false,
@@ -425,6 +448,9 @@ describe("ReconcilePage", () => {
           text: async () =>
             JSON.stringify({ detail: "No GSTR-2B has been imported for 2026-04." }),
         };
+      }
+      if (url.includes("/gstr2b/periods")) {
+        return { ok: true, status: 200, statusText: "OK", text: async () => "[]" };
       }
       if (url.includes("/gstr2b/")) {
         return {
@@ -1247,6 +1273,7 @@ describe("the runs a period accumulates", () => {
       if (/\/reconciliation\?/.test(path)) {
         return body({ items: [LATEST, EARLIER], total: 2 });
       }
+      if (path.includes("/gstr2b/periods")) return body([]);
       if (path.includes("/gstr2b/")) return body(imported());
       if (path.includes("/latest")) return body(run({ id: 9, itc_at_risk: "0.00" }));
       return body({ detail: "Not found" }, 404);
@@ -1448,6 +1475,7 @@ describe("the purchase register check", () => {
         return body(report({ period: currentPeriod(), issues: [MISSING_GSTIN] }));
       }
       if (/\/reconciliation\?/.test(path)) return body({ items: [], total: 0 });
+      if (path.includes("/gstr2b/periods")) return body([]);
       if (path.includes("/gstr2b/")) return body(imported());
       return body({ detail: "Not found" }, 404);
     });
@@ -1460,5 +1488,80 @@ describe("the purchase register check", () => {
     await waitFor(() =>
       expect(screen.queryByText(/will stop an invoice matching/)).not.toBeInTheDocument(),
     );
+  });
+});
+
+// The picker offered a fixed twelve months and said nothing about which of
+// them held a statement. Both halves of that were costing something: a new
+// tenant stepped through months looking for the one they had imported, and a
+// 2B older than a year had no option to select at all — so the runs stored
+// against it, kept precisely as evidence for a reversal raised months later,
+// could not be reached from the screen that holds them.
+describe("the period picker", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  /** A month far enough back that the rolling twelve cannot reach it. */
+  function longAgo(now = new Date()) {
+    const date = new Date(now.getFullYear() - 2, now.getMonth(), 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  }
+
+  it("marks the months that actually have a statement", async () => {
+    mockApi({ imported2b: imported(), periods: [currentPeriod()] });
+    renderPage();
+
+    await screen.findByText(/invoices imported/);
+    const select = screen.getByLabelText("Period");
+    const marked = [...select.options].filter((o) => o.text.includes("2B on file"));
+    expect(marked).toHaveLength(1);
+    expect(marked[0].value).toBe(currentPeriod());
+  });
+
+  it("reaches a period whose statement is older than the twelve it lists", async () => {
+    const old = longAgo();
+    mockApi({ imported2b: imported(), periods: [old] });
+    renderPage();
+
+    await screen.findByText(/invoices imported/);
+    const select = screen.getByLabelText("Period");
+    const option = [...select.options].find((o) => o.value === old);
+    expect(option).toBeDefined();
+    expect(option.text).toContain("2B on file");
+  });
+
+  it("keeps every month selectable when the list could not be loaded", async () => {
+    // The marker is decoration. Losing it must leave the picker exactly as it
+    // was before any of this existed — twelve months, all selectable.
+    mockApi({ imported2b: imported(), fail: undefined });
+    renderPage();
+
+    await screen.findByText(/invoices imported/);
+    const select = screen.getByLabelText("Period");
+    expect(select.options).toHaveLength(12);
+    expect([...select.options].some((o) => o.text.includes("2B on file"))).toBe(false);
+  });
+
+  it("does not blank the control when a payload arrives that is not a list", async () => {
+    // Everything this list does is decorate a picker, and it renders through a
+    // spread and a Set — so a malformed payload must not take down the screen
+    // the import and the run live on.
+    global.fetch = vi.fn(async (url) => {
+      const body = (b, status = 200) => ({
+        ok: status < 400,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(b),
+      });
+      const path = String(url);
+      if (path.includes("/gstr2b/periods")) return body({ oops: true });
+      if (path.includes("/gstr2b/")) return body(imported());
+      if (/\/reconciliation\?/.test(path)) return body({ items: [], total: 0 });
+      return body({ detail: "Not found" }, 404);
+    });
+    renderPage();
+
+    await screen.findByText(/invoices imported/);
+    expect(screen.getByLabelText("Period").options).toHaveLength(12);
   });
 });
