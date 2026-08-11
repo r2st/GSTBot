@@ -222,7 +222,6 @@ def auth_client(client):
     return client
 
 
-
 @pytest.fixture()
 def business(db_session, auth_client) -> Business:
     return db_session.query(Business).filter_by(gstin=BUSINESS_GSTIN).one()
