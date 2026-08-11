@@ -314,6 +314,28 @@ class TestTheImportEndpointRefusals:
 
         assert response.status_code == 413
         assert str(settings.max_upload_mb) in response.json()["detail"]
+        # The size, and no advice about reducing it: a 2B is one portal
+        # download for one registration for one month, so there is nothing the
+        # user can re-export or split. Meeting this means the deployment's
+        # limit is under what a real statement weighs, and the number is what
+        # they report to whoever can raise it.
+        assert "gstr2b.json is " in response.json()["detail"]
+        assert "split" not in response.json()["detail"]
+
+    def test_an_empty_file_says_it_may_still_be_downloading(self, auth_client):
+        response = upload_2b(auth_client, content=b"")
+
+        assert response.status_code == 400
+        assert "0 bytes" in response.json()["detail"]
+
+    def test_a_file_that_is_not_a_2b_says_what_to_download_instead(self, auth_client):
+        """The likeliest wrong file is a real GST download of another kind."""
+        response = upload_2b(auth_client, content=b"%PDF-1.7", filename="gstr3b.pdf")
+
+        assert response.status_code == 415
+        detail = response.json()["detail"]
+        assert "gstr3b.pdf" in detail
+        assert "portal" in detail
 
     def test_a_valid_2b_containing_no_invoices_is_refused(self, auth_client):
         # Parses cleanly, and yields nothing — a period with no inward

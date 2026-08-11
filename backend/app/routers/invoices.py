@@ -91,6 +91,12 @@ ALLOWED_EXTENSIONS = (
     ".txt", ".csv", ".xlsx", ".xlsm", ".xls",
 )
 
+# Spelt out in the refusal rather than left for the caller to guess. What
+# someone does next is convert the file or pick a different one, and neither is
+# a decision they can make from "unsupported". Derived from the tuple above so
+# a format added to one is in the other.
+ACCEPTED_LABEL = ", ".join(ext.removeprefix(".").upper() for ext in ALLOWED_EXTENSIONS)
+
 
 def _owned_invoice(db: Session, business: Business, invoice_id: int) -> Invoice:
     """Fetch an invoice, 404ing on anything outside the caller's tenant.
@@ -116,16 +122,30 @@ def _check_file_shape(filename: str, content_type: str | None, content: bytes) -
     Shared between the single and bulk endpoints so a file that would be
     refused alone is refused identically inside a batch, rather than the two
     paths drifting apart on which error a bad file gets.
+
+    Each refusal names the file and says what to do about it. The app checks
+    the same three things before it uploads anything (``fileError`` in
+    ``lib/validate.js``), so a caller only reaches these when the two disagree
+    — an operator who lowered ``MAX_UPLOAD_MB`` below the app's copy of it, a
+    format the browser typed differently, a script posting straight at the API.
+    Those are exactly the cases where "unsupported" on its own leaves someone
+    with nothing to try.
     """
     lowered = filename.lower()
     if content_type not in ALLOWED_CONTENT_TYPES and not lowered.endswith(ALLOWED_EXTENSIONS):
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-            detail=f"Unsupported file type: {content_type or filename}",
+            detail=(
+                f"{filename} cannot be read as an invoice "
+                f"({content_type or 'no content type'}). Accepted: {ACCEPTED_LABEL}."
+            ),
         )
     if not content:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            # Almost always a half-finished download or a cloud-sync
+            # placeholder rather than a file anyone meant to send.
+            detail=f"{filename} is empty (0 bytes). It may still be downloading.",
         )
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
@@ -134,7 +154,14 @@ def _check_file_shape(filename: str, content_type: str | None, content: bytes) -
             # HTTP_413_CONTENT_TOO_LARGE and deprecated the old spelling, so
             # either name ties us to a version range. The number does not move.
             status_code=413,
-            detail=f"File exceeds the {settings.max_upload_mb} MB limit",
+            # By how much, because that decides what to do: a phone scan a
+            # little over is re-exported at a lower resolution, and one at
+            # several times the limit is a batch that wants splitting.
+            detail=(
+                f"{filename} is {len(content) / (1024 * 1024):.1f} MB, over the "
+                f"{settings.max_upload_mb} MB limit. Re-export it at a lower "
+                "resolution or split it."
+            ),
         )
 
 

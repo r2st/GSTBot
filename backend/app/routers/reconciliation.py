@@ -121,20 +121,31 @@ async def import_gstr2b(
         raise HTTPException(
             status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
             detail=(
-                f"Unsupported file type: {filename}. Upload the GSTR-2B JSON from the "
-                "GST portal, or a CSV export of it."
+                f"{filename} cannot be read as a GSTR-2B. Upload the JSON the GST "
+                "portal downloads, or a CSV export of it."
             ),
         )
 
     content = await file.read()
     if not content:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded file is empty"
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"{filename} is empty (0 bytes). It may still be downloading.",
         )
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(content) > max_bytes:
         raise HTTPException(
-            status_code=413, detail=f"File exceeds the {settings.max_upload_mb} MB limit"
+            status_code=413,
+            # The size, but no advice about reducing it: a 2B is one portal
+            # download for one registration for one month, and there is
+            # nothing a user can re-export or split. Meeting this means the
+            # deployment's limit is set below what a real statement weighs,
+            # which is the operator's to raise, so the number is what to
+            # report to them.
+            detail=(
+                f"{filename} is {len(content) / (1024 * 1024):.1f} MB, over the "
+                f"{settings.max_upload_mb} MB limit."
+            ),
         )
 
     # Whose statement this is, before anything is read out of it. A 2B is

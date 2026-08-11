@@ -216,6 +216,12 @@ def test_an_empty_file_is_rejected(auth_client):
         data={"invoice_type": "purchase"},
     )
     assert response.status_code == 400
+    # Named, and given the usual cause. Zero bytes is nearly always a download
+    # that has not finished or a cloud-sync placeholder, not a file anyone
+    # chose to send.
+    detail = response.json()["detail"]
+    assert "empty.txt" in detail
+    assert "0 bytes" in detail
 
 
 def test_an_unsupported_file_type_is_rejected(auth_client):
@@ -225,6 +231,27 @@ def test_an_unsupported_file_type_is_rejected(auth_client):
         data={"invoice_type": "purchase"},
     )
     assert response.status_code == 415
+
+
+def test_a_refused_file_type_is_told_what_would_have_worked(auth_client):
+    """What someone does next is convert the file or pick another one.
+
+    Neither is a decision they can make from "unsupported file type", and the
+    callers who reach this are the ones the app's own check did not stop — a
+    script posting at the API, a browser that typed the file differently.
+    """
+    response = auth_client.post(
+        "/api/v1/invoices/upload",
+        files={"file": ("scan.dwg", b"AC1027", "image/vnd.dwg")},
+        data={"invoice_type": "purchase"},
+    )
+
+    assert response.status_code == 415
+    detail = response.json()["detail"]
+    assert "scan.dwg" in detail
+    # The list comes off ALLOWED_EXTENSIONS, so a format added there is
+    # offered here without anyone remembering to update a sentence.
+    assert "PDF" in detail and "HEIC" in detail and "XLSX" in detail
 
 
 def test_an_oversized_file_is_rejected(auth_client):
@@ -237,6 +264,34 @@ def test_an_oversized_file_is_rejected(auth_client):
         data={"invoice_type": "purchase"},
     )
     assert response.status_code == 413
+
+
+def test_an_oversized_file_is_told_how_far_over_it_is(auth_client):
+    """By how much is what decides what to do about it.
+
+    A phone scan a little over the limit is re-exported at a lower resolution;
+    one at several times it is a batch that wants splitting. "Exceeds the
+    limit" separates neither.
+    """
+    from app.core.config import settings
+
+    # Only just over. `max_request_bytes` sits a megabyte above the file limit
+    # and is enforced by the middleware before a route sees the body, so a
+    # comfortably oversized file never reaches the message under test — it is
+    # refused by the envelope ceiling instead, which reports its own number.
+    over_by = 0.4
+    oversized = b"x" * int((settings.max_upload_mb + over_by) * 1024 * 1024)
+    response = auth_client.post(
+        "/api/v1/invoices/upload",
+        files={"file": ("ledger-scan.pdf", oversized, "application/pdf")},
+        data={"invoice_type": "purchase"},
+    )
+
+    assert response.status_code == 413
+    detail = response.json()["detail"]
+    assert "ledger-scan.pdf" in detail
+    assert f"{settings.max_upload_mb + over_by:.1f} MB" in detail
+    assert f"{settings.max_upload_mb} MB limit" in detail
 
 
 def test_an_unparseable_upload_is_kept_rather_than_refused(auth_client):
