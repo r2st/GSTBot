@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StateCodesContext } from "../hooks/useStateCodes";
 import InvoiceDetailPage from "./InvoiceDetailPage";
 
 function jsonResponse(body, { status = 200 } = {}) {
@@ -905,6 +906,123 @@ describe("InvoiceDetailPage", () => {
       await user.click(screen.getByRole("button", { name: "Save corrections" }));
 
       await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    });
+  });
+
+  describe("the place of supply picker", () => {
+    // The codes come from `/meta/states`, which the provider fetches once per
+    // session. Supplying them through the context directly rather than mounting
+    // the real provider keeps that request out of the response queue every test
+    // in this file lines up — otherwise which of the two fetches went first
+    // would decide whether a test saw its invoice.
+    const CODES = { 27: "Maharashtra", "07": "Delhi", 29: "Karnataka" };
+
+    async function renderWithStates(data = invoice(), codes = CODES) {
+      global.fetch.mockResolvedValueOnce(jsonResponse(data));
+      render(
+        <StateCodesContext.Provider value={{ codes, load: () => {} }}>
+          <MemoryRouter initialEntries={["/invoices/42"]}>
+            <Routes>
+              <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+            </Routes>
+          </MemoryRouter>
+        </StateCodesContext.Provider>,
+      );
+      await screen.findByLabelText("Counterparty GSTIN");
+      return screen.getByLabelText("Place of supply");
+    }
+
+    it("names the states instead of asking for a code from memory", async () => {
+      // 06 and 09 are both plausible guesses for a Delhi invoice and neither is
+      // Delhi, and the wrong one settles IGST against CGST+SGST on a return.
+      const select = await renderWithStates(invoice({ place_of_supply: "27" }));
+
+      expect(select.tagName).toBe("SELECT");
+      expect(select).toHaveValue("27");
+      expect(
+        [...select.options].map((option) => option.textContent),
+      ).toEqual(["Not stated", "07 — Delhi", "27 — Maharashtra", "29 — Karnataka"]);
+    });
+
+    it("saves the code behind the state that was picked", async () => {
+      const user = userEvent.setup();
+      const select = await renderWithStates(invoice({ place_of_supply: "27" }));
+
+      await user.selectOptions(select, "29");
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ place_of_supply: "29" })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        place_of_supply: "29",
+      });
+    });
+
+    it("takes a place of supply back off the invoice", async () => {
+      // Blank is a real answer: the API accepts an invoice without one, and it
+      // is /filing/validate that refuses the period. Sent as null, which is how
+      // this API clears a field, rather than as an empty string.
+      const user = userEvent.setup();
+      const select = await renderWithStates(invoice({ place_of_supply: "27" }));
+
+      await user.selectOptions(select, "");
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ place_of_supply: null })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        place_of_supply: null,
+      });
+    });
+
+    it("shows a single-digit code as the state it means", async () => {
+      // The server pads `7` to `07` on the way in, so an invoice can hold
+      // either. A select whose value matches no option renders blank, which
+      // would read as this invoice having no place of supply at all.
+      const select = await renderWithStates(invoice({ place_of_supply: "7" }));
+
+      expect(select).toHaveValue("07");
+    });
+
+    it("does not re-send a code it only reformatted for the screen", async () => {
+      // Showing `7` as `07` must not count as an edit. It would mark an invoice
+      // nobody corrected as reviewed, on a field nobody looked at.
+      const user = userEvent.setup();
+      await renderWithStates(invoice({ place_of_supply: "7" }));
+
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      expect(await screen.findByText("Nothing changed.")).toBeInTheDocument();
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps a code the server does not know, and says it is not one", async () => {
+      // The shape check passes anything two digits, so a misread 45 reaches the
+      // portal unremarked. Dropping it from the list instead would silently
+      // blank the field and write that blank back on the next save.
+      const select = await renderWithStates(invoice({ place_of_supply: "45" }));
+
+      expect(select).toHaveValue("45");
+      expect(screen.getByRole("option", { name: "45 — not a GST state code" })).toBeInTheDocument();
+    });
+
+    it("is the text box again when the lookup never answered", async () => {
+      // `/meta/states` is public and metered by address. A dropdown that failed
+      // to populate would leave the one field that unblocks a filing unfillable.
+      const user = userEvent.setup();
+      const input = await renderWithStates(invoice({ place_of_supply: null }), null);
+
+      expect(input.tagName).toBe("INPUT");
+      expect(screen.getByText("Two-digit state code")).toBeInTheDocument();
+
+      await user.type(input, "29");
+      global.fetch.mockResolvedValueOnce(jsonResponse(invoice({ place_of_supply: "29" })));
+      await user.click(screen.getByRole("button", { name: "Save corrections" }));
+
+      await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+      expect(JSON.parse(global.fetch.mock.calls[1][1].body)).toEqual({
+        place_of_supply: "29",
+      });
     });
   });
 });

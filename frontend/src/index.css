@@ -310,11 +310,15 @@ label {
   color: var(--bad);
 }
 .field.is-invalid input,
-input[aria-invalid="true"] {
+.field.is-invalid select,
+input[aria-invalid="true"],
+select[aria-invalid="true"] {
   border-color: var(--bad);
 }
 .field.is-invalid input:focus,
-input[aria-invalid="true"]:focus {
+.field.is-invalid select:focus,
+input[aria-invalid="true"]:focus,
+select[aria-invalid="true"]:focus {
   outline-color: var(--bad);
 }
 

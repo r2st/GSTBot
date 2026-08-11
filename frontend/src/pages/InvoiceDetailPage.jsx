@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonPanel } from "../components/Skeleton";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { useStateCodes } from "../hooks/useStateCodes";
 import { api, isAbortError } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
-import { invoiceDraftErrors } from "../lib/validate";
+import { invoiceDraftErrors, normalizePlaceOfSupply } from "../lib/validate";
 
 // What the extractor read off the document, and what a reviewer corrects when
 // it read it wrong.
@@ -94,38 +95,63 @@ const ALL_FIELDS = [...EDITABLE, ...LEDGER_FLAGS];
  * A checkbox reverses that: its label belongs *after* the box, and its value is
  * `checked` rather than `value`. Handing a boolean to `value` would put the
  * string "true" in the box and leave the tick permanently off.
+ *
+ * A spec carrying `options` is a closed list and renders as a `<select>`. It
+ * carries a `normalize` with them, because the value stored on the invoice is
+ * not always spelt the way an option is — `7` and `07` are the same place of
+ * supply — and a `<select>` whose value matches no option renders blank, which
+ * reads as the invoice not having one. It runs on the way *out* only: the draft
+ * keeps what the server sent, so a field nobody touched is not re-sent as an
+ * edit for having been reformatted on screen.
  */
 function Field({ spec, draft, message, setDraft, setTouched }) {
-  const { field, label, type, hint, step } = spec;
+  const { field, label, type, hint, step, options, normalize } = spec;
   const described = [message ? `${field}-error` : null, hint ? `${field}-hint` : null]
     .filter(Boolean)
     .join(" ");
   const isCheckbox = type === "checkbox";
+  const shared = {
+    id: field,
+    "aria-invalid": message ? true : undefined,
+    // Points at the message so a screen reader reads the reason with the
+    // field rather than leaving it as unattached text.
+    "aria-describedby": described || undefined,
+    onBlur: () => setTouched((prev) => ({ ...prev, [field]: true })),
+  };
   return (
     <div
       className={`field${message ? " is-invalid" : ""}${isCheckbox ? " field-check" : ""}`}
     >
       {!isCheckbox && <label htmlFor={field}>{label}</label>}
-      <input
-        id={field}
-        type={type ?? "text"}
-        step={step ?? (type === "number" ? "0.01" : undefined)}
-        {...(isCheckbox
-          ? {
-              checked: Boolean(draft[field]),
-              onChange: (e) =>
-                setDraft((prev) => ({ ...prev, [field]: e.target.checked })),
-            }
-          : {
-              value: draft[field] ?? "",
-              onChange: (e) => setDraft((prev) => ({ ...prev, [field]: e.target.value })),
-            })}
-        aria-invalid={message ? true : undefined}
-        // Points at the message so a screen reader reads the reason with the
-        // field rather than leaving it as unattached text.
-        aria-describedby={described || undefined}
-        onBlur={() => setTouched((prev) => ({ ...prev, [field]: true }))}
-      />
+      {options ? (
+        <select
+          {...shared}
+          value={normalize(draft[field])}
+          onChange={(e) => setDraft((prev) => ({ ...prev, [field]: e.target.value }))}
+        >
+          {options.map(([value, text]) => (
+            <option key={value} value={value}>
+              {text}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          {...shared}
+          type={type ?? "text"}
+          step={step ?? (type === "number" ? "0.01" : undefined)}
+          {...(isCheckbox
+            ? {
+                checked: Boolean(draft[field]),
+                onChange: (e) =>
+                  setDraft((prev) => ({ ...prev, [field]: e.target.checked })),
+              }
+            : {
+                value: draft[field] ?? "",
+                onChange: (e) => setDraft((prev) => ({ ...prev, [field]: e.target.value })),
+              })}
+        />
+      )}
       {isCheckbox && <label htmlFor={field}>{label}</label>}
       {hint && (
         <span className="muted small" id={`${field}-hint`}>
@@ -166,6 +192,50 @@ export default function InvoiceDetailPage() {
     invoiceType: invoice?.invoice_type,
   });
   const hasErrors = Object.keys(errors).length > 0;
+
+  // Place of supply is a code out of a list the server owns, and typing it blind
+  // is how the wrong state ends up deciding IGST against CGST+SGST — 06 and 09
+  // are both plausible things to read off a Delhi invoice, and neither is Delhi.
+  // With the list to hand the field becomes a picker; without it, it stays the
+  // text box it has always been. `useStateCodes` answers null for every reason
+  // the list can be missing, so the fallback is one branch rather than a
+  // dropdown that is empty while a request is in flight.
+  const stateCodes = useStateCodes();
+  const placeOfSupply = normalizePlaceOfSupply(draft.place_of_supply);
+  const stateOptions = useMemo(() => {
+    if (!stateCodes) return null;
+    // Ordered by code rather than by name. The code is what is printed on the
+    // invoice, what the first two digits of the counterparty's GSTIN spell, and
+    // what a reviewer is cross-checking one against the other — so the list is
+    // ordered the way the thing being looked up is. Sorting is not cosmetic:
+    // "27" is an array-index-shaped key and "07" is not, so the object hands
+    // back Maharashtra before Delhi whatever order the server sent.
+    const options = Object.keys(stateCodes)
+      .sort()
+      .map((code) => [code, `${code} — ${stateCodes[code]}`]);
+    // Blank is a real answer here: the API accepts an invoice without a place of
+    // supply, and `/filing/validate` is what refuses one at the period.
+    options.unshift(["", "Not stated"]);
+    // A code the server does not know still has to be selectable, or opening an
+    // invoice would silently swap the picker to blank and the next save would
+    // write that blank over a value nobody looked at. Naming it as unknown is
+    // also the only place this is ever said — the shape check passes anything
+    // two digits, so a misread `45` reaches the portal unremarked otherwise.
+    if (placeOfSupply && !(placeOfSupply in stateCodes)) {
+      options.push([placeOfSupply, `${placeOfSupply} — not a GST state code`]);
+    }
+    return options;
+  }, [stateCodes, placeOfSupply]);
+
+  // The hint goes with the text box: "two-digit state code" is instruction for
+  // typing, and there is nothing to type once the codes are on screen.
+  const editable = stateOptions
+    ? EDITABLE.map((spec) =>
+        spec.field === "place_of_supply"
+          ? { ...spec, hint: undefined, options: stateOptions, normalize: normalizePlaceOfSupply }
+          : spec,
+      )
+    : EDITABLE;
 
   // Named by invoice number once it arrives, so browser history and the tab
   // strip distinguish the four invoices someone has open while reconciling.
@@ -418,7 +488,7 @@ export default function InvoiceDetailPage() {
 
         <form onSubmit={handleSave} noValidate>
           <div className="edit-grid">
-            {EDITABLE.map((spec) => (
+            {editable.map((spec) => (
               <Field
                 key={spec.field}
                 spec={spec}
