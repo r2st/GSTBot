@@ -997,9 +997,10 @@ describe("InvoiceDetailPage", () => {
     });
 
     it("keeps a code the server does not know, and says it is not one", async () => {
-      // The shape check passes anything two digits, so a misread 45 reaches the
-      // portal unremarked. Dropping it from the list instead would silently
-      // blank the field and write that blank back on the next save.
+      // The API refuses an unknown code on the way in, so this is a row from
+      // before that check rather than one anyone can make now. Dropping it from
+      // the list would silently blank the field and write that blank back on
+      // the next save — a correction to a field nobody opened the invoice for.
       const select = await renderWithStates(invoice({ place_of_supply: "45" }));
 
       expect(select).toHaveValue("45");

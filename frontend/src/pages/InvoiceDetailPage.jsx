@@ -218,9 +218,10 @@ export default function InvoiceDetailPage() {
     options.unshift(["", "Not stated"]);
     // A code the server does not know still has to be selectable, or opening an
     // invoice would silently swap the picker to blank and the next save would
-    // write that blank over a value nobody looked at. Naming it as unknown is
-    // also the only place this is ever said — the shape check passes anything
-    // two digits, so a misread `45` reaches the portal unremarked otherwise.
+    // write that blank over a value nobody looked at. The API refuses an
+    // unknown code on the way in, so this is a row that predates that check
+    // rather than one anyone can create — and saying so on the row beats
+    // finding out from a 422 on a field the user did not touch.
     if (placeOfSupply && !(placeOfSupply in stateCodes)) {
       options.push([placeOfSupply, `${placeOfSupply} — not a GST state code`]);
     }

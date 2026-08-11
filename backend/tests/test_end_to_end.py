@@ -507,6 +507,162 @@ class TestASupplierWhoDidNotFile:
 # Two businesses on one deployment
 # ---------------------------------------------------------------------------
 
+class TestASaleTheExtractorCouldNotPlace:
+    """The one blocking error a reviewer fixes by typing, start to finish.
+
+    "Place of supply is missing and cannot be derived from a GSTIN" is raised
+    per invoice and blocks the whole period, and it is the only error on that
+    list with no second source to fall back on: a B2B sale gets the state off
+    the buyer's GSTIN, and a B2C one has nothing. So this is the loop the
+    invoice screen's place-of-supply field exists to close — validate, correct,
+    validate again, file — and it crosses three modules that are otherwise
+    tested apart.
+
+    What makes it worth a journey rather than a unit test is what the export
+    does *while* the period is blocked. ``gstr1`` does not refuse an invoice it
+    cannot place; it falls back to the business's own state, so an unfixed sale
+    is not missing from the return — it is in it, declared in the wrong state,
+    under a heading that contradicts its own tax. The error is the only thing
+    standing between that and the portal.
+    """
+
+    # Its own document rather than ``SALES_TEXT``: the parser fills anything
+    # the model left out from what it can read off the page, so an extraction
+    # claiming no CGST over a page printing some comes back with the page's
+    # figures and three validation errors instead of the one under test.
+    UNPLACEABLE_TEXT = f"""\
+UMANG TRADERS PRIVATE LIMITED
+GSTIN: {BUSINESS_GSTIN}
+Andheri East, Mumbai, Maharashtra 400069
+
+TAX INVOICE
+
+Invoice No: UT/2026/0102
+Invoice Date: 24/04/2026
+
+Bill To: Cash sale
+
+HSN Code: 85044090
+Power adapters   600 x 500.00 = 300,000.00
+
+Taxable Value:  300000.00
+IGST @ 18%:      54000.00
+Grand Total:    354000.00
+"""
+
+    # No buyer GSTIN, so there is no state to derive: an over-the-counter sale
+    # to an unregistered customer. Inter-state, and above the B2CL threshold,
+    # so where it lands in the return turns entirely on the missing field.
+    UNPLACEABLE_SALE = {
+        "supplier_gstin": BUSINESS_GSTIN,
+        "supplier_name": "Umang Traders Private Limited",
+        "buyer_gstin": None,
+        "buyer_name": "Walk-in customer",
+        "invoice_number": "UT/2026/0102",
+        "invoice_date": "2026-04-24",
+        "place_of_supply": None,
+        "hsn_code": "85044090",
+        "taxable_value": 300000,
+        "cgst": 0,
+        "sgst": 0,
+        "igst": 54000,
+        "cess": 0,
+        "total_value": 354000,
+        "tax_rate": 18,
+        "confidence": 0.71,
+    }
+
+    def sale(self, client, model) -> dict:
+        return upload(
+            client,
+            model,
+            text=self.UNPLACEABLE_TEXT,
+            extraction=self.UNPLACEABLE_SALE,
+            invoice_type="sales",
+            name="ut-2026-0102.txt",
+        )
+
+    def test_the_period_is_blocked_until_the_sale_is_placed(self, signed_in, stub_openrouter):
+        sale = self.sale(signed_in, stub_openrouter)
+        assert sale["place_of_supply"] is None
+
+        blocked = signed_in.get(
+            "/api/v1/filing/validate", params={"period": PERIOD, "invoice_type": "sales"}
+        ).json()
+        assert blocked["ok"] is False
+        assert blocked["error_count"] == 1
+        [issue] = [i for i in blocked["issues"] if i["severity"] == "error"]
+        assert issue["field"] == "place_of_supply"
+        # Named, not counted. The reviewer has to be able to open the one
+        # invoice out of the month's sales that is holding the return up.
+        assert issue["invoice_id"] == sale["id"]
+        assert issue["invoice_number"] == "UT/2026/0102"
+
+        # --- Correct it, which is the only fix there is -------------------
+        patched = signed_in.patch(
+            f"/api/v1/invoices/{sale['id']}", json={"place_of_supply": "29"}
+        )
+        assert patched.status_code == 200, patched.text
+        assert patched.json()["place_of_supply"] == "29"
+
+        cleared = signed_in.get(
+            "/api/v1/filing/validate", params={"period": PERIOD, "invoice_type": "sales"}
+        ).json()
+        assert cleared["ok"] is True
+        assert cleared["error_count"] == 0
+
+    def test_the_corrected_state_is_what_the_return_declares(
+        self, signed_in, stub_openrouter
+    ):
+        """The correction has to reach ``pos``, not just clear the error."""
+        sale = self.sale(signed_in, stub_openrouter)
+
+        # Before: placed in the seller's own state by the fallback, which puts
+        # a ₹3.54 lakh inter-state supply into the summary block for small
+        # local ones — carrying IGST under a heading that says INTRA.
+        before = signed_in.get("/api/v1/filing/gstr1", params={"period": PERIOD}).json()
+        assert before["validation"]["ok"] is False
+        # An empty block is left out of the document rather than sent empty,
+        # so "not in b2cl" is spelt as the key being absent.
+        assert "b2cl" not in before["document"]
+        [misplaced] = before["document"]["b2cs"]
+        assert misplaced["pos"] == "27"
+        assert misplaced["sply_ty"] == "INTRA"
+        assert money(misplaced["iamt"]) == Decimal("54000.00")
+
+        signed_in.patch(f"/api/v1/invoices/{sale['id']}", json={"place_of_supply": "29"})
+
+        after = signed_in.get("/api/v1/filing/gstr1", params={"period": PERIOD}).json()
+        assert after["validation"]["ok"] is True
+        # Now an inter-state supply above the threshold: listed invoice by
+        # invoice under Karnataka rather than summarised under Maharashtra.
+        assert "b2cs" not in after["document"]
+        [block] = after["document"]["b2cl"]
+        assert block["pos"] == "29"
+        assert [inv["inum"] for inv in block["inv"]] == ["UT/2026/0102"]
+
+        # And the file a user downloads is that document, not a second render
+        # of it from the pre-correction state.
+        export = signed_in.get("/api/v1/filing/export/gstr1.json", params={"period": PERIOD})
+        assert json.loads(export.content) == after["document"]
+
+    def test_a_state_code_the_council_never_issued_is_refused(self, signed_in, stub_openrouter):
+        """The picker cannot send this; a script and a stale client can.
+
+        Worth refusing at the API rather than only in the form, because the
+        portal rejects the whole return over one bad ``pos`` — there is no
+        partial acceptance to fall back on.
+        """
+        sale = self.sale(signed_in, stub_openrouter)
+
+        response = signed_in.patch(
+            f"/api/v1/invoices/{sale['id']}", json={"place_of_supply": "45"}
+        )
+
+        assert response.status_code == 422
+        assert "45" in response.text
+
+
 class TestOneTenantsJourneyIsInvisibleToAnother:
     def test_no_read_endpoint_leaks_across_the_boundary(self, client, stub_openrouter):
         # Tenant A does the whole journey.
