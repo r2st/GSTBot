@@ -21,9 +21,17 @@ from app.models.user import User
 from app.services import alert_delivery
 from app.services.alert_delivery import send_pending_alerts
 from app.services.email_sender import EmailSendError
+from app.services.gstin import compute_check_digit
 from tests.conftest import BUSINESS_GSTIN
 
 NOW = datetime(2026, 5, 14, 7, 15)
+
+
+def _valid_gstin(index: int) -> str:
+    """A distinct checksum-valid GSTIN, for the tests that need many tenants."""
+    # 2 state + 10 PAN (5 letters, 4 digits, 1 letter) + 1 entity + "Z" = 14.
+    first14 = f"27AAGCB{7000 + index:04d}J1Z"
+    return first14 + compute_check_digit(first14)
 
 
 def make_business(db, *, gstin=BUSINESS_GSTIN, **kwargs) -> Business:
@@ -489,6 +497,66 @@ class TestAcrossSeveralBusinesses:
 
         assert result.businesses == 1
         assert len(sent) == 1
+
+    def test_the_tenant_and_recipient_reads_do_not_grow_with_the_number_of_tenants(
+        self, db_session, sent
+    ):
+        """Neither the business nor its recipients may be fetched per tenant.
+
+        This is the one caller in the product that deliberately loops over
+        every tenant at once, so a per-tenant read here is multiplied by the
+        whole customer list rather than by anything about the work. Two of
+        them were: ``db.get(Business, ...)`` per id, and ``business.users``
+        inside ``_recipients``, which is a lazy relationship and so a second
+        statement again.
+
+        The digest itself stays one query per business on purpose — that is
+        the unit the per-tenant commit isolates, and merging it would trade a
+        bounded read for one bad tenant's failure reaching the rest. So this
+        counts only the two tables with no such excuse, and requires the count
+        flat between three tenants and fifteen.
+        """
+
+        def _reads_for(tenant_count: int, first_gstin: int) -> int:
+            db_session.query(Alert).delete()
+            db_session.query(User).delete()
+            db_session.query(Business).delete()
+            db_session.commit()
+            for index in range(first_gstin, first_gstin + tenant_count):
+                tenant = make_business(db_session, gstin=_valid_gstin(index))
+                make_user(db_session, tenant, email=f"owner-{index}@example.com")
+                make_alert(db_session, tenant)
+
+            # The sweep runs in a worker with a session of its own. Left in the
+            # identity map, the rows just written answer the lazy loads with no
+            # SQL at all, and the N+1 is invisible here.
+            db_session.expunge_all()
+
+            reads: list[str] = []
+
+            def _record(conn, cursor, statement, parameters, context, executemany):
+                squashed = " ".join(statement.split()).lower()
+                if squashed.startswith("select") and (
+                    "from businesses" in squashed or "from users" in squashed
+                ):
+                    reads.append(squashed)
+
+            engine = db_session.get_bind()
+            event.listen(engine, "before_cursor_execute", _record)
+            try:
+                result = send_pending_alerts(db_session, now=NOW)
+            finally:
+                event.remove(engine, "before_cursor_execute", _record)
+
+            assert result.businesses == tenant_count
+            return len(reads)
+
+        at_three = _reads_for(3, first_gstin=0)
+        at_fifteen = _reads_for(15, first_gstin=100)
+        assert at_three == at_fifteen, (
+            f"{at_three} reads of businesses/users for three tenants, "
+            f"{at_fifteen} for fifteen: the sweep is reading per tenant."
+        )
 
 
 def test_the_result_is_json_serialisable_for_the_task_backend():

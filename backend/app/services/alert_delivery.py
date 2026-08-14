@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
 from app.models.alert import Alert, AlertStatus
@@ -45,6 +45,12 @@ _CHANNEL = "email"
 # because the thing the alert was about is no longer true. See the module
 # docstring for why FAILED stays in rather than being given up on.
 _SENDABLE_STATUSES = (AlertStatus.PENDING, AlertStatus.FAILED)
+
+# How many tenant ids one ``IN`` may carry. Matches
+# ``reconciliation._SUPPLIER_LOOKUP_CHUNK`` and exists for the same reason:
+# every driver bounds the parameters a single statement may take, and this is
+# a list that grows with the customer base rather than with the work.
+_TENANT_LOOKUP_CHUNK = 500
 
 
 @dataclass(frozen=True)
@@ -126,6 +132,13 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
 
     now = now or datetime.now(UTC)
 
+    # Which tenants have something to send, answered out of
+    # ``ix_alerts_status_business`` alone — see
+    # ``tests/test_sweep_indexes.py``, which plans this statement and fails if
+    # it stops being an index-only search. Driving the other way round, from
+    # ``businesses`` joined to ``alerts``, reads better but plans worse: the
+    # planner scans every tenant, including the overwhelming majority with no
+    # alert pending, to probe for the few that have one.
     business_ids = db.scalars(
         select(Alert.business_id)
         .where(Alert.status.in_(_SENDABLE_STATUSES), Alert.deleted_at.is_(None))
@@ -133,12 +146,46 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
         .order_by(Alert.business_id)
     ).all()
 
-    total = AlertEmailResult()
-    for business_id in business_ids:
-        business = db.get(Business, business_id)
-        if business is None or business.deleted_at is not None or not business.is_active:
-            continue
+    # Then those tenants and their recipients, in a bounded number of
+    # statements rather than two per tenant. This is the one place in the
+    # product that deliberately loops over every business at once, so a
+    # per-tenant read here is multiplied by the customer list rather than by
+    # anything about the work. It used to be exactly that: ``db.get`` per id,
+    # and then ``business.users`` inside ``_recipients``, which is a lazy
+    # relationship and so a second statement again — 2N round trips before a
+    # single email was composed.
+    #
+    # Chunked for the reason ``reconciliation._suppliers_by_gstin`` is: every
+    # driver bounds the parameters one statement may carry, and the whole
+    # point of this list is that it grows with the customer base.
+    #
+    # ``selectinload`` rather than a join for the users: a business has many,
+    # and joining would multiply each business row by its user count and leave
+    # this loop de-duplicating. One extra statement per chunk, covering all of
+    # that chunk's users together, is the cheaper shape.
+    #
+    # Read straight out to plain data, because the loop below commits. A
+    # commit expires every instance in the session, so a ``business.users``
+    # read after the first tenant's commit would go back to the database and
+    # put the per-tenant round trip right back — loading it eagerly only helps
+    # for as long as nothing expires it.
+    digest_targets: list[tuple[int, list[str]]] = []
+    for start in range(0, len(business_ids), _TENANT_LOOKUP_CHUNK):
+        chunk = business_ids[start : start + _TENANT_LOOKUP_CHUNK]
+        businesses = db.scalars(
+            select(Business)
+            .where(
+                Business.id.in_(chunk),
+                Business.deleted_at.is_(None),
+                Business.is_active.is_(True),
+            )
+            .options(selectinload(Business.users))
+            .order_by(Business.id)
+        ).all()
+        digest_targets.extend((b.id, _recipients(b)) for b in businesses)
 
+    total = AlertEmailResult()
+    for business_id, recipients in digest_targets:
         alerts = db.scalars(
             select(Alert)
             .where(
@@ -151,7 +198,6 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
         if not alerts:
             continue
 
-        recipients = _recipients(business)
         if not recipients:
             total = AlertEmailResult(
                 businesses=total.businesses,
