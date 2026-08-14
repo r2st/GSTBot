@@ -81,6 +81,9 @@ npm run test:coverage
 npm run lint
 ```
 
+4,304 tests on the backend and 911 on the frontend, both green, in about a
+minute between them.
+
 The suite runs with **every external service unavailable** — in-memory SQLite,
 an unreachable Redis, no OpenRouter key — because that is how the degraded paths
 get exercised. `backend/tests/conftest.py` sets its own environment with
@@ -91,6 +94,29 @@ shell wrapper.
 Coverage gates (99% backend in `pyproject.toml`; frontend statements and lines
 at 99 and branches at 99.5 in `frontend/vite.config.js`) are ratchets against
 tests being deleted or a module landing with none — not targets to code towards.
+
+### The tests that fail when a new route or a new screen forgets something
+
+Most files here test one unit. A handful sweep the assembled application
+instead, and they are the ones most likely to go red on a change that looks
+unrelated — which is the point of them. Adding a route or a page means adding
+its entry, or explaining in the allowlist why it does not need one.
+
+| Sweep | What it refuses to let through |
+|---|---|
+| `test_tenancy_contract.py` | A route with an `*_id` that another tenant can fetch |
+| `test_request_guards.py` | A route reachable without resolving a user or a business |
+| `test_rbac.py` | A mutating route without `require_writer`, and a gate that does not actually refuse a viewer |
+| `test_openapi_contract.py` | A published spec that no longer matches the route's dependencies |
+| `test_error_prose.py` | A refusal whose message names a Python type, an index, or a library |
+| `frontend/src/App.loading.test.jsx` | A screen with no labelled placeholder while it waits |
+
+Three more walk the product rather than its surface, over a fake API that keeps
+state between requests, so a value one step produced is what the next step
+reads: `backend/tests/test_end_to_end.py`,
+`backend/tests/test_filing_journeys.py`, and `frontend/src/App.lifecycle.test.jsx`
+(upload → parse → reconcile → file) with `App.rbac.test.jsx` beside it for what
+a read-only session can and cannot do.
 
 ## Layout
 
