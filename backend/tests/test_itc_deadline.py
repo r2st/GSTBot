@@ -23,6 +23,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import event
 
 from app.models.alert import Alert, AlertSeverity, AlertStatus, AlertType
 from app.models.business import Business
@@ -894,3 +895,131 @@ def test_one_tenant_cannot_read_anothers_lapsing_credit(
 
     assert response.status_code == 200
     assert response.json()["years"] == []
+
+
+# ---------------------------------------------------------------------------
+# What the answer costs to produce
+# ---------------------------------------------------------------------------
+
+class TestTheSweepDoesNotReadTheMonthsItHasAlreadySettled:
+    """The register grows with the customer's history; the answer does not.
+
+    ``lapsing_credit`` is asked once per tenant by the daily alert sweep, so
+    what it reads out of the invoices table is multiplied by the whole customer
+    list. Every invoice from a period whose GSTR-3B is recorded as filed is
+    discarded, and a business that files on time has filed all but the current
+    month — so reading the register whole meant loading a year of rows to keep
+    the handful the alert could possibly be about.
+
+    A claim about the shape rather than a number: the same unfiled month costs
+    the same whether one month has been filed behind it or twelve. A constant
+    would only be a claim about today's fixtures.
+    """
+
+    def _rows_loaded(self, db, business, **kwargs) -> int:
+        """How many invoice rows one call hydrates.
+
+        Rows rather than statements: the query count is the same before and
+        after this change and it is the width of the read that grew. Counted
+        as the ORM makes each instance persistent rather than by inspecting
+        the session afterwards, because the identity map holds weak references
+        — the invoices are unreachable the moment the call returns, and a
+        count taken after it is a count of whatever has not been collected yet.
+
+        ``expunge_all`` first for the reason ``tests/test_dashboard.py`` gives:
+        the client shares this session, so a row already in the identity map is
+        answered from memory and never loads at all.
+        """
+        # Read before expunging: detaching the fixture's own Business would
+        # otherwise make ``business.id`` a lazy load against a session it is
+        # no longer in.
+        business_id = business.id
+        db.expunge_all()
+
+        loaded = []
+
+        def _seen(_session, instance):
+            if isinstance(instance, Invoice):
+                loaded.append(instance.id)
+
+        event.listen(db, "loaded_as_persistent", _seen)
+        try:
+            itc_deadline.lapsing_credit(db, business_id, **kwargs)
+        finally:
+            event.remove(db, "loaded_as_persistent", _seen)
+        return len(loaded)
+
+    def _history(self, db, business, months: list[tuple[str, date]], *, filed: bool):
+        for index, (period, when) in enumerate(months):
+            save_purchase(
+                db,
+                business.id,
+                invoice_number=f"HIST-{index}",
+                invoice_date=when,
+                period=period,
+            )
+            if filed:
+                record_3b(db, business, period=period, filed_on=when)
+
+    def test_a_filed_month_behind_the_unfiled_one_is_never_loaded(
+        self, db_session, business
+    ):
+        save_purchase(db_session, business.id)  # NEAR_PERIOD, unfiled.
+        self._history(
+            db_session, business, [("2025-07", date(2025, 7, 11))], filed=True
+        )
+
+        assert self._rows_loaded(db_session, business, as_of=AS_OF) == 1
+
+    def test_twelve_filed_months_cost_no_more_than_one(self, db_session, business):
+        save_purchase(db_session, business.id)  # NEAR_PERIOD, unfiled.
+        self._history(
+            db_session,
+            business,
+            [(f"2025-{month:02d}", date(2025, month, 11)) for month in range(7, 13)]
+            + [(f"2026-{month:02d}", date(2026, month, 11)) for month in range(1, 7)],
+            filed=True,
+        )
+
+        assert self._rows_loaded(db_session, business, as_of=AS_OF) == 1
+
+    def test_an_unfiled_month_is_still_read_however_many_there_are(
+        self, db_session, business
+    ):
+        # The other direction, so the test above cannot be satisfied by a
+        # query that reads nothing: what the sweep is actually for still
+        # arrives, and arrives whole.
+        save_purchase(db_session, business.id)
+        self._history(
+            db_session,
+            business,
+            [(f"2025-{month:02d}", date(2025, month, 11)) for month in range(7, 13)],
+            filed=False,
+        )
+
+        assert self._rows_loaded(db_session, business, as_of=AS_OF) == 7
+
+    def test_a_row_with_no_period_of_its_own_is_still_read(self, db_session, business):
+        # Its month is derived from the invoice date in Python, so the query
+        # cannot decide it and must not exclude it. This is the row that would
+        # disappear if the period filter were pushed down without the null arm.
+        record_3b(db_session, business, period=NEAR_PERIOD)
+        save_purchase(db_session, business.id, period=None)
+
+        assert self._rows_loaded(db_session, business, as_of=AS_OF) == 1
+
+    def test_a_period_before_the_business_arrived_is_not_read_either(
+        self, db_session, business
+    ):
+        # ``since_period`` is the alerting's guard against announcing a loss
+        # from before the product had any record. It bounded the answer;
+        # bounding the query too is free.
+        save_purchase(
+            db_session, business.id, invoice_date=date(2019, 6, 10), period="2019-06"
+        )
+        save_purchase(db_session, business.id, invoice_number="INV-2")
+
+        loaded = self._rows_loaded(
+            db_session, business, as_of=AS_OF, since_period=NEAR_PERIOD
+        )
+        assert loaded == 1

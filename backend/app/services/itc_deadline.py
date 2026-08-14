@@ -41,7 +41,8 @@ from app.models.gstr_return import ReturnType
 from app.models.invoice import Invoice
 from app.services import filing as filing_service
 from app.services import gst_calendar
-from app.services.itc import TaxHeads, purchase_invoices
+from app.services import itc as itc_service
+from app.services.itc import TaxHeads
 
 # How far ahead the exposure is worth surfacing. Sixty days rather than the
 # seven a filing deadline gets, because the two deadlines ask for different
@@ -174,20 +175,31 @@ def lapsing_credit(
     """
     today = as_of or gst_calendar.today_ist()
 
+    # The filing record first, and the register second — the opposite of the
+    # obvious order, and the reason is that this reads the register *minus* the
+    # months already filed rather than all of it. A business's filing history
+    # is a row a month; its purchase history is however many invoices a month
+    # it receives, and every one of those from a settled period would be loaded
+    # only to be dropped by the ``continue`` below. Asking about all periods
+    # rather than only the ones carrying credit is what makes that possible,
+    # and costs one small table instead of one large one.
+    filed = filing_service.filed_returns(db, business_id)
+    claimed = {
+        period
+        for period, return_type in filed
+        if return_type is ReturnType.GSTR3B
+    }
+
     invoices = [
         invoice
-        for invoice in purchase_invoices(db, business_id)
+        for invoice in itc_service.purchases_outside_periods(
+            db, business_id, excluding=claimed, from_period=since_period
+        )
         if _claimable(invoice)
         and (since_period is None or _period_of(invoice) >= since_period)
     ]
     if not invoices:
         return []
-
-    # One query for the whole register rather than one per period. The periods
-    # asked about are only those actually carrying credit, so a business with
-    # two unclaimed months does not fetch six years of filing history.
-    periods = {_period_of(invoice) for invoice in invoices}
-    filed = filing_service.filed_returns(db, business_id, sorted(periods))
 
     years: dict[str, dict] = {}
     for invoice in invoices:

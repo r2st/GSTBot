@@ -25,11 +25,12 @@ hold 18% of ₹1,234.56.
 """
 from __future__ import annotations
 
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.invoice import UNREADABLE_STATUSES, Invoice, InvoiceType
@@ -726,13 +727,26 @@ class ITCSummary:
         }
 
 
-def _purchases(db: Session, business_id: int, period: str | None = None) -> list[Invoice]:
-    """Purchase invoices that could carry credit, oldest first."""
+def _purchases(
+    db: Session,
+    business_id: int,
+    period: str | None = None,
+    *,
+    narrowed_by: Sequence = (),
+) -> list[Invoice]:
+    """Purchase invoices that could carry credit, oldest first.
+
+    *narrowed_by* is how a caller adds its own predicate without restating
+    what a purchase register is. What belongs in one — undeleted, inward, and
+    readable enough to carry a figure — is decided here and in one place, so a
+    caller that narrows the register cannot quietly widen it.
+    """
     conditions = [
         Invoice.business_id == business_id,
         Invoice.deleted_at.is_(None),
         Invoice.invoice_type == InvoiceType.PURCHASE,
         Invoice.status.not_in(UNREADABLE_STATUSES),
+        *narrowed_by,
     ]
     if period:
         conditions.append(Invoice.period == period)
@@ -754,6 +768,39 @@ def purchase_invoices(
     just of the period under review.
     """
     return _purchases(db, business_id, period)
+
+
+def purchases_outside_periods(
+    db: Session,
+    business_id: int,
+    *,
+    excluding: Collection[str],
+    from_period: str | None = None,
+) -> list[Invoice]:
+    """The purchase register minus the months the caller has already settled.
+
+    Exists for the s.16(4) sweep, which asks what credit is still unclaimed and
+    so discards every invoice whose period is recorded as filed. Asked of the
+    whole register, that is nearly all of them: a business two years in has
+    filed twenty-three of its twenty-four months, and reading those rows out of
+    the database to drop them in Python costs the same whether one month is
+    outstanding or none. The daily alert sweep is what makes it matter — once
+    per tenant, across every tenant, growing with how long each has been a
+    customer rather than with anything the alert could be about.
+
+    Rows with no ``period`` come back regardless of *excluding* and
+    *from_period*. Their month is derived from the invoice date, which is the
+    caller's rule rather than a column, so those rows are still decided where
+    they always were; this narrows the query without moving the answer.
+    """
+    narrowing = []
+    if excluding:
+        narrowing.append(
+            or_(Invoice.period.is_(None), Invoice.period.not_in(sorted(excluding)))
+        )
+    if from_period is not None:
+        narrowing.append(or_(Invoice.period.is_(None), Invoice.period >= from_period))
+    return _purchases(db, business_id, narrowed_by=narrowing)
 
 
 def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
