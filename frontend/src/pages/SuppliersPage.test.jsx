@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StubAuth } from "../test/auth";
 import SuppliersPage from "./SuppliersPage";
 
 function supplier(overrides = {}) {
@@ -96,7 +97,12 @@ function mockApi({ items = [supplier()], detail: one = detail(), rescored = 3, f
   });
 }
 
-const renderPage = () => render(<SuppliersPage />);
+const renderPage = ({ role } = {}) =>
+  render(
+    <StubAuth role={role}>
+      <SuppliersPage />
+    </StubAuth>,
+  );
 
 /**
  * A fetch that hands back the levers instead of resolving on its own.
@@ -920,5 +926,37 @@ describe("SuppliersPage", () => {
       const banner = await screen.findByRole("status");
       expect(banner).toHaveClass("banner-neutral");
     });
+  });
+});
+
+describe("a viewer", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is not offered the rescore", async () => {
+    mockApi();
+    renderPage({ role: "viewer" });
+    await loaded();
+
+    expect(screen.queryByRole("button", { name: /Rescore all/ })).toBeNull();
+  });
+
+  it("keeps the scores, which are the whole read", async () => {
+    // No notice on this screen on purpose: the table is still complete, and a
+    // list that lost one button does not read as broken. Bannering every page
+    // in the app would make the notice something people stop seeing.
+    mockApi();
+    renderPage({ role: "viewer" });
+
+    await loaded();
+    expect(screen.getByText("Northwind Supplies Pvt Ltd")).toBeInTheDocument();
+    expect(screen.queryByText(/read-only/)).toBeNull();
+  });
+
+  it("leaves an owner the rescore", async () => {
+    mockApi();
+    renderPage();
+    await loaded();
+
+    expect(screen.getByRole("button", { name: /Rescore all/ })).toBeInTheDocument();
   });
 });

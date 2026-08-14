@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import ReadOnlyNotice from "../components/ReadOnlyNotice";
 import { SkeletonPanel } from "../components/Skeleton";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { useStateCodes } from "../hooks/useStateCodes";
 import { api, isAbortError } from "../lib/api";
@@ -179,6 +181,7 @@ function Field({ spec, draft, message, setDraft, setTouched }) {
 export default function InvoiceDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { canWrite } = useAuth();
 
   const [invoice, setInvoice] = useState(null);
   const [draft, setDraft] = useState({});
@@ -446,17 +449,26 @@ export default function InvoiceDetailPage() {
             · {invoice.invoice_type} · {dateLabel(invoice.invoice_date)}
           </p>
         </div>
-        <div className="page-actions">
-          <button type="button" className="btn btn-ghost" onClick={handleReparse} disabled={busy}>
-            Re-extract
-          </button>
-          <button type="button" className="btn btn-danger" onClick={handleDelete}>
-            Delete
-          </button>
-        </div>
+        {canWrite && (
+          <div className="page-actions">
+            <button type="button" className="btn btn-ghost" onClick={handleReparse} disabled={busy}>
+              Re-extract
+            </button>
+            <button type="button" className="btn btn-danger" onClick={handleDelete}>
+              Delete
+            </button>
+          </div>
+        )}
       </div>
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
+      {/* The page keeps its whole read-only half — an invoice a viewer cannot
+          correct is still one they are here to look at — so the notice is what
+          explains the missing Re-extract, Delete and Save rather than the page
+          reading as broken. */}
+      <ReadOnlyNotice>
+        Ask an owner or an accountant to correct or delete this invoice.
+      </ReadOnlyNotice>
       {notice && (
         <div className="banner banner-good" role="status">
           {notice}
@@ -496,29 +508,17 @@ export default function InvoiceDetailPage() {
           </div>
         )}
 
+        {/* One `disabled` on a wrapping fieldset rather than a flag threaded
+            through every Field: the inputs stay in the DOM and keep showing
+            what the extractor read, which is what a viewer came for, and the
+            browser refuses focus and typing on all of them at once. Nothing
+            here relies on it — the Save button is gone and the route is
+            gated — but a field that looks editable and silently discards what
+            is typed into it is worse than one that never invited the typing. */}
         <form onSubmit={handleSave} noValidate>
-          <div className="edit-grid">
-            {editable.map((spec) => (
-              <Field
-                key={spec.field}
-                spec={spec}
-                draft={draft}
-                message={touched[spec.field] ? errors[spec.field] : ""}
-                setDraft={setDraft}
-                setTouched={setTouched}
-              />
-            ))}
-          </div>
-
-          <fieldset className="edit-fieldset">
-            <legend>Your books</legend>
-            <p className="muted small">
-              Not on the paper, and nothing can read them off it — but they decide what
-              this invoice’s credit is worth. Recording one does not mark the extraction
-              reviewed.
-            </p>
+          <fieldset className="fieldset-bare" disabled={!canWrite}>
             <div className="edit-grid">
-              {LEDGER_FLAGS.map((spec) => (
+              {editable.map((spec) => (
                 <Field
                   key={spec.field}
                   spec={spec}
@@ -529,16 +529,39 @@ export default function InvoiceDetailPage() {
                 />
               ))}
             </div>
+
+            <fieldset className="edit-fieldset">
+              <legend>Your books</legend>
+              <p className="muted small">
+                Not on the paper, and nothing can read them off it — but they decide what
+                this invoice’s credit is worth. Recording one does not mark the extraction
+                reviewed.
+              </p>
+              <div className="edit-grid">
+                {LEDGER_FLAGS.map((spec) => (
+                  <Field
+                    key={spec.field}
+                    spec={spec}
+                    draft={draft}
+                    message={touched[spec.field] ? errors[spec.field] : ""}
+                    setDraft={setDraft}
+                    setTouched={setTouched}
+                  />
+                ))}
+              </div>
           </fieldset>
 
-          <div className="edit-actions">
-            {/* Not disabled on invalid input. A disabled button gives no
-                reason it is disabled; letting the submit through is what
-                surfaces the per-field messages and the banner. */}
-            <button type="submit" className="btn btn-primary" disabled={busy}>
-              {busy ? "Saving…" : "Save corrections"}
-            </button>
-          </div>
+          {canWrite && (
+            <div className="edit-actions">
+              {/* Not disabled on invalid input. A disabled button gives no
+                  reason it is disabled; letting the submit through is what
+                  surfaces the per-field messages and the banner. */}
+              <button type="submit" className="btn btn-primary" disabled={busy}>
+                {busy ? "Saving…" : "Save corrections"}
+              </button>
+            </div>
+          )}
+          </fieldset>
         </form>
       </section>
 

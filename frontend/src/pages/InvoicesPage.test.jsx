@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { StubAuth } from "../test/auth";
 import InvoicesPage from "./InvoicesPage";
 
 const PAGE_SIZE = 25;
@@ -53,10 +54,12 @@ function mockApi({ items = [invoice()], total = items.length, fail } = {}) {
   return urls;
 }
 
-function renderPage() {
+function renderPage({ role } = {}) {
   return render(
     <MemoryRouter>
-      <InvoicesPage />
+      <StubAuth role={role}>
+        <InvoicesPage />
+      </StubAuth>
     </MemoryRouter>,
   );
 }

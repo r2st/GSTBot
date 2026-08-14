@@ -1,7 +1,9 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import ReadOnlyNotice from "../components/ReadOnlyNotice";
 import { Spinner } from "../components/Skeleton";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { dateLabel, rupees } from "../lib/format";
@@ -101,6 +103,7 @@ function ResultRow({ result }) {
 
 export default function UploadPage() {
   usePageTitle("Upload");
+  const { canWrite } = useAuth();
   const [invoiceType, setInvoiceType] = useState("purchase");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
@@ -248,75 +251,85 @@ export default function UploadPage() {
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
 
-      {/* Locked while a batch runs, like the file picker beside it.
-          `uploadFiles` reads the type once, at the top, and the loop under it
-          is deliberately sequential — so a batch is uploaded under the type it
-          was started with, and forty invoices take minutes to get through.
-          Left live, the radio moved while the loop went on sending the old
-          value: the screen said Sales and the remaining thirty files were still
-          being booked as purchases.
+      {/* Everything below this line is the write. A viewer gets the notice in
+          place of the whole form rather than a dropzone that answers 403 on
+          drop — the page's only purpose is uploading, so there is no read-only
+          version of it to fall back to. */}
+      <ReadOnlyNotice>Ask an owner or an accountant to upload invoices.</ReadOnlyNotice>
 
-          Which is the direction that costs money. A sales invoice booked as a
-          purchase claims input credit on the business's own output tax — an
-          over-claim with interest and a penalty on it — and nothing downstream
-          re-reads the document to catch it, because every screen shows the type
-          that was stored.
+      {!canWrite ? null : (
+        <>
+          {/* Locked while a batch runs, like the file picker beside it.
+              `uploadFiles` reads the type once, at the top, and the loop under it
+              is deliberately sequential — so a batch is uploaded under the type it
+              was started with, and forty invoices take minutes to get through.
+              Left live, the radio moved while the loop went on sending the old
+              value: the screen said Sales and the remaining thirty files were still
+              being booked as purchases.
 
-          Disabled rather than made to take effect mid-batch: splitting one drop
-          across two types by how fast the user clicked is not a thing anyone
-          can predict, and the honest unit here is the batch. The legend says so
-          while it is held. */}
-      <fieldset className="type-toggle" disabled={busy}>
-        <legend>
-          Invoice type
-          {busy && <span className="muted small"> · locked until the batch finishes</span>}
-        </legend>
-        {[
-          { value: "purchase", label: "Purchase (claim ITC)" },
-          { value: "sales", label: "Sales (feeds GSTR-1)" },
-        ].map((option) => (
-          <label key={option.value}>
+              Which is the direction that costs money. A sales invoice booked as a
+              purchase claims input credit on the business's own output tax — an
+              over-claim with interest and a penalty on it — and nothing downstream
+              re-reads the document to catch it, because every screen shows the type
+              that was stored.
+
+              Disabled rather than made to take effect mid-batch: splitting one drop
+              across two types by how fast the user clicked is not a thing anyone
+              can predict, and the honest unit here is the batch. The legend says so
+              while it is held. */}
+          <fieldset className="type-toggle" disabled={busy}>
+            <legend>
+              Invoice type
+              {busy && <span className="muted small"> · locked until the batch finishes</span>}
+            </legend>
+            {[
+              { value: "purchase", label: "Purchase (claim ITC)" },
+              { value: "sales", label: "Sales (feeds GSTR-1)" },
+            ].map((option) => (
+              <label key={option.value}>
+                <input
+                  type="radio"
+                  name="invoice_type"
+                  value={option.value}
+                  checked={invoiceType === option.value}
+                  onChange={(e) => setInvoiceType(e.target.value)}
+                />
+                {option.label}
+              </label>
+            ))}
+          </fieldset>
+
+          <div
+            className={dragging ? "dropzone is-dragging" : "dropzone"}
+            onDragOver={(e) => {
+              e.preventDefault();
+              // Not while a batch is running: highlighting invites a drop that is
+              // about to be refused.
+              if (!busy) setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={handleDrop}
+          >
+            <p>Drag invoices here, or</p>
+            <label htmlFor="invoice-file" className="btn btn-primary">
+              Choose files
+            </label>
             <input
-              type="radio"
-              name="invoice_type"
-              value={option.value}
-              checked={invoiceType === option.value}
-              onChange={(e) => setInvoiceType(e.target.value)}
+              id="invoice-file"
+              ref={inputRef}
+              type="file"
+              multiple
+              accept={ACCEPT}
+              className="visually-hidden"
+              disabled={busy}
+              onChange={(e) => uploadFiles(e.target.files)}
             />
-            {option.label}
-          </label>
-        ))}
-      </fieldset>
-
-      <div
-        className={dragging ? "dropzone is-dragging" : "dropzone"}
-        onDragOver={(e) => {
-          e.preventDefault();
-          // Not while a batch is running: highlighting invites a drop that is
-          // about to be refused.
-          if (!busy) setDragging(true);
-        }}
-        onDragLeave={() => setDragging(false)}
-        onDrop={handleDrop}
-      >
-        <p>Drag invoices here, or</p>
-        <label htmlFor="invoice-file" className="btn btn-primary">
-          Choose files
-        </label>
-        <input
-          id="invoice-file"
-          ref={inputRef}
-          type="file"
-          multiple
-          accept={ACCEPT}
-          className="visually-hidden"
-          disabled={busy}
-          onChange={(e) => uploadFiles(e.target.files)}
-        />
-        <p className="muted small">
-          Up to {MAX_UPLOAD_MB} MB per file · {INVOICE_EXTENSIONS.join(" ")}
-        </p>
-      </div>
+            <p className="muted small">
+              Up to {MAX_UPLOAD_MB} MB per file · {INVOICE_EXTENSIONS.join(" ")}
+            </p>
+          </div>
+        </>
+      )}
 
       {progress && (
         <p className="muted upload-progress" role="status">

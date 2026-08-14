@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import ReadOnlyNotice from "../components/ReadOnlyNotice";
 import { SkeletonStats } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import ValidationIssues from "../components/ValidationIssues";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
@@ -112,6 +114,7 @@ function latenessLine(owed) {
 
 export default function FilingPage() {
   usePageTitle("Filing");
+  const { canWrite } = useAuth();
   const [period, setPeriod] = useState(currentPeriod());
   const [returnType, setReturnType] = useState("gstr1");
   const [preview, setPreview] = useState(null);
@@ -510,7 +513,7 @@ export default function FilingPage() {
               here can see that happen. Tell us once you have filed — otherwise the
               deadline reminders keep treating {periodLabel(period)} as outstanding.
             </p>
-            {!recordable && (
+            {canWrite && !recordable && (
               <p className="muted small">
                 {periodLabel(period)} has not ended yet, so there is nothing to record —
                 the portal does not open a return until the month it covers is over.
@@ -523,41 +526,53 @@ export default function FilingPage() {
                 corrects the reference rather than filing twice.
               </p>
             )}
-            <form className="inline-form" onSubmit={handleRecordFiled}>
-              <label htmlFor="filing-arn">
-                <span>ARN (optional)</span>
-                <input
-                  id="filing-arn"
-                  type="text"
-                  value={arn}
-                  maxLength={40}
-                  placeholder="AA270426000000X"
-                  disabled={!recordable}
-                  aria-invalid={arnProblem ? "true" : undefined}
-                  aria-describedby={arnProblem ? "filing-arn-error" : undefined}
-                  onChange={(e) => {
-                    setArn(e.target.value);
-                    if (arnProblem) setArnProblem("");
-                  }}
-                />
-              </label>
-              <button
-                type="submit"
-                className="btn btn-primary"
-                disabled={busy || !recordable}
-              >
-                {busy ? "Working…" : `Mark ${meta.label} as filed`}
-              </button>
-            </form>
-            {arnProblem && (
-              <p className="field-error" id="filing-arn-error" role="alert">
-                {arnProblem}
+            {!canWrite ? (
+              /* The export buttons above stay: downloading a return is a read,
+                 and handing the JSON to the CA who *can* file it is most of
+                 what a viewer is on this screen to do. Only the recording is
+                 gone. */
+              <ReadOnlyNotice>
+                Ask an owner or an accountant to record the filing.
+              </ReadOnlyNotice>
+            ) : (
+              <>
+              <form className="inline-form" onSubmit={handleRecordFiled}>
+                <label htmlFor="filing-arn">
+                  <span>ARN (optional)</span>
+                  <input
+                    id="filing-arn"
+                    type="text"
+                    value={arn}
+                    maxLength={40}
+                    placeholder="AA270426000000X"
+                    disabled={!recordable}
+                    aria-invalid={arnProblem ? "true" : undefined}
+                    aria-describedby={arnProblem ? "filing-arn-error" : undefined}
+                    onChange={(e) => {
+                      setArn(e.target.value);
+                      if (arnProblem) setArnProblem("");
+                    }}
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={busy || !recordable}
+                >
+                  {busy ? "Working…" : `Mark ${meta.label} as filed`}
+                </button>
+              </form>
+              {arnProblem && (
+                <p className="field-error" id="filing-arn-error" role="alert">
+                  {arnProblem}
+                </p>
+              )}
+              <p className="muted small">
+                You can leave the ARN blank now and add it later — recording the same period
+                again never clears a reference already saved.
               </p>
+              </>
             )}
-            <p className="muted small">
-              You can leave the ARN blank now and add it later — recording the same period
-              again never clears a reference already saved.
-            </p>
           </section>
 
           <section className="panel">

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { dateLabel, rupees, statusLabel, statusTone } from "../lib/format";
@@ -37,6 +38,7 @@ function SortHeader({ column, sort, onSort, children }) {
 
 export default function InvoicesPage() {
   usePageTitle("Invoices");
+  const { canWrite } = useAuth();
   const [filters, setFilters] = useState({ invoice_type: "", status: "", search: "" });
   const [sort, setSort] = useState("");
   const [offset, setOffset] = useState(0);
@@ -131,9 +133,14 @@ export default function InvoicesPage() {
     <div className="page" aria-busy={refreshing}>
       <div className="page-head">
         <h1>Invoices</h1>
-        <Link to="/upload" className="btn btn-primary">
-          Upload
-        </Link>
+        {/* A call to action for a page whose only control a viewer does not
+            have. The list itself is untouched — this is the invitation going,
+            not the invoices. */}
+        {canWrite && (
+          <Link to="/upload" className="btn btn-primary">
+            Upload
+          </Link>
+        )}
       </div>
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />
@@ -206,9 +213,18 @@ export default function InvoicesPage() {
       ) : items.length === 0 ? (
         <div className="empty">
           <p>No invoices yet.</p>
-          <Link to="/upload" className="btn btn-primary">
-            Upload your first invoice
-          </Link>
+          {canWrite ? (
+            <Link to="/upload" className="btn btn-primary">
+              Upload your first invoice
+            </Link>
+          ) : (
+            /* "Upload your first invoice" is the one sentence on this screen a
+               viewer cannot act on, and an empty state that asks for something
+               impossible is worse than one that says who to ask. */
+            <p className="muted">
+              An owner or an accountant can upload the first one.
+            </p>
+          )}
         </div>
       ) : (
         <div className={refreshing ? "results is-refreshing" : "results"}>

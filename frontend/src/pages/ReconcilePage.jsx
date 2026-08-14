@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
+import ReadOnlyNotice from "../components/ReadOnlyNotice";
 import { SkeletonText } from "../components/Skeleton";
 import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import ValidationIssues from "../components/ValidationIssues";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
@@ -162,6 +164,7 @@ function FindingRow({ finding }) {
 
 export default function ReconcilePage() {
   usePageTitle("Reconcile");
+  const { canWrite } = useAuth();
   const [period, setPeriod] = useState(currentPeriod());
   const [imported, setImported] = useState(null);
   const [run, setRun] = useState(null);
@@ -552,28 +555,38 @@ export default function ReconcilePage() {
           </p>
         )}
 
-        <div className="button-row">
-          <label htmlFor="gstr2b-file" className="btn btn-ghost">
-            {imported ? "Replace GSTR-2B" : "Import GSTR-2B"}
-          </label>
-          <input
-            id="gstr2b-file"
-            ref={inputRef}
-            type="file"
-            accept={ACCEPT}
-            className="visually-hidden"
-            disabled={busy}
-            onChange={(e) => handleImport(e.target.files)}
-          />
-          <button
-            type="button"
-            className="btn btn-primary"
-            disabled={busy || !imported}
-            onClick={handleReconcile}
-          >
-            {busy ? "Working…" : "Run reconciliation"}
-          </button>
-        </div>
+        {/* The only two writes on the screen. Everything below — the findings,
+            the run history, the View buttons — is reading, and a viewer keeps
+            all of it: what a reconciliation found is exactly what someone
+            without the authority to re-run it is here to look at. */}
+        <ReadOnlyNotice>
+          Ask an owner or an accountant to import GSTR-2B or run a reconciliation.
+        </ReadOnlyNotice>
+
+        {canWrite && (
+          <div className="button-row">
+            <label htmlFor="gstr2b-file" className="btn btn-ghost">
+              {imported ? "Replace GSTR-2B" : "Import GSTR-2B"}
+            </label>
+            <input
+              id="gstr2b-file"
+              ref={inputRef}
+              type="file"
+              accept={ACCEPT}
+              className="visually-hidden"
+              disabled={busy}
+              onChange={(e) => handleImport(e.target.files)}
+            />
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={busy || !imported}
+              onClick={handleReconcile}
+            >
+              {busy ? "Working…" : "Run reconciliation"}
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Guarded on the period as well as on there being a report, so the

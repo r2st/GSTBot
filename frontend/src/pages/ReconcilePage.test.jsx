@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentPeriod, periodLabel } from "../lib/format";
+import { StubAuth } from "../test/auth";
 import ReconcilePage from "./ReconcilePage";
 
 const PERIOD = "2026-04";
@@ -156,10 +157,12 @@ function mockApi({
   });
 }
 
-function renderPage() {
+function renderPage({ role } = {}) {
   return render(
     <MemoryRouter>
-      <ReconcilePage />
+      <StubAuth role={role}>
+        <ReconcilePage />
+      </StubAuth>
     </MemoryRouter>,
   );
 }
@@ -1158,7 +1161,9 @@ describe("the runs a period accumulates", () => {
     });
     return render(
       <MemoryRouter>
-        <ReconcilePage />
+        <StubAuth>
+          <ReconcilePage />
+        </StubAuth>
       </MemoryRouter>,
     );
   }
@@ -1296,7 +1301,9 @@ describe("the runs a period accumulates", () => {
     });
     render(
       <MemoryRouter>
-        <ReconcilePage />
+        <StubAuth>
+          <ReconcilePage />
+        </StubAuth>
       </MemoryRouter>,
     );
     await screen.findByText(/invoices imported/);
@@ -1349,7 +1356,9 @@ describe("the runs a period accumulates", () => {
     });
     render(
       <MemoryRouter>
-        <ReconcilePage />
+        <StubAuth>
+          <ReconcilePage />
+        </StubAuth>
       </MemoryRouter>,
     );
 
@@ -1386,7 +1395,9 @@ describe("the runs a period accumulates", () => {
     });
     render(
       <MemoryRouter>
-        <ReconcilePage />
+        <StubAuth>
+          <ReconcilePage />
+        </StubAuth>
       </MemoryRouter>,
     );
     await screen.findByRole("region", { name: "Earlier reconciliation runs" });

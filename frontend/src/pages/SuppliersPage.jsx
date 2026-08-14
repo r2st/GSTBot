@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { dateLabel, periodLabel, rupees } from "../lib/format";
@@ -166,6 +167,7 @@ function SupplierDetail({ supplier, onClose }) {
 
 export default function SuppliersPage() {
   usePageTitle("Suppliers");
+  const { canWrite } = useAuth();
   const [items, setItems] = useState([]);
   const [total, setTotal] = useState(0);
   const [risk, setRisk] = useState("");
@@ -292,14 +294,20 @@ export default function SuppliersPage() {
             how much of their credit is worth providing against.
           </p>
         </div>
-        <button
-          type="button"
-          className="btn btn-ghost"
-          disabled={busy}
-          onClick={handleRescore}
-        >
-          {busy ? "Working…" : "Rescore all"}
-        </button>
+        {/* The only write here. The scores themselves, and the per-supplier
+            detail below, are a read a viewer keeps in full — no notice, because
+            a list that is still complete does not read as broken for having one
+            fewer button. */}
+        {canWrite && (
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={busy}
+            onClick={handleRescore}
+          >
+            {busy ? "Working…" : "Rescore all"}
+          </button>
+        )}
       </div>
 
       <ErrorBanner message={error} onDismiss={() => setError("")} />

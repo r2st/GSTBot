@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateCodesContext } from "../hooks/useStateCodes";
+import { StubAuth } from "../test/auth";
 import InvoiceDetailPage from "./InvoiceDetailPage";
 
 function jsonResponse(body, { status = 200 } = {}) {
@@ -38,13 +39,15 @@ function invoice(overrides = {}) {
   };
 }
 
-async function renderPage(data = invoice()) {
+async function renderPage(data = invoice(), { role } = {}) {
   global.fetch.mockResolvedValueOnce(jsonResponse(data));
   render(
     <MemoryRouter initialEntries={["/invoices/42"]}>
-      <Routes>
-        <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-      </Routes>
+      <StubAuth role={role}>
+        <Routes>
+          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+        </Routes>
+      </StubAuth>
     </MemoryRouter>,
   );
   // Wait for the load to land before any interaction.
@@ -94,9 +97,11 @@ describe("InvoiceDetailPage", () => {
     global.fetch.mockReturnValueOnce(new Promise(() => {}));
     render(
       <MemoryRouter initialEntries={["/invoices/42"]}>
-        <Routes>
-          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-        </Routes>
+        <StubAuth>
+          <Routes>
+            <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+          </Routes>
+        </StubAuth>
       </MemoryRouter>,
     );
     expect(screen.getByText("Loading invoice…")).toBeInTheDocument();
@@ -111,9 +116,11 @@ describe("InvoiceDetailPage", () => {
     );
     render(
       <MemoryRouter initialEntries={["/invoices/42"]}>
-        <Routes>
-          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-        </Routes>
+        <StubAuth>
+          <Routes>
+            <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+          </Routes>
+        </StubAuth>
       </MemoryRouter>,
     );
 
@@ -458,10 +465,12 @@ describe("InvoiceDetailPage", () => {
     function renderAtFortyTwo() {
       return render(
         <MemoryRouter initialEntries={["/invoices/42"]}>
-          <Link to="/invoices/43">Open 43</Link>
-          <Routes>
-            <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-          </Routes>
+          <StubAuth>
+            <Link to="/invoices/43">Open 43</Link>
+            <Routes>
+              <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+            </Routes>
+          </StubAuth>
         </MemoryRouter>,
       );
     }
@@ -922,9 +931,11 @@ describe("InvoiceDetailPage", () => {
       render(
         <StateCodesContext.Provider value={{ codes, load: () => {} }}>
           <MemoryRouter initialEntries={["/invoices/42"]}>
-            <Routes>
-              <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
-            </Routes>
+            <StubAuth>
+              <Routes>
+                <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
+              </Routes>
+            </StubAuth>
           </MemoryRouter>
         </StateCodesContext.Provider>,
       );
@@ -1025,5 +1036,47 @@ describe("InvoiceDetailPage", () => {
         place_of_supply: "29",
       });
     });
+  });
+});
+
+describe("a viewer", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is not offered the three writes this screen has", async () => {
+    await renderPage(invoice(), { role: "viewer" });
+
+    expect(screen.queryByRole("button", { name: "Re-extract" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Save corrections/ })).toBeNull();
+  });
+
+  it("keeps every extracted field on screen, because reading them is the point", async () => {
+    await renderPage(invoice(), { role: "viewer" });
+
+    expect(screen.getByLabelText("Counterparty GSTIN")).toHaveValue("27AAPFU0939F1ZV");
+    expect(screen.getByLabelText("Invoice number")).toHaveValue("INV-2026-0042");
+  });
+
+  it("cannot type into a field whose edit could never be saved", async () => {
+    // The fields stay rather than being swapped for text, so without this they
+    // would accept an edit and silently drop it — a correction someone made,
+    // watched appear on screen, and never filed.
+    await renderPage(invoice(), { role: "viewer" });
+
+    expect(screen.getByLabelText("Counterparty GSTIN")).toBeDisabled();
+    expect(screen.getByLabelText("Capital goods")).toBeDisabled();
+  });
+
+  it("leaves an owner all three", async () => {
+    await renderPage();
+
+    expect(screen.getByRole("button", { name: "Re-extract" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Save corrections/ })).toBeInTheDocument();
+    expect(screen.getByLabelText("Counterparty GSTIN")).toBeEnabled();
   });
 });

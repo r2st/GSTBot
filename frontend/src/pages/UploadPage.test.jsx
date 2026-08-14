@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StubAuth } from "../test/auth";
 import UploadPage from "./UploadPage";
 
 function jsonResponse(body, { status = 200 } = {}) {
@@ -72,10 +73,12 @@ function sizedFile(name, bytes) {
   return made;
 }
 
-function renderPage() {
+function renderPage({ role } = {}) {
   return render(
     <MemoryRouter>
-      <UploadPage />
+      <StubAuth role={role}>
+        <UploadPage />
+      </StubAuth>
     </MemoryRouter>,
   );
 }
@@ -242,7 +245,7 @@ describe("UploadPage", () => {
     // The point of the client-side check: a 41 MB scan should be refused
     // before it is read off disk and pushed over a phone connection.
     expect(await screen.findByText(/over the 15 MB limit/)).toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(global.fetch.mock.calls.map((c) => c[0])).toEqual([]);
   });
 
   it("refuses a file type the parser cannot read", async () => {
@@ -257,7 +260,7 @@ describe("UploadPage", () => {
     });
 
     expect(await screen.findByText(/which cannot be read/)).toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(global.fetch.mock.calls.map((c) => c[0])).toEqual([]);
   });
 
   it("accepts a dropped file the parser can read", async () => {
@@ -280,7 +283,7 @@ describe("UploadPage", () => {
     // Zero bytes otherwise reaches the parser and comes back as "no fields
     // found", which reads like the extraction failed rather than the file.
     expect(await screen.findByText(/still be downloading/)).toBeInTheDocument();
-    expect(global.fetch).not.toHaveBeenCalled();
+    expect(global.fetch.mock.calls.map((c) => c[0])).toEqual([]);
   });
 
   it("uploads the good files in a batch and reports the rejected one", async () => {
@@ -572,7 +575,7 @@ describe("UploadPage", () => {
       fireEvent.drop(dropzone(container), { dataTransfer: { files: [] } });
 
       await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(global.fetch.mock.calls.map((c) => c[0])).toEqual([]);
     });
 
     it("ignores a drop with no file list at all rather than throwing on it", async () => {
@@ -585,7 +588,7 @@ describe("UploadPage", () => {
       fireEvent.drop(dropzone(container), { dataTransfer: {} });
 
       await waitFor(() => expect(dropzone(container)).not.toHaveClass("is-dragging"));
-      expect(global.fetch).not.toHaveBeenCalled();
+      expect(global.fetch.mock.calls.map((c) => c[0])).toEqual([]);
       expect(screen.getByRole("heading", { name: "Upload invoices" })).toBeInTheDocument();
     });
   });
@@ -826,5 +829,53 @@ describe("the invoice type while a batch is running", () => {
     for (const call of global.fetch.mock.calls) {
       expect(call[1].body.get("invoice_type")).toBe("sales");
     }
+  });
+});
+
+describe("a viewer", () => {
+  // Its own fetch, rather than the one the suite above leaves behind: this
+  // block asserts that *no* request is made, which is only a claim about this
+  // page if the counter starts at zero.
+  beforeEach(() => {
+    localStorage.clear();
+    global.fetch = vi.fn();
+  });
+  afterEach(() => vi.restoreAllMocks());
+
+  // Every route this page can call is writer-only, so there is no read-only
+  // version of it to fall back to. The controls go and the notice takes their
+  // place — a dropzone that answers 403 on drop would be worse than no
+  // dropzone, and a bare page with nothing on it worse still.
+  it("is not shown a dropzone whose every drop would be refused", () => {
+    renderPage({ role: "viewer" });
+
+    expect(screen.queryByLabelText("Choose files")).toBeNull();
+    expect(screen.queryByText(/Drag invoices here/)).toBeNull();
+    expect(screen.queryByRole("group", { name: /Invoice type/ })).toBeNull();
+  });
+
+  it("is told why, and who can do it", () => {
+    renderPage({ role: "viewer" });
+
+    const notice = screen.getByRole("status");
+    expect(notice).toHaveTextContent(/read-only/);
+    expect(notice).toHaveTextContent(/Ask an owner or an accountant to upload/);
+  });
+
+  it("sends nothing", async () => {
+    // The gate is the point, so assert the absence that matters: no request
+    // leaves the page at all, rather than one that leaves and is refused.
+    renderPage({ role: "viewer" });
+    await Promise.resolve();
+
+    expect(global.fetch.mock.calls.map((c) => c[0])).toEqual([]);
+  });
+
+  it("leaves an owner the whole form", () => {
+    renderPage();
+
+    expect(screen.getByLabelText("Choose files")).toBeInTheDocument();
+    expect(screen.getByText(/Drag invoices here/)).toBeInTheDocument();
+    expect(screen.queryByText(/read-only/)).toBeNull();
   });
 });

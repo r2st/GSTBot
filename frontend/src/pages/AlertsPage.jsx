@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import ErrorBanner from "../components/ErrorBanner";
 import { SkeletonPanel } from "../components/Skeleton";
+import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
 import { dateLabel, periodLabel } from "../lib/format";
@@ -41,9 +42,14 @@ function SeverityChip({ severity }) {
  * bit as unmet, so it stays in the badge, while dismissing it says "I know" and
  * stops the sweep raising it again tomorrow.
  */
-function AlertRow({ alert, busy, onRead, onDismiss }) {
+function AlertRow({ alert, busy, canWrite, onRead, onDismiss }) {
   const closed = CLOSED_LABEL[alert.status];
   const unread = alert.status === "pending" || alert.status === "sent";
+  // Read and dismiss are both writes, and "Record filing" leads to the one
+  // control on the filing screen a viewer also does not have. With all three
+  // gone the row has no actions left, so the container goes too rather than
+  // leaving an empty flex row's padding under every alert.
+  const actions = canWrite && (unread || !closed || alert.alert_type === "filing_deadline");
 
   return (
     <li className={`alert-row is-${SEVERITY[alert.severity]?.tone ?? "neutral"}`}>
@@ -61,43 +67,46 @@ function AlertRow({ alert, busy, onRead, onDismiss }) {
         Raised {dateLabel(alert.created_at)}
       </p>
 
-      <div className="alert-actions">
-        {/* The alert asks for a filing, and this is where a filing gets
-            recorded — so the way to make a deadline alert close *properly* is
-            one click away rather than something to go and find. Recording the
-            filing resolves it on the next sweep; dismissing only silences it. */}
-        {alert.alert_type === "filing_deadline" && !closed && (
-          <Link to="/filing" className="btn btn-primary">
-            Record filing
-          </Link>
-        )}
-        {unread && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={busy}
-            onClick={onRead}
-          >
-            Mark as read
-          </button>
-        )}
-        {!closed && (
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={busy}
-            onClick={onDismiss}
-          >
-            Dismiss
-          </button>
-        )}
-      </div>
+      {actions && (
+        <div className="alert-actions">
+          {/* The alert asks for a filing, and this is where a filing gets
+              recorded — so the way to make a deadline alert close *properly* is
+              one click away rather than something to go and find. Recording the
+              filing resolves it on the next sweep; dismissing only silences it. */}
+          {alert.alert_type === "filing_deadline" && !closed && (
+            <Link to="/filing" className="btn btn-primary">
+              Record filing
+            </Link>
+          )}
+          {unread && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={onRead}
+            >
+              Mark as read
+            </button>
+          )}
+          {!closed && (
+            <button
+              type="button"
+              className="btn btn-ghost"
+              disabled={busy}
+              onClick={onDismiss}
+            >
+              Dismiss
+            </button>
+          )}
+        </div>
+      )}
     </li>
   );
 }
 
 export default function AlertsPage() {
   usePageTitle("Alerts");
+  const { canWrite } = useAuth();
   const [items, setItems] = useState([]);
   const [openTotal, setOpenTotal] = useState(0);
   const [scope, setScope] = useState("open");
@@ -300,6 +309,7 @@ export default function AlertsPage() {
                 key={alert.id}
                 alert={alert}
                 busy={pending.has(alert.id)}
+                canWrite={canWrite}
                 onRead={() => apply(alert, api.markAlertRead)}
                 onDismiss={() => apply(alert, api.dismissAlert)}
               />

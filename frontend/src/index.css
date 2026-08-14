@@ -885,6 +885,17 @@ button.chip.is-active {
   margin-top: 0.85rem;
 }
 
+/* A fieldset used only for its `disabled`, which is the one way to turn off
+   every control inside a form at once without threading a flag through each
+   input. Carries none of a fieldset's own appearance, so wrapping a form in it
+   to make the form read-only does not also draw a box around it. */
+.fieldset-bare {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0; /* Fieldsets get an intrinsic min-width that breaks grid children. */
+}
+
 /* The ledger facts — paid on, capital goods, credit claimable, reverse charge.
    Separated from the extracted fields because they are a different kind of
    claim: the fields above are what the document says, these are what the

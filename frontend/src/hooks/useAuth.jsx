@@ -8,7 +8,12 @@ import {
   setToken,
 } from "../lib/api";
 
-const AuthContext = createContext(null);
+// Exported for tests, which mount one page at a time and need to say what role
+// it is being viewed with. The alternative is a real `AuthProvider` around
+// every page test, which would put a `/auth/me` fetch in front of the request
+// each test is actually about — so the stub is the honest seam, and
+// `src/test/auth.jsx` is the only thing that uses it.
+export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -110,9 +115,28 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  // May this session change the books it is currently looking at?
+  //
+  // `active_role`, not `role`. The two differ exactly when it matters: `role`
+  // is the role on the login's own business, while a session switched to a
+  // linked business is enforced against that membership's role. An owner
+  // linked into a client as a viewer has `role: "owner"` and
+  // `active_role: "viewer"`, and gating on the former would show a full set of
+  // buttons for the one business where every one of them is refused.
+  //
+  // Derived from the server's answer rather than tracked separately, so it
+  // changes with the business the moment `/auth/me` says it has — see
+  // `switchBusiness`, which sets `user` from that response.
+  //
+  // This hides controls; it does not enforce anything. `require_writer` on the
+  // route is the enforcement, and it stays the only thing standing between a
+  // viewer and a write — a client can always call the API directly. What this
+  // buys is that a viewer is not invited to try.
+  const canWrite = user ? user.active_role !== "viewer" : false;
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, register, logout, switchBusiness }}
+      value={{ user, loading, canWrite, login, register, logout, switchBusiness }}
     >
       {children}
     </AuthContext.Provider>

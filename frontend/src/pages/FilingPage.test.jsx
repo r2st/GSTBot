@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentPeriod, periodLabel } from "../lib/format";
+import { StubAuth } from "../test/auth";
 import FilingPage from "./FilingPage";
 
 const PERIOD = "2026-04";
@@ -219,10 +220,12 @@ async function selectCompletedPeriod(user) {
   return previous;
 }
 
-function renderPage() {
+function renderPage({ role } = {}) {
   return render(
     <MemoryRouter>
-      <FilingPage />
+      <StubAuth role={role}>
+        <FilingPage />
+      </StubAuth>
     </MemoryRouter>,
   );
 }
@@ -1304,5 +1307,49 @@ describe("FilingPage", () => {
         ).not.toBeInTheDocument(),
       );
     });
+  });
+});
+
+describe("a viewer", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("cannot record a filing", async () => {
+    mockApi();
+    renderPage({ role: "viewer" });
+    await loaded();
+
+    expect(screen.queryByRole("button", { name: /Mark GSTR-1 as filed/i })).toBeNull();
+    expect(screen.queryByLabelText(/ARN/)).toBeNull();
+  });
+
+  it("keeps the exports, which are reads and the reason it is on this page", async () => {
+    // The point of the split. A viewer downloading the JSON and handing it to
+    // the CA who can file it is the normal way this product gets used by a
+    // business that has an outside accountant — gating the exports along with
+    // the recording would have broken that for no gain.
+    mockApi();
+    renderPage({ role: "viewer" });
+    await loaded();
+
+    expect(screen.getByRole("button", { name: /Download GSTR-1 JSON/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download CSV" })).toBeInTheDocument();
+  });
+
+  it("is told why the recording is missing", async () => {
+    mockApi();
+    renderPage({ role: "viewer" });
+    await loaded();
+
+    expect(
+      screen.getByText(/Ask an owner or an accountant to record the filing/),
+    ).toBeInTheDocument();
+  });
+
+  it("leaves an owner the recording form", async () => {
+    mockApi();
+    renderPage();
+    await loaded();
+
+    expect(screen.getByRole("button", { name: /Mark GSTR-1 as filed/i })).toBeInTheDocument();
   });
 });

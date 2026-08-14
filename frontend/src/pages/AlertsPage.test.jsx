@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StubAuth } from "../test/auth";
 import AlertsPage from "./AlertsPage";
 
 function alert(overrides = {}) {
@@ -52,10 +53,12 @@ function mockFetch(...bodies) {
   return fetch;
 }
 
-function renderPage() {
+function renderPage({ role } = {}) {
   return render(
     <MemoryRouter>
-      <AlertsPage />
+      <StubAuth role={role}>
+        <AlertsPage />
+      </StubAuth>
     </MemoryRouter>,
   );
 }
@@ -623,5 +626,42 @@ describe("an action that outlives the tab it was started on", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /Could not reach the server/,
     );
+  });
+});
+
+describe("a viewer", () => {
+  // The API answers 403 to both alert writes. Before this, the buttons were
+  // rendered anyway, so the only way to find out was to click one and read a
+  // refusal — on a screen whose whole purpose is working through a backlog.
+  it("is not offered the two actions it would be refused", async () => {
+    mockFetch(page([alert()]));
+    renderPage({ role: "viewer" });
+    await screen.findByText(/is overdue/);
+
+    expect(screen.queryByRole("button", { name: "Mark as read" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    // And the shortcut to the filing screen goes with them: it leads to the
+    // one control there that a viewer also does not have.
+    expect(screen.queryByRole("link", { name: "Record filing" })).toBeNull();
+  });
+
+  it("still reads every alert, which is what it is here for", async () => {
+    mockFetch(page([alert()]));
+    renderPage({ role: "viewer" });
+
+    expect(await screen.findByText(/is overdue/)).toBeInTheDocument();
+    expect(screen.getByText(/was due on 2026-05-20/)).toBeInTheDocument();
+    expect(screen.getByText("Overdue")).toBeInTheDocument();
+  });
+
+  it("leaves an owner both actions", async () => {
+    // The other half of the claim: the gate is the role, not something that
+    // removed the buttons for everyone.
+    mockFetch(page([alert()]));
+    renderPage();
+    await screen.findByText(/is overdue/);
+
+    expect(screen.getByRole("button", { name: "Mark as read" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).toBeInTheDocument();
   });
 });
