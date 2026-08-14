@@ -420,6 +420,11 @@ TARGETS: tuple[Target, ...] = (
     # Money the user is asked to pay that no invoice states: unlike a tax
     # split, nothing downstream re-derives a fee or an interest figure, so a
     # wrong one is never contradicted by anything — it is simply paid.
+    #
+    # Tops out at 43/45. The two it cannot reach are both edges of the same
+    # guard in ``interest`` — zero days and zero tax each multiply out to zero
+    # whether the guard catches them or not — so no test can tell the mutant
+    # from the original. See the docstring there.
     Target("late_fee", "app/services/late_fee.py", ("tests/test_late_fee.py",)),
     Target(
         "itc",

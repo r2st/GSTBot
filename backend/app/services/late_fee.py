@@ -105,6 +105,12 @@ def interest(net_tax: Decimal, days_late: int) -> Decimal:
 
     Zero for a period that owes nothing, or one that is not yet late — a
     negative ``days_late`` is a due date still ahead, not a rebate.
+
+    Both guards are stated at ``<=`` rather than ``<`` to say what they mean,
+    not because the equal case would compute wrongly without them: zero days or
+    zero tax multiplies out to zero anyway, and only a *negative* one needs
+    catching. Nothing can distinguish the two forms, so the mutation run leaves
+    two survivors here permanently — see the score note in ``tools/mutation.py``.
     """
     if days_late <= 0 or net_tax <= ZERO:
         return ZERO

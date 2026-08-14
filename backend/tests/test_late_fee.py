@@ -6,6 +6,7 @@ before checking the endpoint wires the two into one figure correctly.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import date
 from decimal import Decimal
 
@@ -201,6 +202,51 @@ class TestLateFee:
             days_late=1000, is_nil=False, previous_year_turnover=Decimal("15000000.01")
         )
         assert over.total == Decimal("5000.00")
+
+    def test_a_return_filed_on_its_due_date_is_quoted_its_turnover_cap_not_the_nil_one(self):
+        # Day zero returns before the nil branch is reached, so the tier a
+        # not-yet-late filer is shown is the one their turnover puts them in.
+        # The distinction is only visible on a nil return, where being one day
+        # later would swap the ₹2,000 cap for the ₹500 nil cap — and the ₹2,000
+        # is the honest answer to "what could this cost me", because whether
+        # the period is still nil on the day it is finally filed is not
+        # something a zero-invoice period today can promise.
+        fee = late_fee_service.late_fee(
+            0, is_nil=True, previous_year_turnover=Decimal("1000000")
+        )
+        assert fee.total == Decimal("0.00")
+        assert fee.tier.label == "turnover up to ₹1.5 crore"
+        assert fee.tier.cap == Decimal("2000.00")
+
+
+# ---------------------------------------------------------------------------
+# The value objects the figures travel in
+# ---------------------------------------------------------------------------
+
+class TestTheQuotedFiguresCannotBeEditedAfterTheyAreQuoted:
+    """A fee is quoted once and then read by several screens.
+
+    The estimate goes to the late-fee endpoint, to the dashboard card, and
+    through ``as_dict`` to the alert digest, all from the one call — and
+    nothing downstream re-derives it from the invoices, so a reader that
+    adjusted a head in place would change what every later reader is told a
+    business owes, with no second computation to contradict it.
+    """
+
+    def test_a_turnover_tier_cannot_be_edited(self):
+        tier = late_fee_service.turnover_tier(Decimal("1000000"))
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            tier.cap = Decimal("10000.00")
+
+    def test_a_late_fee_cannot_be_edited(self):
+        fee = late_fee_service.late_fee(4, is_nil=False)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            fee.cgst = Decimal("0.00")
+
+    def test_an_estimate_cannot_be_edited(self, db_session, business, frozen_today):
+        estimate = late_fee_service.estimate(db_session, business, PERIOD)
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            estimate.days_late = 0
 
 
 # ---------------------------------------------------------------------------

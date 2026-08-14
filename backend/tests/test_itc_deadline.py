@@ -19,6 +19,7 @@ with an extra row nobody looked at.
 """
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime
 from decimal import Decimal
 
@@ -257,6 +258,24 @@ def test_unclaimed_credit_is_reported_against_its_financial_years_deadline(db_se
     assert row.periods == (NEAR_PERIOD,)
     assert row.total == Decimal("18000.00")
     assert row.expired is False
+
+
+def test_a_lapsing_row_cannot_be_edited_after_it_is_reported(db_session):
+    """One row answers two readers, and neither recomputes it.
+
+    ``lapsing_credit`` is called once and its rows go to the ``/itc/lapsing``
+    endpoint and to the alert the sweep raises — which reads ``total`` into the
+    message body a business is emailed. A reader that adjusted a row in place
+    would change the figure the other one announced, and nothing further down
+    re-derives it from the invoices to disagree.
+    """
+    business = make_business(db_session)
+    save_purchase(db_session, business.id)
+
+    (row,) = itc_deadline.lapsing_credit(db_session, business.id, as_of=AS_OF)
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        row.days_remaining = 0
 
 
 def test_recording_the_gstr_3b_takes_the_credit_and_empties_the_list(db_session):
