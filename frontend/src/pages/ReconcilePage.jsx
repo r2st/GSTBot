@@ -246,6 +246,17 @@ export default function ReconcilePage() {
     setUnknown({ imported: unanswered(importResult), run: unanswered(runResult) });
 
     const failure = [importResult, runResult].find(unanswered);
+    // The `||` never fires, and proving it does would mean rejecting with an
+    // error this app cannot construct. Every throw in `lib/api.js` carries a
+    // written sentence: `refusal` is handed `errorMessage`, which falls back to
+    // a non-empty string by its own `|| fallback`; the unreadable-body and
+    // unreachable-server throws are literals; and the one rejection with a
+    // message we did not write — `AbortError` — is returned on at the
+    // `signal?.aborted` check above before it can get here. It stays because
+    // the failure it guards against is the one this whole block exists to
+    // prevent: a banner that is visibly *there* with nothing written in it says
+    // the page broke without saying what to do, and reads as a frozen app
+    // rather than a period that could not be loaded.
     if (failure) setError(failure.reason?.message || "Could not load this period.");
     setLoading(false);
   }, []);
