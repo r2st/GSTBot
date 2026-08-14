@@ -368,6 +368,25 @@ TARGETS: tuple[Target, ...] = (
     ),
     Target("supplier_score", "app/services/supplier_score.py", ("tests/test_supplier_score.py",)),
     Target("security", "app/core/security.py", ("tests/test_security.py",)),
+    # The calendar every deadline in the product is derived from. Its coverage
+    # is split three ways and the split is the point: the financial-year
+    # arithmetic is only ever exercised through s.16(4), and ``ist_date`` only
+    # through a filing read back out of the column it was written to. Listed
+    # here so that stays true — dropping either file takes the score with it.
+    Target(
+        "gst_calendar",
+        "app/services/gst_calendar.py",
+        (
+            "tests/test_gst_calendar.py",
+            "tests/test_itc_deadline.py",
+            "tests/test_filing_record.py",
+        ),
+    ),
+    Target("itc_deadline", "app/services/itc_deadline.py", ("tests/test_itc_deadline.py",)),
+    # Money the user is asked to pay that no invoice states: unlike a tax
+    # split, nothing downstream re-derives a fee or an interest figure, so a
+    # wrong one is never contradicted by anything — it is simply paid.
+    Target("late_fee", "app/services/late_fee.py", ("tests/test_late_fee.py",)),
     Target("itc", "app/services/itc.py", ("tests/test_itc.py",)),
     Target("filing", "app/services/filing.py", ("tests/test_filing.py",)),
     Target(
