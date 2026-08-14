@@ -74,6 +74,28 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText(/total_value of null/)).toBeInTheDocument();
   });
 
+  it("introduces that message as something to quote, not as the explanation", () => {
+    // The one line on this screen not written for the person reading it. Sat
+    // under an apology and nothing else, "total_value of null" reads as the
+    // app's account of what happened — addressed to a reader it cannot mean
+    // anything to, and giving them nothing to do. The label is what makes the
+    // same string useful to them: it is the part they pass on.
+    render(
+      <MemoryRouter>
+        <ErrorBoundary>
+          <Bomb explode message="total_value of null" />
+        </ErrorBoundary>
+      </MemoryRouter>,
+    );
+
+    // Asserted through the raw text's own parent rather than by searching for
+    // the whole sentence: the label and the message are separate nodes, which
+    // is what keeps the message findable on its own by every test above.
+    expect(screen.getByText("total_value of null").parentElement).toHaveTextContent(
+      "If you report this, quote: total_value of null",
+    );
+  });
+
   it("shows a thrown value that is not an Error, rather than an empty detail", () => {
     // `throw` takes any value, and a bundled dependency rejecting a render
     // with a string is the realistic source. Reading `.message` off it gives

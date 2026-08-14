@@ -588,13 +588,38 @@ describe("api", () => {
       await expect(api.me()).rejects.toThrow("The server is having trouble (500)");
     });
 
-    it("keeps the reason phrase when there is one", async () => {
+    it("leaves the answering hop's reason phrase out of the sentence", async () => {
+      // The phrase belongs to whoever answered, and on a 503 that is usually
+      // not the API. It is also the wording the sentence in front of it was
+      // written to replace, so quoting both says the same thing twice, once
+      // in the voice of a stranger.
       global.fetch.mockResolvedValueOnce({
         ...jsonResponse(null, { status: 503 }),
         statusText: "Service Unavailable",
       });
 
-      await expect(api.me()).rejects.toThrow("503 Service Unavailable");
+      await expect(api.me()).rejects.toThrow(
+        "The server is having trouble (503). Please try again in a moment.",
+      );
+    });
+
+    it("says the same thing whether or not the wire format carried a phrase", async () => {
+      // The one that would otherwise go unnoticed. HTTP/1.1 is what a
+      // developer mocks and what a local proxy speaks; HTTP/2 is what
+      // production serves. A message that differed between them is a bug
+      // report nobody can reproduce from the screenshot.
+      const withPhrase = {
+        ...jsonResponse(null, { status: 502 }),
+        statusText: "Bad Gateway",
+      };
+      const withoutPhrase = jsonResponse(null, { status: 502 });
+
+      global.fetch.mockResolvedValueOnce(withPhrase);
+      const overHttp1 = await api.me().catch((err) => err.message);
+      global.fetch.mockResolvedValueOnce(withoutPhrase);
+      const overHttp2 = await api.me().catch((err) => err.message);
+
+      expect(overHttp1).toBe(overHttp2);
     });
 
     it("still prefers the server's own detail over the generic message", async () => {
@@ -611,11 +636,10 @@ describe("api", () => {
       await expect(api.me()).rejects.toThrow("Too many requests (429)");
     });
 
-    it("keeps the reason phrase on an unreadable 2xx as well", async () => {
-      // The same HTTP/2 hazard as `statusMessage`, in the other message. A
-      // proxy that answers 200 with an HTML interstitial is usually HTTP/1.1
-      // — it is the hop that did *not* come from the app — so this is the
-      // path where a reason phrase actually shows up.
+    it("leaves the reason phrase out of the unreadable-2xx message too", async () => {
+      // The path where a phrase most reliably shows up, and the one where it
+      // is least ours: a captive portal answering 200 with an HTML sign-in
+      // page is by definition the hop that is not the API.
       global.fetch.mockResolvedValueOnce({
         ok: true,
         status: 200,
@@ -624,7 +648,7 @@ describe("api", () => {
       });
 
       await expect(api.me()).rejects.toThrow(
-        "The server sent a response this app could not read (200 OK).",
+        "The server sent a response this app could not read (200).",
       );
     });
 
@@ -803,19 +827,23 @@ describe("api", () => {
       );
     });
 
-    it("falls back to the status text when the error body is empty", async () => {
+    it("does not fall back to the status text when the error body is empty", async () => {
       global.fetch.mockResolvedValueOnce({
         ...fileResponse(null, { status: 502 }),
         statusText: "Bad Gateway",
       });
 
-      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow("Bad Gateway");
+      await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow(
+        "The server is having trouble (502). Please try again in a moment.",
+      );
     });
 
     it("still says something when the error body is empty over HTTP/2", async () => {
       // The reason phrase does not exist in HTTP/2 or HTTP/3, so `statusText`
-      // is "" against the server this actually deploys behind. Falling back to
-      // it alone renders an error banner with nothing in it.
+      // is "" against the server this actually deploys behind — which is why
+      // the status number, not the phrase, is what a message falls back to.
+      // Falling back to `statusText` renders an error banner with nothing in
+      // it exactly where production is.
       global.fetch.mockResolvedValueOnce(fileResponse(null, { status: 502 }));
 
       await expect(api.downloadExport("gstr1", "csv", "2026-04")).rejects.toThrow(

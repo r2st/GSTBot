@@ -211,16 +211,38 @@ function readBody(text) {
 }
 
 /**
- * A last-resort description of a response, which is never the empty string.
+ * The number, and only the number, as the reference a message quotes.
  *
- * `res.statusText` cannot carry this alone. HTTP/2 and HTTP/3 removed the
- * reason phrase from the wire format, so `statusText` is always `""` there —
- * and HTTP/2 and HTTP/3 are exactly what production serves. Using it as the
- * fallback means a body with no `detail` renders an error banner with nothing
- * in it, while every test that mocks an HTTP/1.1-shaped response passes.
+ * `res.statusText` is deliberately not part of this, and used to be. Three
+ * things are wrong with putting it in front of a user:
+ *
+ * It is not ours. The reason phrase is written by whichever hop answered, and
+ * on a bad day that is not the API — a proxy, a captive portal, a middlebox
+ * sending back whatever it likes. Rendering it into the banner puts a
+ * stranger's prose in the product's voice.
+ *
+ * It is the wording the sentence exists to replace. "The server is having
+ * trouble (500 Internal Server Error)" reintroduces the phrase in the same
+ * breath as the plain-English version of it — and the backend refuses that
+ * exact string in `tests/test_error_prose.py`, so the API would never say it
+ * while its own client did.
+ *
+ * And it is not there in production anyway. HTTP/2 and HTTP/3 dropped the
+ * reason phrase from the wire format, so `statusText` is `""` against the
+ * server this deploys behind and non-empty on a developer's HTTP/1.1 mock —
+ * which made the message a user reports one nobody could reproduce.
+ *
+ * The number survives all three: it is the thing support asks for, and it is
+ * always there, which is why it and not `statusText` is what a caller falls
+ * back to when a body carries no `detail`.
  */
+function statusCode(res) {
+  return `${res.status}`;
+}
+
+/** A last-resort description of a response, which is never the empty string. */
 function statusMessage(res) {
-  const code = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
+  const code = statusCode(res);
   if (res.status >= 500) {
     return `The server is having trouble (${code}). Please try again in a moment.`;
   }
@@ -293,8 +315,7 @@ async function send(input, init) {
 
 /** A 2xx whose body was not JSON: the request worked, the answer did not. */
 function unreadableMessage(res) {
-  const code = res.statusText ? `${res.status} ${res.statusText}` : `${res.status}`;
-  return `The server sent a response this app could not read (${code}).`;
+  return `The server sent a response this app could not read (${statusCode(res)}).`;
 }
 
 /**

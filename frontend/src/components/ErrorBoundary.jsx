@@ -51,6 +51,35 @@ class ErrorBoundaryInner extends Component {
   }
 }
 
+/**
+ * What a caught error is allowed to put on screen, introduced as such.
+ *
+ * The text is whatever the render threw, which means it is a programmer's
+ * sentence: "Cannot read properties of null (reading 'total')". Nowhere else
+ * does this product show one — the backend answers a bug with an opaque
+ * apology and a correlation id, and `tests/test_error_prose.py` holds every
+ * refusal it makes to a bar this line could not pass.
+ *
+ * It stays anyway, because the alternative is worse here than it is there. A
+ * render crash reaches no log a human will look at: there is no request behind
+ * it, no correlation id to trade for the real error, and the browser console
+ * is not a place users go. Removing the line would leave whoever is told about
+ * the crash with nothing but "a screen broke", which is not a bug report.
+ *
+ * So it is labelled rather than removed. Unlabelled, raw exception text under
+ * an apology reads as the *explanation* — the app's answer to what went wrong,
+ * addressed to a reader it will not make sense to. Named as a thing to quote,
+ * the same string stops being an explanation and becomes the one use the
+ * reader can actually put it to.
+ */
+function ErrorReference({ error }) {
+  return (
+    <p className="small muted error-fallback-detail">
+      If you report this, quote: <span>{String(error?.message || error)}</span>
+    </p>
+  );
+}
+
 /** The whole-screen fallback: the route rendered nothing usable. */
 function PageFallback({ error, reset }) {
   return (
@@ -60,7 +89,7 @@ function PageFallback({ error, reset }) {
         Nothing you have entered was lost — the failure is in displaying this page, not in
         saving your data. Try again, or move to another screen and come back.
       </p>
-      <p className="small muted error-fallback-detail">{String(error?.message || error)}</p>
+      <ErrorReference error={error} />
       <div className="button-row">
         <button type="button" className="btn btn-primary" onClick={reset}>
           Try again
@@ -87,7 +116,7 @@ function SectionFallback({ name, error, reset }) {
   return (
     <div className="panel error-fallback error-fallback-section" role="status">
       <p className="section-fallback-head">{name} could not be displayed</p>
-      <p className="small muted error-fallback-detail">{String(error?.message || error)}</p>
+      <ErrorReference error={error} />
       <button type="button" className="btn btn-ghost" onClick={reset}>
         Retry this section
       </button>
