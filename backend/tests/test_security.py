@@ -220,6 +220,66 @@ class TestVerifyingAgainstNoAccount:
         monkeypatch.setattr(security, "_absent_hash", None)
         assert security._absent_account_hash() != first
 
+    def test_a_caller_that_loses_the_race_reuses_what_the_winner_minted(self, monkeypatch):
+        """The check inside the lock is not a redundant copy of the one outside.
+
+        They guard different things. The outer check keeps every later call off
+        the lock at all; the inner one is what a thread that *blocked* on the
+        lock runs once the winner has released it. Without it that thread mints
+        a second hash and overwrites the first — so a burst of failed logins,
+        which is precisely the traffic this stand-in exists for, pays the full
+        bcrypt cost once per concurrent request instead of once per process,
+        and does it on the workers already contending for the lock.
+
+        The race is forced rather than run. A lock whose acquisition fills the
+        global is what losing looks like from inside this function, and it is
+        deterministic where real threads would not be.
+        """
+        import app.core.security as security
+
+        monkeypatch.setattr(security, "_absent_hash", None)
+        winners_hash = hash_password("what the thread that got there first minted")
+
+        class _LockTheWinnerHasAlreadyPassedThrough:
+            def __enter__(self):
+                security._absent_hash = winners_hash
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(
+            security, "_absent_hash_lock", _LockTheWinnerHasAlreadyPassedThrough()
+        )
+
+        assert security._absent_account_hash() == winners_hash
+
+    def test_the_lock_is_held_only_when_there_is_nothing_to_return(self, monkeypatch):
+        """The common call is a read of an already-built hash, and it happens
+        on every failed login. Taking the lock for it would serialise the whole
+        worker behind a value that stopped changing at startup."""
+        import app.core.security as security
+
+        entries = []
+
+        class _CountingLock:
+            def __enter__(self):
+                entries.append(1)
+                security._absent_hash = hash_password("built under the lock")
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        monkeypatch.setattr(security, "_absent_hash", None)
+        monkeypatch.setattr(security, "_absent_hash_lock", _CountingLock())
+
+        security._absent_account_hash()
+        security._absent_account_hash()
+        security._absent_account_hash()
+
+        assert entries == [1]
+
 
 class TestAccessTokens:
     def test_a_token_round_trips_to_its_subject(self):

@@ -669,6 +669,57 @@ class TestASupplierWhoFilesLate:
         assert other.status is InvoiceStatus.MATCHED
         assert len(run.report["findings"]) == 1
 
+    def test_a_statement_row_naming_only_a_supplier_carries_nothing_in(
+        self, db_session, business
+    ):
+        """Half-identified rows are ordinary in a portal export, and the two
+        halves do different work here: the GSTIN narrows the query and the
+        number decides which row it was. A statement whose out-of-period rows
+        name a supplier but no invoice number therefore identifies nothing —
+        and must carry nothing, because the alternative is dragging in every
+        invoice that supplier ever sold us. Each of those would then find no
+        counterpart in this run and have its own period's verdict rewritten.
+        """
+        older = self.late_book(db_session, business.id)
+        import_2b(
+            db_session,
+            business.id,
+            [
+                portal(
+                    invoice_number=None,
+                    period=self.LATE,
+                    invoice_date=date(2026, 3, 10),
+                )
+            ],
+        )
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        db_session.refresh(older)
+        assert older.status is InvoiceStatus.PARSED
+        # The row itself is still reported — it is in the 2B and in no books
+        # this run compared it against — but nothing was carried in for it.
+        assert [f["category"] for f in run.report["findings"]] == ["missing_in_books"]
+        assert all(f["carried"] is False for f in run.report["findings"])
+
+    def test_a_statement_row_naming_only_a_number_carries_nothing_in(
+        self, db_session, business
+    ):
+        """The mirror image, and the more dangerous one.
+
+        An invoice number without a supplier is not unique — ``INV-001`` is
+        every small supplier's first bill of the year — so widening the query
+        on it alone would reach across suppliers, not merely across periods.
+        """
+        older = self.late_book(db_session, business.id)
+        import_2b(db_session, business.id, [self.late_record(supplier_gstin=None)])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        db_session.refresh(older)
+        assert older.status is InvoiceStatus.PARSED
+        assert all(f["carried"] is False for f in run.report["findings"])
+
     def test_this_period_gets_first_claim_on_a_shared_number(self):
         """A carried invoice must never take a row this period's books own.
 
@@ -1282,3 +1333,93 @@ class TestCapitalCreditIsCountedApart:
 
         assert run.itc_eligible == Decimal("162000.00")
         assert run.report["itc_eligible_capital"] == "81000.00"
+
+
+class TestADuplicateThroughAWholeRun:
+    """A duplicate is a verdict about our books, not about the supplier.
+
+    ``match`` produces the DUPLICATE finding and ``test_the_same_invoice_
+    booked_twice_is_reported_as_a_duplicate`` covers that. What no test reached
+    was the two functions the finding then passes through on a real run, both of
+    which have to decline to act on it and both of which do so by falling off
+    the end of a chain of ``if``s rather than by naming the category.
+
+    That is the shape that rots quietly. A fifth category added to
+    ``MatchCategory``, or a ``status_for`` grown an entry, changes what these do
+    with no test failing — and the two wrong answers are a supplier marked down
+    for our double entry, and an invoice whose status says it was reconciled
+    against a portal row that belongs to the other copy.
+    """
+
+    def _run_with_a_double_entry(self, db_session, business):
+        """The same bill entered twice, with the separator typed differently.
+
+        That is what a duplicate looks like by the time it reaches a run. The
+        partial unique index refuses a second row carrying the byte-identical
+        number, so any pair that survives to be reconciled is one the index
+        could not see and only ``normalize_invoice_number`` can — here ``D-1``
+        and ``D/01``, which both key to ``D1``.
+        """
+        original = save(db_session, business.id, invoice_number="D-1")
+        copy = save(db_session, business.id, invoice_number="D/01")
+        import_2b(db_session, business.id, [portal(invoice_number="D-1")])
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        return run, original, copy
+
+    def test_the_duplicate_is_counted_as_a_duplicate_and_nothing_else(
+        self, db_session, business
+    ):
+        run, _, _ = self._run_with_a_double_entry(db_session, business)
+
+        assert run.duplicate_count == 1
+        assert run.matched_count == 1
+        assert run.mismatched_count == 0
+        assert run.missing_in_2b_count == 0
+
+    def test_the_second_copy_keeps_the_status_it_arrived_with(
+        self, db_session, business
+    ):
+        """``_apply_statuses`` has no status for a duplicate, and must leave the
+        row alone rather than reach for a default. Writing MATCHED here would
+        claim the portal row covers both copies; writing MISSING_IN_2B would
+        send the user looking for a supplier who filed exactly what they owed."""
+        _, original, copy = self._run_with_a_double_entry(db_session, business)
+        db_session.refresh(original)
+        db_session.refresh(copy)
+
+        assert original.status is InvoiceStatus.MATCHED
+        assert copy.status is InvoiceStatus.PARSED
+
+    def test_the_supplier_is_not_marked_down_for_our_double_entry(
+        self, db_session, business
+    ):
+        """The duplicate is in the supplier's denominator — they are one of the
+        invoices we hold against them — but it is neither matched, mismatched
+        nor missing. Counting it as missing would score a supplier who filed
+        everything they owed as one who did not, off a mistake in our own
+        books; scoring it as matched would inflate them for the same reason.
+        """
+        db_session.add(
+            Supplier(
+                business_id=business.id,
+                gstin=SUPPLIER_GSTIN_OTHER_STATE,
+                legal_name="Northwind",
+            )
+        )
+        db_session.commit()
+
+        run, _, _ = self._run_with_a_double_entry(db_session, business)
+        tally = run.report["suppliers"][SUPPLIER_GSTIN_OTHER_STATE]
+
+        assert tally["total"] == 2
+        assert tally["matched"] == 1
+        assert tally["mismatched"] == 0
+        assert tally["missing"] == 0
+
+        supplier = db_session.query(Supplier).filter_by(
+            gstin=SUPPLIER_GSTIN_OTHER_STATE
+        ).one()
+        # The recorded observation is the three real outcomes, so the history
+        # the score is computed from never sees our double entry at all.
+        assert supplier.missing_invoices == 0
+        assert supplier.matched_invoices == 1

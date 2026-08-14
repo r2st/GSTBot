@@ -212,6 +212,36 @@ class TestClientIp:
         monkeypatch.setattr(settings, "trust_proxy_headers", True)
         assert rate_limit.client_ip(self._request({"x-real-ip": "5.6.7.8"})) == "5.6.7.8"
 
+    def test_a_declared_proxy_that_sent_neither_header_falls_back_to_the_socket(
+        self, monkeypatch
+    ):
+        """Trusting a proxy must not mean requiring one to have spoken.
+
+        ``TRUST_PROXY_HEADERS`` is a deployment-wide switch, and the box it is
+        set on still serves requests that did not arrive through the proxy — a
+        probe from the orchestrator, anything reaching the port directly.
+        Neither header is on those, and the fall-through to the socket address
+        is what keeps them keyed by who they are rather than collapsing every
+        one of them into a single shared bucket.
+        """
+        from app.core import rate_limit
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "trust_proxy_headers", True)
+        assert rate_limit.client_ip(self._request({})) == "10.0.0.1"
+
+    def test_an_empty_x_real_ip_is_not_read_as_an_address(self, monkeypatch):
+        """A proxy that sets the header unconditionally sends it empty when it
+        has nothing to put in it. Reading that as the client would key every
+        such request to ``""`` — one bucket shared by everyone who arrives that
+        way, which meters real traffic against strangers and hands an attacker
+        a way to exhaust somebody else's allowance."""
+        from app.core import rate_limit
+        from app.core.config import settings
+
+        monkeypatch.setattr(settings, "trust_proxy_headers", True)
+        assert rate_limit.client_ip(self._request({"x-real-ip": ""})) == "10.0.0.1"
+
     def test_an_overlong_forwarded_value_is_bounded(self, monkeypatch):
         # It becomes a Redis key; an unbounded one is a memory-exhaustion lever.
         from app.core import rate_limit
