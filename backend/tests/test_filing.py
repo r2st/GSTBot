@@ -109,6 +109,16 @@ def test_an_over_long_invoice_number_is_an_error():
     assert issues_for(sale(invoice_number="X" * 17))["invoice_number"] is Severity.ERROR
 
 
+def test_an_invoice_number_of_exactly_sixteen_characters_is_allowed():
+    """Sixteen is the limit, not the first length past it.
+
+    A serial that fits exactly is what a business with a long prefix ends up
+    with, and refusing it would send them to renumber a book the portal was
+    always going to take.
+    """
+    assert issues_for(sale(invoice_number="INV-2026-2704/12")) == {}
+
+
 def test_a_sale_numbered_with_a_character_rule_46_forbids_is_an_error():
     """Rule 46(b) allows letters, digits, '-' and '/'. A hash is not one."""
     assert issues_for(sale(invoice_number="INV#42"))["invoice_number"] is Severity.ERROR
@@ -200,7 +210,16 @@ def test_a_missing_hsn_is_a_warning_and_a_malformed_one_an_error():
     assert issues_for(sale(hsn_code=None))["hsn_code"] is Severity.WARNING
     assert issues_for(sale(hsn_code="123"))["hsn_code"] is Severity.ERROR
     assert issues_for(sale(hsn_code="84AB3010"))["hsn_code"] is Severity.ERROR
-    assert "hsn_code" not in issues_for(sale(hsn_code="8471"))
+
+
+def test_the_three_hsn_lengths_the_portal_takes_raise_nothing():
+    """Four, six and eight digits. Six is the one a turnover band lands on.
+
+    Under ₹5 crore an invoice needs four digits and above it six, so the
+    middle length is the one most of these codes are actually filed at.
+    """
+    for code in ("8471", "847130", "84713010"):
+        assert issues_for(sale(hsn_code=code)) == {}, code
 
 
 def test_a_rate_that_is_not_a_gst_slab_is_an_error():
@@ -222,6 +241,59 @@ def test_a_rupee_of_rounding_is_not_a_validation_error():
     assert "tax_rate" not in issues_for(
         sale(igst=Decimal("18000.60"), total_value=Decimal("118000.60"))
     )
+
+
+def test_a_rupee_out_is_the_tolerance_itself_and_is_allowed():
+    """The tolerance is inclusive at both checks, on purpose.
+
+    A rupee is the largest drift a per-line rounding can leave on either the
+    tax or the total, so the invoice that is off by exactly one is the common
+    correct invoice rather than the first wrong one.
+    """
+    assert issues_for(sale(igst=Decimal("18001.00"), total_value=Decimal("118001.00"))) == {}
+    assert issues_for(sale(total_value=Decimal("118001.00"))) == {}
+
+
+def test_an_unrateable_tax_names_the_slab_it_will_be_filed_at():
+    """One line, no stored rate, and figures that imply no slab.
+
+    The message has to say which rate the return will carry, because that is
+    what the portal will reject — "does not match the breakdown" would be a
+    message about a breakdown this invoice does not have.
+    """
+    found = filing_service.validate_invoice(
+        sale(tax_rate=None, igst=Decimal("11500.00"), total_value=Decimal("111500.00")),
+        business_state="27",
+        period=PERIOD,
+    )
+
+    message = next(i.message for i in found if i.field == "tax_rate")
+    assert "matches no GST rate" in message
+    assert "12%, the nearest slab" in message
+
+
+def test_every_tax_head_counts_toward_what_the_total_is_checked_against():
+    """Cess and the two local heads are tax as much as IGST is.
+
+    The total is checked against taxable plus tax, and the tax is these four
+    added up — a head left out of that sum reports a correct invoice as one
+    that does not foot, and does it on every intra-state sale in the period.
+    """
+    invoice = local_sale(cess=Decimal("1000.00"), total_value=Decimal("119000.00"))
+
+    assert issues_for(invoice) == {}
+
+
+def test_cess_is_left_out_of_the_rate_check_because_it_has_its_own_base():
+    """Cess is not levied at the GST rate, so counting it in makes 18% look wrong.
+
+    ₹1,000 of cess on a ₹1,00,000 supply at 18% is a correct invoice; folded
+    into the rate comparison it reads as ₹19,000 of tax where ₹18,000 was due,
+    which is an error against a document that has nothing wrong with it.
+    """
+    invoice = sale(cess=Decimal("1000.00"), total_value=Decimal("119000.00"))
+
+    assert issues_for(invoice) == {}
 
 
 def test_a_total_that_does_not_add_up_is_an_error():
@@ -248,6 +320,30 @@ def test_an_intrastate_supply_carrying_igst_is_an_error():
     assert issues_for(invoice)["igst"] is Severity.ERROR
 
 
+def test_an_inter_state_supply_carrying_one_local_head_is_still_the_wrong_tax():
+    """Either of them alone is CGST/SGST on a supply that owed IGST.
+
+    An invoice carrying only one half is malformed twice over, and reading the
+    two heads together — rather than one and then the other — is what makes
+    the half-filled row report anything at all.
+    """
+    cgst_only = sale(igst=ZERO, cgst=Decimal("18000.00"))
+    sgst_only = sale(igst=ZERO, sgst=Decimal("18000.00"))
+
+    assert issues_for(cgst_only)["igst"] is Severity.ERROR
+    assert issues_for(sgst_only)["igst"] is Severity.ERROR
+
+
+def test_the_split_is_not_judged_when_there_is_no_supplier_state_to_judge_it_by():
+    """A business with no GSTIN on file yet has no state to compare against.
+
+    Comparing against a missing state makes every supply look inter-state, so
+    a business part-way through onboarding would be told its own local sales
+    carry the wrong tax — an error it cannot act on and did not earn.
+    """
+    assert issues_for(local_sale(), state=None) == {}
+
+
 def test_unequal_cgst_and_sgst_is_an_error():
     invoice = local_sale(cgst=Decimal("10000.00"), sgst=Decimal("8000.00"))
     assert issues_for(invoice)["cgst"] is Severity.ERROR
@@ -255,6 +351,21 @@ def test_unequal_cgst_and_sgst_is_an_error():
 
 def test_a_clean_intrastate_sale_raises_nothing():
     assert issues_for(local_sale()) == {}
+
+
+def test_the_place_of_supply_printed_on_a_sale_beats_the_buyers_own_state():
+    """Bill-to-ship-to: a Karnataka customer taking delivery in Maharashtra.
+
+    s.10 puts the supply where the goods end up, and the invoice says where
+    that is. The buyer's registration is only the fallback for an invoice that
+    did not carry the field — read the other way round, a perfectly ordinary
+    local delivery to an out-of-state customer is reported as carrying the
+    wrong tax.
+    """
+    invoice = local_sale(counterparty_gstin=SUPPLIER_GSTIN_OTHER_STATE)
+
+    assert invoice.place_of_supply == "27"
+    assert issues_for(invoice) == {}
 
 
 def test_a_sale_with_no_derivable_place_of_supply_is_an_error():
@@ -292,6 +403,24 @@ def test_an_interstate_purchase_is_clean_when_its_place_of_supply_was_read():
     """
     assert issues_for(purchase()) == {}
     assert issues_for(purchase(place_of_supply=None)) == {}
+
+
+def test_a_purchase_collected_in_the_suppliers_own_state_is_a_local_supply():
+    """Ex-works: we collect in Karnataka, so Karnataka's own tax applies.
+
+    The invoice says where the supply took place and it is not our state. Our
+    state is only the fallback for a purchase whose place of supply the parser
+    never found — used ahead of the field, this correct invoice reads as an
+    inter-state supply carrying CGST and SGST.
+    """
+    invoice = purchase(
+        place_of_supply="29",
+        igst=Decimal("0.00"),
+        cgst=Decimal("9000.00"),
+        sgst=Decimal("9000.00"),
+    )
+
+    assert issues_for(invoice) == {}
 
 
 def test_an_interstate_purchase_charged_local_tax_is_an_error():
@@ -337,6 +466,14 @@ def test_an_invoice_with_no_value_at_all_is_an_error():
     )
     assert issues_for(invoice)["taxable_value"] is Severity.ERROR
 
+    # And it is *this* error, not the tax-on-nothing one below it. Both are
+    # reported against the same field, so only the message separates an empty
+    # row from a row whose taxable value went missing — and they ask the
+    # reader for different things.
+    found = filing_service.validate_invoice(invoice, business_state="27", period=PERIOD)
+    message = next(i.message for i in found if i.field == "taxable_value")
+    assert message == "Invoice has no taxable value and no tax"
+
 
 class TestTaxOnATaxableValueOfZero:
     """The gap between the two money checks, which nothing else covered.
@@ -357,6 +494,21 @@ class TestTaxOnATaxableValueOfZero:
 
     def test_it_is_an_error(self):
         assert issues_for(self.broken())["taxable_value"] is Severity.ERROR
+
+    def test_it_is_the_only_thing_reported(self):
+        """One problem, said once.
+
+        The rate cross-check is skipped for exactly this invoice, and it has to
+        be: a taxable value of zero derives a rate of zero, so it would also
+        report tax that "matches no GST rate on 0.00" — a second error, about
+        the same missing figure, telling the reader to correct the tax when the
+        tax is the half that was read correctly.
+        """
+        # A total of ₹18,000 against ₹18,000 of tax and nothing taxable: the
+        # row foots, so the missing value is the only thing left wrong with it.
+        invoice = self.broken(total_value=Decimal("18000.00"))
+
+        assert issues_for(invoice) == {"taxable_value": Severity.ERROR}
 
     def test_the_message_says_the_value_is_missing_not_nil(self):
         found = filing_service.validate_invoice(
@@ -693,6 +845,83 @@ def test_gstr1_lists_large_interstate_unregistered_sales_separately(db_session, 
     (block,) = document["b2cl"]
     assert block["pos"] == "29"
     assert block["inv"][0]["val"] == 354000.00
+    # Invoice by invoice means by number: it is what an amendment in a later
+    # period has to name to find this supply again.
+    assert block["inv"][0]["inum"] == "S-001"
+
+
+def test_a_b2c_sale_worth_exactly_the_threshold_is_summarised(db_session, business):
+    """The threshold is the last value that is summarised, not the first listed.
+
+    A round ₹1,00,000 invoice is not a rare one, and the two blocks are
+    reconciled against table 3.2 of the same period's 3B — a supply in the
+    wrong one is a mismatch the portal raises on upload rather than a figure
+    anybody can see is wrong.
+    """
+    save(
+        db_session,
+        business.id,
+        sale(
+            counterparty_gstin=None,
+            place_of_supply="29",
+            taxable_value=Decimal("84745.76"),
+            igst=Decimal("15254.24"),
+            total_value=Decimal("100000.00"),
+        ),
+    )
+
+    assert filing_service.b2cl_threshold(PERIOD) == Decimal("100000.00")
+
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+    assert "b2cl" not in document
+    assert document["b2cs"][0]["txval"] == 84745.76
+
+
+def test_a_b2b_supply_is_attributed_to_the_state_its_buyer_is_registered_in(
+    db_session, business
+):
+    """`pos` is the field the portal attributes the supply by.
+
+    The place of supply is often not printed on the invoice, and the buyer's
+    registration always is. Falling back to our own state instead would file
+    every inter-state B2B sale as a local one — the credit lands with the
+    wrong government, and the customer's 2B is what says so.
+    """
+    save(db_session, business.id, sale(place_of_supply=None))
+
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+    assert document["b2b"][0]["inv"][0]["pos"] == "29"
+
+
+def test_cess_reaches_both_the_invoice_block_and_the_b2cs_summary(db_session, business):
+    """Cess is a head of its own in every block, and it is money.
+
+    It is levied on top of GST and is nobody's input credit at these rates, so
+    a return that drops it understates what is payable in cash.
+    """
+    save(
+        db_session,
+        business.id,
+        sale(invoice_number="S-B2B", cess=Decimal("2500.00"), total_value=Decimal("120500.00")),
+    )
+    save(
+        db_session,
+        business.id,
+        local_sale(
+            invoice_number="S-B2C",
+            counterparty_gstin=None,
+            cess=Decimal("1500.00"),
+            total_value=Decimal("119500.00"),
+        ),
+    )
+
+    document = filing_service.build_gstr1(db_session, business, PERIOD)
+
+    (item,) = document["b2b"][0]["inv"][0]["itms"]
+    assert item["itm_det"]["csamt"] == 2500.00
+    assert document["b2cs"][0]["csamt"] == 1500.00
 
 
 class TestAnInvoiceWorthWhatItIsWorth:
@@ -998,6 +1227,103 @@ class TestAnInvoiceThatMixesRates:
     def test_a_breakdown_with_a_bad_line_is_not_used(self, items):
         """All of it or none of it. Half a breakdown does not foot either."""
         assert filing_service._line_item_rate_lines(self.mixed(line_items=items)) is None
+
+    def test_a_breakdown_that_is_not_a_list_of_lines_is_not_a_breakdown(self):
+        """``line_items`` is a JSON column: what comes back is what was written.
+
+        A number, an object, or nothing at all is not a breakdown, and each has
+        to be refused before the loop reaches it rather than by whatever the
+        loop happens to do with it.
+        """
+        for value in (5, {"taxable_value": 50000, "tax_rate": 5}, [], None):
+            assert (
+                filing_service._line_item_rate_lines(self.mixed(line_items=value)) is None
+            ), value
+
+    def test_a_line_worth_nothing_does_not_discard_the_breakdown(self):
+        """A free sample on a slab the invoice already carries is a real line.
+
+        There is nothing wrong with it — no value to add and no tax to
+        apportion — and dropping the whole breakdown over it files the invoice
+        at the blended rate this class exists to avoid.
+        """
+        invoice = self.mixed(
+            line_items=[
+                {"hsn_code": "49019900", "taxable_value": 50000, "tax_rate": 5},
+                {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
+                {"hsn_code": "84713010", "taxable_value": 0, "tax_rate": 18},
+            ]
+        )
+
+        lines = filing_service._line_item_rate_lines(invoice)
+
+        assert [line.rate for line in lines] == [Decimal("5"), Decimal("18")]
+
+    def test_a_rupee_between_the_breakdown_and_the_invoice_is_absorbed(self):
+        """The lines are what the document printed, the invoice what it totals.
+
+        Within the tolerance the gap is the paper's own rounding, and it goes
+        to the largest line so the block still foots to the invoice exactly —
+        which is the thing the portal cross-checks.
+        """
+        invoice = self.mixed(
+            line_items=[
+                {"hsn_code": "49019900", "taxable_value": 50000, "tax_rate": 5},
+                {"hsn_code": "84713010", "taxable_value": 49999, "tax_rate": 18},
+            ]
+        )
+
+        lines = filing_service._line_item_rate_lines(invoice)
+
+        assert [line.taxable_value for line in lines] == [
+            Decimal("50001.00"),
+            Decimal("49999.00"),
+        ]
+
+    def test_the_tax_is_split_by_the_tax_each_line_implies(self):
+        """₹20,000 at 5% and ₹80,000 at 18% do not share their tax evenly.
+
+        The weight is rate applied to value — ₹1,000 against ₹14,400 — because
+        that is the tax each line is actually carrying. Weighted any other way
+        the lines foot to the invoice and still declare tax that is not their
+        own rate applied to their own value, which is what ``itms`` is checked
+        for on upload.
+        """
+        invoice = self.mixed(
+            cgst=Decimal("7700.00"),
+            sgst=Decimal("7700.00"),
+            total_value=Decimal("115400.00"),
+            line_items=[
+                {"hsn_code": "49019900", "taxable_value": 20000, "tax_rate": 5},
+                {"hsn_code": "84713010", "taxable_value": 80000, "tax_rate": 18},
+            ],
+        )
+
+        lines = filing_service._line_item_rate_lines(invoice)
+
+        assert [line.cgst for line in lines] == [Decimal("500.00"), Decimal("7200.00")]
+        assert [line.sgst for line in lines] == [Decimal("500.00"), Decimal("7200.00")]
+        assert issues_for(invoice) == {}
+
+    def test_two_lines_on_one_rate_are_ordered_by_their_hsn_code(self):
+        """The order is (rate, HSN), and the second half is not decoration.
+
+        ``itms`` folds by rate, but the HSN summary filed beside it does not,
+        so these lines keep their own identity all the way into the return.
+        Ordered by whatever the extraction happened to list first, the same
+        invoice generates a different document each time it is regenerated.
+        """
+        invoice = self.mixed(
+            line_items=[
+                {"hsn_code": "99999999", "taxable_value": 25000, "tax_rate": 5},
+                {"hsn_code": "11111111", "taxable_value": 25000, "tax_rate": 5},
+                {"hsn_code": "84713010", "taxable_value": 50000, "tax_rate": 18},
+            ]
+        )
+
+        lines = filing_service._line_item_rate_lines(invoice)
+
+        assert [line.hsn_code for line in lines] == ["11111111", "99999999", "84713010"]
 
     def test_a_single_rate_breakdown_is_left_alone(self):
         """It tells the return nothing the invoice did not already say.
@@ -1724,6 +2050,45 @@ def test_csv_has_a_header_and_one_row_per_invoice(db_session, business):
     assert lines[0].startswith("invoice_number,invoice_date,")
     assert len(lines) == 3
     assert "S-1" in lines[1]
+
+
+def test_the_csv_row_carries_the_figures_the_ca_is_checking(db_session, business):
+    """This file is opened to check a period before it is filed.
+
+    Every column here is one somebody reads against the paper invoice, and a
+    column that is right for an inter-state sale and empty for a local one is
+    the kind of wrong that survives a review — the reviewer sees a number in
+    the head they expected and stops looking.
+    """
+    save(
+        db_session,
+        business.id,
+        local_sale(
+            invoice_number="S-LOCAL",
+            cess=Decimal("1000.00"),
+            total_value=Decimal("119000.00"),
+        ),
+    )
+    save(db_session, business.id, sale(invoice_number="S-INTER"))
+
+    rows = {
+        row["invoice_number"]: row
+        for row in csv.DictReader(
+            io.StringIO(
+                filing_service.to_csv(db_session, business, PERIOD, InvoiceType.SALES)
+            )
+        )
+    }
+
+    local = rows["S-LOCAL"]
+    assert local["invoice_date"] == "15-04-2026"
+    assert local["tax_rate"] == "18.00"
+    assert local["taxable_value"] == "100000.00"
+    assert local["cgst"] == "9000.00"
+    assert local["sgst"] == "9000.00"
+    assert local["igst"] == "0.00"
+    assert local["cess"] == "1000.00"
+    assert rows["S-INTER"]["igst"] == "18000.00"
 
 
 def test_csv_uses_crlf_for_excel(db_session, business):
