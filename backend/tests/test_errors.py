@@ -386,6 +386,34 @@ class TestA422DoesNotEchoTheWholeRequestBack:
         assert isinstance(detail, list)
         assert all("msg" in entry for entry in detail)
 
+    def test_an_oversized_container_is_described_rather_than_quoted(self, client):
+        """A body that is the wrong *shape* has no meaningful prefix.
+
+        The string case can be cut to its first 200 characters and stay useful.
+        A rejected value that arrives as the whole parsed list or dict cannot:
+        the first 200 entries of a 300-element array tell the caller nothing
+        that its type and length do not, and serialising them is the reflection
+        the bound exists to stop. So it is replaced by a note of what it was.
+        """
+        response = client.post(
+            "/api/v1/auth/register", json=[{"email": "a@b.com"} for _ in range(300)]
+        )
+        assert response.status_code == 422
+        assert len(response.content) < 1_000
+        echoed = response.json()["detail"][0]["input"]
+        assert echoed == "<list of 300 items…[truncated]>"
+
+    def test_a_container_small_enough_to_read_is_still_quoted_in_full(self, client):
+        """The same bound must not describe away a value a caller can act on.
+
+        A three-element list in a rejected field is the whole of what they
+        sent, and reading back ``<list of 3 items>`` would make the 422 less
+        useful than saying nothing.
+        """
+        response = client.post("/api/v1/auth/register", json=[1, 2, 3])
+        assert response.status_code == 422
+        assert response.json()["detail"][0]["input"] == [1, 2, 3]
+
 
 def test_a_404_from_a_route_keeps_its_own_wording(auth_client):
     # The generic handler must not overwrite a message a route wrote on purpose.
@@ -530,3 +558,68 @@ class TestEveryGuardedRouteRefusesInTheSameShape:
             if any(word in detail.lower() for word in ("not found", "no such", "does not exist")):
                 leaks.append(f"{method} {path} -> {detail}")
         assert not leaks, leaks
+
+
+class TestAPathNothingServesAndAMethodNothingAccepts:
+    """Starlette answers these two before any route runs, and the envelope
+    has to survive that.
+
+    Every other refusal in this file leaves through a handler the app installs
+    on its own routes. A request for a path the router never matched, and a
+    request for a real path with a verb it does not take, are raised by
+    Starlette itself — the app's ``StarletteHTTPException`` handler is the only
+    thing that puts them back in the shared shape. A client branching on
+    ``error.code`` is at its most likely to be doing so here, because a typo'd
+    URL is the most common way to reach the API wrongly, and nothing pinned
+    either shape until now.
+    """
+
+    def test_an_unmatched_path_answers_the_shared_envelope(self, client):
+        response = client.get("/api/v1/no-such-collection")
+        assert response.status_code == 404
+        body = response.json()
+        assert body["error"]["code"] == "not_found"
+        assert body["error"]["status"] == 404
+        assert isinstance(body["detail"], str) and body["detail"]
+        assert body["error"]["message"] == body["detail"]
+
+    def test_an_unmatched_path_still_gets_a_correlation_id(self, client):
+        """Support's only handle on "your API 404s me" is this id, and a 404
+        raised before routing is exactly the report that arrives without a
+        route name to search for."""
+        response = client.get("/api/v1/no-such-collection")
+        assert response.json()["correlation_id"] != "-"
+        assert response.headers.get("X-Request-ID")
+
+    def test_an_unmatched_path_does_not_echo_the_path_back(self, client):
+        """The 404 body is written by the app, not assembled from the URL.
+
+        Reflecting the requested path would make every unrouted URL a reflector
+        on an endpoint that needs no account — the same hole the 422 bound in
+        :class:`TestA422DoesNotEchoTheWholeRequestBack` closes.
+        """
+        response = client.get("/api/v1/" + "Z" * 4_000)
+        assert response.status_code == 404
+        assert "ZZZZ" not in response.text
+
+    def test_a_wrong_method_on_a_real_path_answers_405_in_the_envelope(self, client):
+        response = client.delete("/api/v1/auth/login")
+        assert response.status_code == 405
+        body = response.json()
+        assert body["error"]["code"] == "method_not_allowed"
+        assert body["error"]["status"] == 405
+        assert body["correlation_id"] != "-"
+
+    def test_a_wrong_method_still_names_the_methods_that_would_work(self, client):
+        """``Allow`` is the whole value of a 405 over a 404, and it is set by
+        Starlette on the exception rather than by the handler. Rebuilding the
+        response body must not drop the header that came with it."""
+        response = client.delete("/api/v1/auth/login")
+        assert "POST" in response.headers.get("allow", "")
+
+    def test_a_wrong_method_does_not_confirm_what_the_path_is_for(self, client):
+        """A 405 is unauthenticated and says a path exists — which is fine, the
+        route table is published — but it must not go on to describe the row
+        behind it the way a route's own 404 does."""
+        detail = str(client.delete("/api/v1/invoices/1").json()["detail"])
+        assert "invoice" not in detail.lower()
