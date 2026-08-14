@@ -437,6 +437,10 @@ TARGETS: tuple[Target, ...] = (
             # test_filing.py never does. Without this file every mutant in
             # those lines survives for want of a caller, not an assertion.
             "tests/test_filing_record.py",
+            # The edges the two above read through rather than at: the day a
+            # return is late on, the day it becomes overdue, and the defaults
+            # a report and a frozen value object start from.
+            "tests/test_filing_boundaries.py",
         ),
     ),
     Target(
