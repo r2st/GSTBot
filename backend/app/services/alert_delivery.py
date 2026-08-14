@@ -22,14 +22,25 @@ next, without a second sweep having to notice and re-raise anything.
 **Isolation.** Committed per business, for the same reason the sweep itself
 is: a bad address or a mid-run SMTP outage on one tenant must not cost every
 tenant after it its place in today's send.
+
+That is a property of the *writes*, and only of the writes. Every read this
+module does — the tenant ids, their recipients, their alerts — happens up
+front, across all tenants at once, because a read failing is a failure of the
+whole run whichever loop it sits in; there is no tenant to isolate it from.
+What the batching has to respect is the commit: it expires every ORM instance
+in the session, so anything read before the loop must be plain rows rather
+than mapped objects, or the first commit turns the saving back into a
+per-instance re-read. Both prefetches obey that, and the loop writes through
+``update()`` by id rather than by attribute for the same reason.
 """
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import Row, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import settings
@@ -51,6 +62,12 @@ _SENDABLE_STATUSES = (AlertStatus.PENDING, AlertStatus.FAILED)
 # every driver bounds the parameters a single statement may take, and this is
 # a list that grows with the customer base rather than with the work.
 _TENANT_LOOKUP_CHUNK = 500
+
+
+def _chunked(items: Sequence[int]) -> Iterator[Sequence[int]]:
+    """``items`` in slices no statement's parameter list will choke on."""
+    for start in range(0, len(items), _TENANT_LOOKUP_CHUNK):
+        yield items[start : start + _TENANT_LOOKUP_CHUNK]
 
 
 @dataclass(frozen=True)
@@ -76,7 +93,45 @@ class AlertEmailResult:
         }
 
 
-def _digest(alerts: list[Alert]) -> tuple[str, str]:
+def _outstanding_by_business(
+    db: Session, business_ids: Sequence[int]
+) -> dict[int, list[Row]]:
+    """Every sendable alert for ``business_ids``, grouped, in send order.
+
+    Selected as columns rather than as ``Alert`` instances, and that is the
+    whole reason this can be hoisted out of the loop at all. The loop commits
+    per business; a commit expires every ORM instance in the session, so a
+    prefetch of mapped objects would be re-read attribute by attribute after
+    the first tenant — one statement per *alert* rather than per tenant, which
+    is worse than the read it replaced. A ``Row`` belongs to no session and
+    survives the commit intact, the same reasoning as the recipients above.
+
+    Note what is *not* hoisted: the send and the write stay inside the loop,
+    one tenant at a time, because those are what the per-business commit
+    isolates. Reading early costs that nothing — a failure here is a failure
+    of the whole run either way, exactly as the two statements before it
+    already are.
+    """
+    by_business: dict[int, list[Row]] = {}
+    for chunk in _chunked(business_ids):
+        rows = db.execute(
+            select(Alert.id, Alert.business_id, Alert.title, Alert.message, Alert.due_date)
+            .where(
+                Alert.business_id.in_(chunk),
+                Alert.status.in_(_SENDABLE_STATUSES),
+                Alert.deleted_at.is_(None),
+            )
+            # ``business_id`` leads only to make the grouping below a single
+            # pass; within a tenant the order is the one the digest has always
+            # been written in.
+            .order_by(Alert.business_id, Alert.due_date, Alert.id)
+        ).all()
+        for row in rows:
+            by_business.setdefault(row.business_id, []).append(row)
+    return by_business
+
+
+def _digest(alerts: list[Row]) -> tuple[str, str]:
     """The subject and body for one business's outstanding alerts."""
     subject = (
         "1 GST alert needs your attention"
@@ -151,9 +206,11 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
     # product that deliberately loops over every business at once, so a
     # per-tenant read here is multiplied by the customer list rather than by
     # anything about the work. It used to be exactly that: ``db.get`` per id,
-    # and then ``business.users`` inside ``_recipients``, which is a lazy
-    # relationship and so a second statement again — 2N round trips before a
-    # single email was composed.
+    # then ``business.users`` inside ``_recipients``, which is a lazy
+    # relationship and so a second statement again, and then the alerts
+    # themselves — 3N round trips before a single email was composed. The
+    # whole read side is three statements per chunk now, and the loop below
+    # issues none.
     #
     # Chunked for the reason ``reconciliation._suppliers_by_gstin`` is: every
     # driver bounds the parameters one statement may carry, and the whole
@@ -170,8 +227,7 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
     # put the per-tenant round trip right back — loading it eagerly only helps
     # for as long as nothing expires it.
     digest_targets: list[tuple[int, list[str]]] = []
-    for start in range(0, len(business_ids), _TENANT_LOOKUP_CHUNK):
-        chunk = business_ids[start : start + _TENANT_LOOKUP_CHUNK]
+    for chunk in _chunked(business_ids):
         businesses = db.scalars(
             select(Business)
             .where(
@@ -184,17 +240,21 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
         ).all()
         digest_targets.extend((b.id, _recipients(b)) for b in businesses)
 
+    # And the alerts themselves, for every tenant at once. Read after the
+    # businesses rather than with them so that a tenant deactivated between the
+    # two is not paid for here — and read at all only for the tenants that
+    # survived that filter.
+    outstanding = _outstanding_by_business(db, [bid for bid, _ in digest_targets])
+
     total = AlertEmailResult()
     for business_id, recipients in digest_targets:
-        alerts = db.scalars(
-            select(Alert)
-            .where(
-                Alert.business_id == business_id,
-                Alert.status.in_(_SENDABLE_STATUSES),
-                Alert.deleted_at.is_(None),
-            )
-            .order_by(Alert.due_date, Alert.id)
-        ).all()
+        alerts = outstanding.get(business_id, [])
+        # Still reachable, and still a ``continue`` rather than a ``return``.
+        # The id scan and this read are separate statements, and the sweep, the
+        # alerts API and a tenant deletion all write these rows from other
+        # connections — so a business named by the scan can have nothing left
+        # by the time this asks. See
+        # ``TestAlertsThatVanishBetweenTheTwoQueries``.
         if not alerts:
             continue
 
@@ -223,13 +283,26 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
         # the one the module docstring promises will not happen.
         try:
             reached = _send_to_all(recipients, subject, body, business_id=business_id)
-            for alert in alerts:
-                alert.channel = _CHANNEL
-                if reached:
-                    alert.sent_at = now
-                    alert.status = AlertStatus.SENT
-                else:
-                    alert.status = AlertStatus.FAILED
+            # Stamped by id in one statement rather than attribute by attribute
+            # on mapped instances, because there are no mapped instances to
+            # stamp any more — see ``_outstanding_by_business``. ``sent_at`` is
+            # left alone on a failure, as it always was: the row is a delivery
+            # that has not happened, and dating it would make it one that did.
+            stamp = (
+                {"channel": _CHANNEL, "sent_at": now, "status": AlertStatus.SENT}
+                if reached
+                else {"channel": _CHANNEL, "status": AlertStatus.FAILED}
+            )
+            for ids in _chunked([alert.id for alert in alerts]):
+                db.execute(
+                    update(Alert)
+                    .where(Alert.id.in_(ids))
+                    .values(**stamp)
+                    # Nothing in this session is mapped to these rows, so there
+                    # is no in-memory state to reconcile and the extra SELECT
+                    # the default strategy would issue buys nothing.
+                    .execution_options(synchronize_session=False)
+                )
             db.commit()
         except Exception:  # noqa: BLE001 - one tenant must not end the run
             db.rollback()

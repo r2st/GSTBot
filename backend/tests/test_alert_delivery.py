@@ -498,23 +498,22 @@ class TestAcrossSeveralBusinesses:
         assert result.businesses == 1
         assert len(sent) == 1
 
-    def test_the_tenant_and_recipient_reads_do_not_grow_with_the_number_of_tenants(
-        self, db_session, sent
-    ):
-        """Neither the business nor its recipients may be fetched per tenant.
+    def test_no_read_at_all_grows_with_the_number_of_tenants(self, db_session, sent):
+        """Not the business, not its recipients, and not the alerts either.
 
         This is the one caller in the product that deliberately loops over
         every tenant at once, so a per-tenant read here is multiplied by the
-        whole customer list rather than by anything about the work. Two of
-        them were: ``db.get(Business, ...)`` per id, and ``business.users``
-        inside ``_recipients``, which is a lazy relationship and so a second
-        statement again.
+        whole customer list rather than by anything about the work. Three of
+        them were: ``db.get(Business, ...)`` per id, ``business.users`` inside
+        ``_recipients``, which is a lazy relationship and so a second
+        statement again, and the digest's own fetch of the alerts.
 
-        The digest itself stays one query per business on purpose — that is
-        the unit the per-tenant commit isolates, and merging it would trade a
-        bounded read for one bad tenant's failure reaching the rest. So this
-        counts only the two tables with no such excuse, and requires the count
-        flat between three tenants and fifteen.
+        The last of those was left in deliberately once, on the grounds that
+        it was the unit the per-tenant commit isolates. It is not — the commit
+        isolates the *send and the write*, which are still one tenant at a
+        time. A SELECT that fails fails the run wherever it sits, so hoisting
+        it costs nothing and it is now hoisted, leaving no read in this module
+        that scales with the customer list.
         """
 
         def _reads_for(tenant_count: int, first_gstin: int) -> int:
@@ -537,7 +536,9 @@ class TestAcrossSeveralBusinesses:
             def _record(conn, cursor, statement, parameters, context, executemany):
                 squashed = " ".join(statement.split()).lower()
                 if squashed.startswith("select") and (
-                    "from businesses" in squashed or "from users" in squashed
+                    "from businesses" in squashed
+                    or "from users" in squashed
+                    or "from alerts" in squashed
                 ):
                     reads.append(squashed)
 
@@ -554,8 +555,64 @@ class TestAcrossSeveralBusinesses:
         at_three = _reads_for(3, first_gstin=0)
         at_fifteen = _reads_for(15, first_gstin=100)
         assert at_three == at_fifteen, (
-            f"{at_three} reads of businesses/users for three tenants, "
+            f"{at_three} reads of businesses/users/alerts for three tenants, "
             f"{at_fifteen} for fifteen: the sweep is reading per tenant."
+        )
+
+    def test_the_per_business_commit_does_not_re_read_the_alerts_one_by_one(
+        self, db_session, sent
+    ):
+        """The trap the prefetch had to avoid, asserted rather than assumed.
+
+        ``db.commit()`` at the end of each tenant expires every ORM instance in
+        the session. Had the alerts been prefetched as ``Alert`` objects, the
+        first commit would have expired the rest, and composing the *next*
+        tenant's digest would re-read every one of them attribute by attribute
+        — one statement per alert, which is worse than the per-tenant read the
+        prefetch replaced. Reading columns into ``Row``s is what rules that
+        out, and nothing about that choice is self-evident from the call.
+
+        So: hold the tenant count still and grow the alerts instead. The
+        per-tenant version of this bug is invisible that way; only the
+        per-instance one moves the number.
+        """
+
+        def _reads_for(alerts_each: int, first_gstin: int) -> int:
+            db_session.query(Alert).delete()
+            db_session.query(User).delete()
+            db_session.query(Business).delete()
+            db_session.commit()
+            # Three tenants throughout, so every commit but the last is
+            # followed by more digest-composing work to expire.
+            for index in range(first_gstin, first_gstin + 3):
+                tenant = make_business(db_session, gstin=_valid_gstin(index))
+                make_user(db_session, tenant, email=f"owner-{index}@example.com")
+                for _ in range(alerts_each):
+                    make_alert(db_session, tenant)
+            db_session.expunge_all()
+
+            reads: list[str] = []
+
+            def _record(conn, cursor, statement, parameters, context, executemany):
+                squashed = " ".join(statement.split()).lower()
+                if squashed.startswith("select") and "from alerts" in squashed:
+                    reads.append(squashed)
+
+            engine = db_session.get_bind()
+            event.listen(engine, "before_cursor_execute", _record)
+            try:
+                result = send_pending_alerts(db_session, now=NOW)
+            finally:
+                event.remove(engine, "before_cursor_execute", _record)
+
+            assert result.alerts_sent == 3 * alerts_each
+            return len(reads)
+
+        at_one = _reads_for(1, first_gstin=200)
+        at_eight = _reads_for(8, first_gstin=300)
+        assert at_one == at_eight, (
+            f"{at_one} reads of alerts at one alert per tenant, {at_eight} at eight: "
+            "the digest is going back to the database for rows the commit expired."
         )
 
 
