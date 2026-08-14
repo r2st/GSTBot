@@ -154,10 +154,13 @@ class SupplierScore:
     score: int | None
     risk_level: RiskLevel
     confidence: Decimal  # 0-1.
+    # How much evidence the score rests on. Required rather than defaulted:
+    # there is one place that builds a score and it counts both, and a zero
+    # standing in for "nobody said" would read as a supplier with no history.
+    invoices_observed: int
+    periods_observed: int
     components: list[Component] = field(default_factory=list)
     observations: list[Observation] = field(default_factory=list)
-    invoices_observed: int = 0
-    periods_observed: int = 0
     recommended_provision_pct: Decimal = ZERO
     recommendation: str = ""
 
@@ -218,6 +221,13 @@ def _timeliness_of(delay: int) -> Decimal:
     between it falls off linearly. Filing early earns nothing extra — the
     buyer's claim is not improved by the supplier having filed on the 4th
     rather than the 11th.
+
+    Both edges are inclusive, and at both of them the fall-through computes the
+    same figure the shortcut returns — a delay of exactly 0 is 100 either way,
+    and one of exactly 30 is zero either way. No test can tell the two apart,
+    which is why the mutation run leaves a survivor on each and why it is not a
+    missing assertion. The shortcuts are here for the early filer, whose
+    negative delay the linear form would score above 100.
     """
     if delay <= 0:
         return Decimal("100")
@@ -301,6 +311,11 @@ def _recency_component(observations: list[Observation], as_of_period: str) -> Co
     A supplier who has filed nothing for six periods scores zero: at that point
     the likeliest explanations are that they have stopped trading or had their
     registration cancelled, and either one puts the credit at risk.
+
+    As in :func:`_timeliness_of`, the boundary itself is the same number by
+    either route — a gap of exactly six periods scores zero whether the
+    shortcut takes it or the linear form does — so the surviving mutant on this
+    comparison is an equivalent one rather than an unasserted edge.
     """
     filed = [o.period for o in observations if o.matched or o.mismatched]
     if not filed:
@@ -505,10 +520,13 @@ def rescore_all(
 class SupplierExposure:
     """The money resting on one supplier right now."""
 
-    invoice_count: int = 0
-    tax_total: Decimal = ZERO
-    tax_at_risk: Decimal = ZERO
-    unpaid_count: int = 0
+    # All four are read off one aggregate row, so all four are required. A
+    # default would be a figure nothing measured, on a screen whose whole job
+    # is to say how much money is resting on this supplier.
+    invoice_count: int
+    tax_total: Decimal
+    tax_at_risk: Decimal
+    unpaid_count: int
 
     def as_dict(self) -> dict:
         return {
@@ -571,12 +589,13 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
     which asserts this figure against the reconciliation's ``itc_at_risk``,
     reached the other way.
     """
-    tax = (
-        func.coalesce(Invoice.igst, 0)
-        + func.coalesce(Invoice.cgst, 0)
-        + func.coalesce(Invoice.sgst, 0)
-        + func.coalesce(Invoice.cess, 0)
-    )
+    # The four tax columns are NOT NULL and have been since the initial
+    # revision, so they are added as they are. A per-column ``coalesce`` here
+    # was defending against a row that cannot exist, and no test could reach
+    # it. What can be null is the ``SUM`` over no rows at all, which is what
+    # the coalesces below it are for — the same shape ``invoice_service``
+    # sums its own money in.
+    tax = Invoice.igst + Invoice.cgst + Invoice.sgst + Invoice.cess
     at_risk = and_(
         Invoice.status == InvoiceStatus.MISSING_IN_2B,
         Invoice.itc_eligible.is_(True),

@@ -90,6 +90,30 @@ def test_a_mismatch_earns_half_credit_and_a_missing_invoice_none():
     assert component(missing, "match_rate").score == Decimal("0")
 
 
+def test_a_period_that_saw_nothing_counted_nothing():
+    """A period is built with its counts at zero, not at one.
+
+    Every observation reconciliation writes starts from these defaults and
+    fills in what it saw; a default of one would invent an invoice for each
+    period a supplier was silent in, and silence is exactly what the recency
+    and match-rate components are reading.
+    """
+    empty = scoring.Observation(period=PERIOD)
+
+    assert (empty.matched, empty.mismatched, empty.missing) == (0, 0, 0)
+    assert empty.total == 0
+    assert empty.match_rate is None
+
+
+def test_a_periods_own_match_rate_is_the_weighted_share_of_that_period():
+    """One matched and one mismatched is 75%: (1 + 0.5) of 2, as a percentage.
+
+    The per-period rate is what consistency is measured across, so it is
+    asserted here rather than only through the pooled component.
+    """
+    assert observed(PERIOD, matched=1, mismatched=1).match_rate == Decimal("75")
+
+
 def test_match_rate_pools_invoices_rather_than_averaging_periods():
     """A one-invoice month must not outweigh a two-hundred-invoice month."""
     result = score(
@@ -130,6 +154,19 @@ def test_timeliness_averages_across_periods():
         [observed("2026-03", matched=5, delay=0), observed("2026-04", matched=5, delay=30)]
     )
     assert component(result, "timeliness").score == Decimal("50")
+
+
+def test_a_single_day_late_is_already_late():
+    """The full score is earned by the due date, not by the day after it.
+
+    A day of grace would be a policy — the portal gives none, and a return
+    filed on the 12th is a return the buyer could not claim from on the 11th.
+    """
+    result = score([observed(PERIOD, matched=5, delay=1)])
+
+    timeliness = component(result, "timeliness")
+    assert timeliness.score.quantize(Decimal("0.01")) == Decimal("96.67")
+    assert timeliness.detail == "Late on 1 of 1 filing, by 1 days on average"
 
 
 class TestAnEarlyFilingCannotPayForALateOne:
@@ -201,6 +238,23 @@ class TestAnEarlyFilingCannotPayForALateOne:
         result = score([observed(PERIOD, matched=5, delay=-3)])
         assert component(result, "timeliness").detail == "Files on or before the due date"
 
+    def test_filing_on_the_due_date_itself_does_not_read_as_late(self):
+        """Zero days late is the due date, and "on or before" is what it is."""
+        result = score([observed(PERIOD, matched=5, delay=0)])
+        assert component(result, "timeliness").detail == "Files on or before the due date"
+
+    def test_the_days_quoted_are_the_mean_of_the_late_filings(self):
+        """Two days and four days is three on average — the late ones, averaged."""
+        result = score(
+            [
+                observed("2026-03", matched=5, delay=2),
+                observed("2026-04", matched=5, delay=4),
+            ]
+        )
+        assert component(result, "timeliness").detail == (
+            "Late on 2 of 2 filings, by 3 days on average"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Consistency
@@ -216,6 +270,22 @@ def test_a_steady_supplier_scores_full_consistency():
         [observed("2026-03", matched=8, missing=2), observed("2026-04", matched=8, missing=2)]
     )
     assert component(result, "consistency").score == Decimal("100")
+
+
+def test_consistency_costs_two_points_for_every_point_of_spread():
+    """100% one period and 80% the next is ten points of spread, and 80 for it.
+
+    The rate is what a supplier's swing is measured in, and the factor is what
+    turns fifty points of it into a zero. Asserted exactly, because a supplier
+    scored between the two extremes is where the number does any work.
+    """
+    result = score(
+        [observed("2026-03", matched=5), observed("2026-04", matched=4, missing=1)]
+    )
+
+    consistency = component(result, "consistency")
+    assert consistency.score == Decimal("80")
+    assert consistency.detail == "Match rate varies by 10 points across 2 periods"
 
 
 def test_an_erratic_supplier_scores_worse_than_a_steady_one_at_the_same_average():
@@ -248,6 +318,24 @@ def test_recency_decays_with_silence():
 def test_six_periods_of_silence_exhausts_recency():
     result = score([observed("2025-10", matched=5)], as_of="2026-04")
     assert component(result, "recency").score == Decimal("0")
+
+
+def test_the_silence_is_counted_in_months_across_a_year_boundary():
+    """November to February is three periods, not the nine a bare month
+    subtraction gives — and nine would exhaust a supplier's recency outright."""
+    result = score([observed("2025-11", matched=5)], as_of="2026-02")
+
+    recency = component(result, "recency")
+    assert recency.score == Decimal("50")
+    assert recency.detail == "Last filed 3 period(s) ago"
+
+
+def test_the_recency_detail_separates_this_period_from_the_last_one():
+    this_period = score([observed("2026-04", matched=5)], as_of="2026-04")
+    last_period = score([observed("2026-03", matched=5)], as_of="2026-04")
+
+    assert component(this_period, "recency").detail == "Filed this period"
+    assert component(last_period, "recency").detail == "Last filed 1 period(s) ago"
 
 
 def test_a_supplier_only_ever_seen_missing_has_no_recency_evidence():
@@ -299,6 +387,25 @@ def test_confidence_grows_with_volume_and_spread():
     assert thick.confidence == Decimal("1.00")
 
 
+def test_one_invoice_is_thin_evidence_rather_than_no_evidence():
+    """A single invoice still supports a score; it barely supports a provision.
+
+    Zero would say the same thing as a supplier never bought from, and the
+    provisioning arithmetic would then quietly discard the whole judgement.
+    """
+    assert score([observed(PERIOD, matched=1)]).confidence == Decimal("0.14")
+
+
+def test_twenty_invoices_in_a_single_month_are_volume_without_spread():
+    """Volume is satisfied at twenty; the other three-tenths wants three periods.
+
+    Twenty invoices in one month is the case the two halves exist to tell
+    apart — full marks on volume, a third of the spread, and 0.80 rather than
+    the 1.00 a supplier seen across a quarter earns.
+    """
+    assert score([observed(PERIOD, matched=20)]).confidence == Decimal("0.80")
+
+
 def test_a_reliable_supplier_needs_no_provision():
     result = score(
         [
@@ -340,6 +447,46 @@ def test_thin_evidence_softens_the_provision():
     assert thin.recommended_provision_pct < thick.recommended_provision_pct
 
 
+class TestWhichAdviceAScoreEarns:
+    """The provisioning bands, at the scores where the advice changes.
+
+    They are the risk bands — 85 and 60 — and the boundary belongs to the
+    kinder side of each: a supplier scoring exactly 85 is broadly reliable, and
+    one scoring exactly 60 has a mixed record rather than an unreliable one.
+    The message is the part a business acts on, so it is what is asserted.
+    """
+
+    def test_a_score_of_exactly_85_is_broadly_reliable(self):
+        # 41 matched of 50, with full recency and no filing dates, weighs out
+        # at exactly the boundary.
+        result = score([observed(PERIOD, matched=41, missing=9)])
+
+        assert result.score == 85
+        assert result.recommended_provision_pct == Decimal("12.00")
+        assert result.recommendation.startswith("Broadly reliable.")
+
+    def test_a_score_of_exactly_60_is_a_mixed_record(self):
+        result = score([observed(PERIOD, matched=26, missing=24)])
+
+        assert result.score == 60
+        assert result.recommendation.startswith("Mixed record.")
+
+    def test_a_provision_of_exactly_one_percent_is_still_a_provision(self):
+        """Under a percent is not worth a journal entry; a percent is.
+
+        Three invoices filed six days late score 95 on evidence worth 0.20,
+        which is the one-percent case exactly — and rounding it away would
+        report "no provision needed" for a supplier the model does want held
+        against.
+        """
+        result = score([observed(PERIOD, matched=3, delay=6)])
+
+        assert result.score == 95
+        assert result.confidence == Decimal("0.20")
+        assert result.recommended_provision_pct == Decimal("1.00")
+        assert "Hold 1.00%" in result.recommendation
+
+
 @pytest.mark.parametrize(
     ("value", "expected"),
     [
@@ -374,6 +521,23 @@ def test_observations_are_rebuilt_from_stored_history():
 
     assert [o.period for o in observations] == ["2026-03", "2026-04"]
     assert observations[1].filing_delay_days == 7
+
+
+def test_a_history_entry_counts_only_what_it_names():
+    """A period written with only its misses matched nothing — not one thing.
+
+    Reconciliation omits the keys that were zero, so the fallback here is the
+    value most of a supplier's history is read through.
+    """
+    supplier = Supplier(
+        business_id=1,
+        gstin=SUPPLIER_GSTIN_OTHER_STATE,
+        filing_history=[{"period": "2026-04", "missing": 2}],
+    )
+
+    (observation,) = scoring.observations_from_history(supplier)
+
+    assert (observation.matched, observation.mismatched, observation.missing) == (0, 0, 2)
 
 
 def test_malformed_history_entries_are_skipped():
