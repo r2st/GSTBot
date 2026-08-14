@@ -1082,6 +1082,27 @@ a:focus-visible {
   outline-offset: -2px;
 }
 
+/* The upload page's file input is `.visually-hidden` — clipped to a single
+   pixel — with a `<label>` styled as the button beside it. That is the standard
+   way to get a file picker that looks like the rest of the app, and it costs
+   the ring: the input is what takes focus, and the input is what is clipped, so
+   tabbing onto the one control that page exists for lit up nothing anywhere on
+   screen. A label cannot hold focus in its place, so the ring has to be drawn
+   onto it from the input's state.
+
+   Keyed off the input rather than the dropzone's own :focus-within, because
+   clicking "Choose files" with a mouse focuses the input too, and the ring
+   would then sit behind the pointer while the file dialog is open.
+   :focus-visible is the same keyboard-only heuristic the buttons above use.
+
+   `--ink` rather than `--brand` for the same reason `.btn-primary` overrides
+   it: this label is a primary button, and brand green on brand green is not a
+   focus ring. */
+.dropzone:has(input:focus-visible) .btn {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+}
+
 .skip-link {
   position: absolute;
   left: -9999px;

@@ -830,6 +830,67 @@ describe("the invoice type while a batch is running", () => {
       expect(call[1].body.get("invoice_type")).toBe("sales");
     }
   });
+
+  describe("reaching the picker from the keyboard", () => {
+    // The input is `.visually-hidden` — clipped to one pixel — with a label
+    // styled as the button next to it. That is what makes a file picker look
+    // like the rest of the app, and it is also what took the focus ring away:
+    // the input holds focus, the input is what is clipped, and tabbing onto
+    // the one control this page exists for lit nothing up anywhere on screen.
+    //
+    // The ring is drawn by `.dropzone:has(input:focus-visible) .btn`. jsdom
+    // applies no stylesheet, so these pin the DOM that rule selects through
+    // instead — move the input out of the dropzone, or drop the class off the
+    // label, and the ring goes away again in silence.
+
+    it("keeps the file input inside the dropzone", () => {
+      const { container } = renderPage();
+
+      expect(container.querySelector(".dropzone")).toContainElement(
+        screen.getByLabelText("Choose files"),
+      );
+    });
+
+    it("keeps the label the ring is drawn on inside it too", () => {
+      const { container } = renderPage();
+
+      expect(container.querySelector(".dropzone label.btn")).toHaveTextContent(
+        "Choose files",
+      );
+    });
+
+    it("leaves the input in the tab order rather than hiding it from focus", async () => {
+      // `.visually-hidden` clips; it does not remove the element from the tab
+      // order, and it must not — `display: none` or a negative tabindex here
+      // would leave the page with no keyboard route to its own file picker at
+      // all, ring or no ring.
+      const user = userEvent.setup();
+      renderPage();
+      const input = screen.getByLabelText("Choose files");
+      expect(input).not.toHaveAttribute("tabindex", "-1");
+
+      // Reached by tabbing from the top of the page, rather than by a
+      // programmatic focus() no user can perform.
+      for (let i = 0; i < 20 && document.activeElement !== input; i += 1) {
+        await user.tab();
+      }
+      expect(input).toHaveFocus();
+    });
+
+    it("takes the picker out of the tab order while a batch is running", async () => {
+      // Disabled, so the ring cannot land on a control that would refuse the
+      // click it is inviting. The label stays where it is, because a dropzone
+      // with no button in it reads as broken.
+      const user = userEvent.setup();
+      global.fetch.mockReturnValueOnce(new Promise(() => {}));
+      const { container } = renderPage();
+
+      await user.upload(screen.getByLabelText("Choose files"), file());
+
+      await waitFor(() => expect(screen.getByLabelText("Choose files")).toBeDisabled());
+      expect(container.querySelector(".dropzone label.btn")).toBeInTheDocument();
+    });
+  });
 });
 
 describe("a viewer", () => {
