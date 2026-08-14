@@ -22,6 +22,7 @@ would get wrong:
 """
 from __future__ import annotations
 
+import re
 from datetime import date
 from io import BytesIO
 
@@ -569,6 +570,111 @@ class TestEveryMutatingRouteIsGated:
             calls = set(self._calls(route.dependant))
             if any(isinstance(call, RequireRole) for call in calls):
                 assert {get_current_business, get_current_user} & calls, route.path
+
+    def test_a_gate_that_admits_a_viewer_does_not_count_as_gated(self):
+        """The presence of the dependency is not the property that matters.
+
+        Every assertion above asks whether a ``RequireRole`` is on the route,
+        and ``RequireRole(UserRole.VIEWER)`` is one: it constructs, it reads
+        the tenant, and its comparison is ``_RANK[viewer] < _RANK[viewer]``,
+        which is false for everyone. A route carrying it would satisfy the
+        whole sweep while admitting exactly the role the sweep exists to
+        refuse. So the minimum is checked, not just the type.
+        """
+        for route in self._mutating():
+            for call in self._calls(route.dependant):
+                if isinstance(call, RequireRole):
+                    assert call.minimum is not UserRole.VIEWER, (
+                        f"{route.path} carries a gate that refuses nobody"
+                    )
+
+
+# The value substituted for each path parameter on the sweep below. None of
+# them has to name a row that exists: the refusal is decided before any id is
+# looked up, which is the point ``TestTheRefusalIsUsable`` makes at length. A
+# real ``return_type`` is used anyway so that the owner half of the sweep
+# fails on something other than the enum.
+SWEEP_PATH_VALUES = {
+    "return_type": "gstr1",
+    "extension": "json",
+}
+SWEEP_DEFAULT_ID = "999999"
+
+_PATH_PARAM = re.compile(r"\{(\w+)\}")
+
+
+def _fill(path: str) -> str:
+    return _PATH_PARAM.sub(
+        lambda m: SWEEP_PATH_VALUES.get(m.group(1), SWEEP_DEFAULT_ID), path
+    )
+
+
+def _gated_calls() -> list[tuple[str, str]]:
+    """Every ``(method, path)`` the role gate is supposed to refuse a viewer.
+
+    Module level rather than a classmethod because ``parametrize`` is evaluated
+    while the class body is still executing, so the class does not yet have a
+    name to call it through.
+    """
+    return [
+        (method, route.path)
+        for route in TestEveryMutatingRouteIsGated._mutating()
+        if route.path not in UNGATED_MUTATIONS
+        for method in sorted((route.methods or set()) & MUTATING)
+    ]
+
+
+GATED_CALLS = _gated_calls()
+GATED_IDS = [f"{method} {path}" for method, path in GATED_CALLS]
+
+
+class TestEveryGatedRouteRefusesARealViewer:
+    """The sweep above reads the route table; this one drives it.
+
+    They fail for different reasons and that is why both exist. The static
+    sweep catches the route that shipped without a gate — it can see a route
+    nobody thought to test. It cannot see whether the gate *works*: it reads
+    declarations, and a dependency can be declared and still let the request
+    through, by ordering, by an override left installed, or by the wrong
+    minimum. This one asks the assembled application the question the product
+    actually promises an answer to — a viewer's session, a real request, a
+    403 — for every gated route rather than the eleven somebody listed.
+    """
+
+    def test_the_sweep_found_the_write_surface(self):
+        """A parametrize over an empty list passes every case it has."""
+        assert len(GATED_CALLS) >= 11, f"only {len(GATED_CALLS)} gated calls found"
+
+    @pytest.mark.parametrize(("method", "path"), GATED_CALLS, ids=GATED_IDS)
+    def test_the_viewer_is_refused(self, viewer, method, path):
+        """No body is sent on purpose.
+
+        The gate is a sub-dependency, so it is solved before the route's own
+        body and path parameters are read. A viewer who could reach the 422
+        would be a viewer whose request had already been let past the role,
+        and sending nothing is the shortest way to say that a well-formed
+        payload is not what stands between them and the write.
+        """
+        response = viewer.request(method, _fill(path))
+        assert response.status_code == 403, (
+            f"{method} {path} answered {response.status_code}: {response.text[:200]}"
+        )
+
+    @pytest.mark.parametrize(("method", "path"), GATED_CALLS, ids=GATED_IDS)
+    def test_the_same_request_as_an_owner_is_not_a_403(self, auth_client, method, path):
+        """What stops this file proving nothing.
+
+        Every assertion above is "the viewer got a 403", and a route that 403s
+        for *everybody* — a broken tenant lookup, a fixture that built no
+        membership — would satisfy all of them while testing no role at all.
+        The owner sends the same empty request, so the answer is a 404 or a
+        422 rather than a 200; what matters is only that it is not the refusal
+        the viewer got.
+        """
+        response = auth_client.request(method, _fill(path))
+        assert response.status_code != 403, (
+            f"{method} {path} refuses an owner too, so the viewer's 403 means nothing"
+        )
 
 
 class TestTheSpecSaysSoToo:
