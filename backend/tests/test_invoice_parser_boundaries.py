@@ -603,6 +603,10 @@ class TestTheEdgesThatCannotMove:
     rather than a behaviour. What is asserted instead is the fact that makes
     the mutant equivalent, so that the day it stops being true, this goes red
     rather than a mutation score quietly improving.
+
+    With the two below, this class now accounts for every one of the nine
+    survivors the module has left: `invoice_parser` is at its ceiling at 95.8%,
+    and the figure will not move again without the code moving first.
     """
 
     def test_the_fraction_window_is_bounded_by_two_rates_that_are_real(self):
@@ -621,6 +625,35 @@ class TestTheEdgesThatCannotMove:
         longest = _invoice_number_in("Invoice No: " + "A1" * 40)
         assert len(longest) <= 30
         assert len(_from_model_payload({"invoice_number": "X" * 200}, "", "m").invoice_number) == 64
+
+    def test_the_confidence_scale_lands_on_two_places_by_itself(self):
+        # ``round(found / 5 * 0.6, 2)`` has six reachable inputs and every one
+        # of them is already exact to two places, so rounding to three would
+        # return the same figure. The rounding is there for the reader rather
+        # than for the arithmetic; the day the divisor or the cap moves, this
+        # goes red and the rounding starts doing work.
+        assert [round(found / 5 * 0.6, 3) for found in range(6)] == [
+            round(found / 5 * 0.6, 2) for found in range(6)
+        ]
+
+    def test_the_line_a_label_sits_on_cannot_start_before_the_document(self):
+        # ``text.rfind("\n", 0, start) + 1`` bounds the window the reference
+        # and e-way markers are looked for in. Both mutants of it — searching
+        # from 1 instead of 0, and stepping back over the newline instead of
+        # past it — only ever widen that window by the newline itself and the
+        # character before it, and every marker pattern is a word ending at the
+        # label. There is no marker a newline can be the first character of, so
+        # neither mutant can change what is skipped.
+        assert invoice_parser._REFERENCE_PREFIX.search("\n") is None
+        assert invoice_parser._EWAY_PREFIX.search("\n") is None
+        assert invoice_parser._OTHER_DATE_PREFIX.search("\n") is None
+        # And the widening is not reachable from the other end either. A label
+        # on the first line has no newline before it, so the offset falls to
+        # the start of the document either way and the marker on that line is
+        # still read; a document that opens with a blank line puts the newline
+        # at index 0, where searching from 1 instead skips only itself.
+        assert _invoice_number_in("Ref Invoice No: OLD-1\nInvoice No: REAL-1") == "REAL-1"
+        assert _invoice_number_in("\nRef Invoice No: OLD-1\nInvoice No: REAL-1") == "REAL-1"
 
     def test_a_one_sided_pair_of_gstins_decides_nothing(self):
         # ``supplier and buyer`` guards a comparison that answers None when
