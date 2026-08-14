@@ -434,7 +434,16 @@ TARGETS: tuple[Target, ...] = (
             # The ineligible-ITC reversal reached through a filing, which is
             # the only path that carries a return period into the ledger.
             "tests/test_filing_journeys.py",
+            # ``purchases_outside_periods`` has exactly one caller — the
+            # s.16(4) sweep — and this is the only file that runs it. Without
+            # it the query's own narrowing has no test at all, and the three
+            # mutants in it survived for want of a caller.
+            "tests/test_itc_deadline.py",
         ),
+        # Tops out at 164/171. The seven are all guards against a value the
+        # column types make impossible (``x or 0`` on a NOT NULL money column)
+        # or an equal case that computes the same answer either way — adding a
+        # zero-tax invoice to a running total, or scaling a split by one.
     ),
     Target(
         "filing",

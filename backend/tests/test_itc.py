@@ -1,7 +1,7 @@
 """The set-off waterfall, the reversal rules, and the ITC endpoints."""
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
@@ -60,6 +60,17 @@ def save(db, business_id, **kwargs) -> Invoice:
 # ---------------------------------------------------------------------------
 # Section 49 / 49A / 49B — the set-off order
 # ---------------------------------------------------------------------------
+
+def test_a_tax_heads_total_is_all_four_heads_added():
+    """Every figure this module reports is read through ``.total``.
+
+    Four distinct amounts rather than a round number in one head: cess is the
+    one that is zero in almost every fixture here — it applies to a handful of
+    goods — so a total that quietly dropped or subtracted it would agree with
+    the rest of the suite and be wrong only for the businesses that sell them.
+    """
+    assert heads(igst="1", cgst="20", sgst="300", cess="4000").total == Decimal("4321")
+
 
 def test_igst_credit_settles_igst_first():
     result = itc_service.set_off(heads(igst="10000"), heads(igst="10000"))
@@ -343,6 +354,141 @@ def test_rule_37_reports_the_most_overdue_first():
     result = itc_service.rule_37([newer, old], as_of=date(2026, 12, 1))
 
     assert [item.invoice_id for item in result.overdue] == [1, 2]
+
+
+def test_rule_37_lists_the_approaching_by_how_little_time_is_left():
+    """The other list has an order too, and it is the opposite one.
+
+    Overdue is worst-first by age; approaching is soonest-first by what is
+    left, because the two answer different questions — "how much have I
+    already lost" against "what do I have to pay this week". The register
+    arrives in whatever order the invoices were entered, so an unsorted
+    approaching list would put the invoice with a month of runway above the
+    one due on Friday, and the screen shows the top of it.
+    """
+    as_of = date(2026, 6, 10)
+    later = purchase(id=1, invoice_date=as_of - timedelta(days=155))  # 25 days left
+    sooner = purchase(id=2, invoice_date=as_of - timedelta(days=170))  # 10 days left
+
+    result = itc_service.rule_37([later, sooner], as_of=as_of)
+
+    assert [item.days_remaining for item in result.approaching] == [10, 25]
+    assert [item.invoice_id for item in result.approaching] == [2, 1]
+
+
+def test_rule_37_warns_from_exactly_thirty_days_out_and_not_a_day_sooner():
+    """The window is a promise about notice, and both its edges are load-bearing.
+
+    A day narrow and the business is told about the invoice with less time to
+    act than the screen claims to give; a day wide and the list it is asked to
+    work through every morning grows by a month's invoices, which is how a
+    warning stops being read. Thirty days out is in; thirty-one is not.
+    """
+    invoice_date = date(2026, 1, 1)
+    thirty_out = itc_service.rule_37(
+        [purchase(invoice_date=invoice_date)],
+        as_of=invoice_date + timedelta(days=itc_service.RULE_37_DAYS - 30),
+    )
+    thirty_one_out = itc_service.rule_37(
+        [purchase(invoice_date=invoice_date)],
+        as_of=invoice_date + timedelta(days=itc_service.RULE_37_DAYS - 31),
+    )
+
+    assert [item.days_remaining for item in thirty_out.approaching] == [30]
+    assert thirty_out.approaching_amount.igst == Decimal("18000.00")
+
+    assert thirty_one_out.approaching == []
+    assert thirty_one_out.approaching_amount.total == Decimal("0.00")
+
+
+def test_rule_37_marks_the_day_180_invoice_as_still_in_time():
+    """``overdue`` is the flag the row is rendered from, not the list it is in.
+
+    The two are computed separately — the item carries its own boolean and the
+    result then files it under ``overdue`` or ``approaching`` — so the flag can
+    disagree with the list it lands in, and day 180 is where it would: the item
+    sits in ``approaching`` with nothing reversed while a row rendered from a
+    wrong flag tells the business the credit is already gone.
+    """
+    invoice_date = date(2026, 1, 1)
+    lapse = itc_service.lapse_date(invoice_date)
+
+    in_time = itc_service.rule_37(
+        [purchase(invoice_date=invoice_date)], as_of=lapse - timedelta(days=1)
+    )
+    gone = itc_service.rule_37([purchase(invoice_date=invoice_date)], as_of=lapse)
+
+    (still_in_time,) = in_time.approaching
+    assert still_in_time.days_remaining == 0
+    assert still_in_time.overdue is False
+    assert in_time.reversal.total == Decimal("0.00")
+
+    (reversed_item,) = gone.overdue
+    assert reversed_item.days_remaining == -1
+    assert reversed_item.overdue is True
+
+
+# ---------------------------------------------------------------------------
+# Rule 37's second half — the period the credit comes back in
+# ---------------------------------------------------------------------------
+
+class TestReAvailmentBelongsToExactlyOnePeriod:
+    """Both edges of both conditions, asserted on the pure function.
+
+    Every existing test reaches this through ``summary``, which fixes the
+    period to a month with a payment comfortably inside it. The credit is
+    given back exactly once, in one month, so a boundary off by a day either
+    hands it back twice — once in each of two adjacent returns — or never.
+    """
+
+    PERIOD = "2026-04"  # 1 – 30 April 2026.
+    # Lapses 31 March 2026, the day before the period opens: reversed by the
+    # March return, so April is the month entitled to take it back.
+    REVERSED_BEFORE = date(2025, 10, 1)
+    # One day later, and it lapses on 1 April instead.
+    LAPSES_ON_THE_FIRST = date(2025, 10, 2)
+
+    def test_the_fixture_dates_straddle_the_period_opening(self):
+        assert itc_service.lapse_date(self.REVERSED_BEFORE) == date(2026, 3, 31)
+        assert itc_service.lapse_date(self.LAPSES_ON_THE_FIRST) == date(2026, 4, 1)
+
+    @pytest.mark.parametrize("paid_on", [date(2026, 4, 1), date(2026, 4, 30)])
+    def test_a_payment_on_either_end_of_the_period_is_re_availed_in_it(self, paid_on):
+        invoice = purchase(invoice_date=self.REVERSED_BEFORE, paid_at=paid_on)
+
+        taken_back = itc_service.rule_37_reavailment([invoice], self.PERIOD)
+
+        assert taken_back.igst == Decimal("18000.00")
+
+    @pytest.mark.parametrize("paid_on", [date(2026, 3, 31), date(2026, 5, 1)])
+    def test_a_payment_a_day_outside_belongs_to_the_month_it_fell_in(self, paid_on):
+        invoice = purchase(invoice_date=self.REVERSED_BEFORE, paid_at=paid_on)
+
+        assert itc_service.rule_37_reavailment([invoice], self.PERIOD).total == Decimal(
+            "0.00"
+        )
+
+    def test_an_invoice_lapsing_on_the_first_of_the_period_was_never_reversed(self):
+        """So there is nothing for this period to give back.
+
+        ``rule_37`` reads ``paid_at`` as of the close of the period: an invoice
+        that crossed 180 days on 1 April and was paid on the 15th was already
+        excluded when April's reversal was computed, and never left the books.
+        Re-availing it would credit the business twice for one invoice.
+        """
+        never_reversed = purchase(
+            invoice_date=self.LAPSES_ON_THE_FIRST, paid_at=date(2026, 4, 15)
+        )
+        reversed_in_march = purchase(
+            invoice_date=self.REVERSED_BEFORE, paid_at=date(2026, 4, 15)
+        )
+
+        assert itc_service.rule_37_reavailment(
+            [never_reversed], self.PERIOD
+        ).total == Decimal("0.00")
+        assert itc_service.rule_37_reavailment(
+            [reversed_in_march], self.PERIOD
+        ).igst == Decimal("18000.00")
 
 
 # ---------------------------------------------------------------------------
@@ -1590,6 +1736,42 @@ def test_output_tax_ignores_a_sale_whose_extraction_failed(db_session, business)
     output = itc_service._outward_tax(db_session, business.id, PERIOD)
 
     assert output.igst == Decimal("18000.00")
+
+
+def test_output_tax_keeps_each_head_on_its_own_head(db_session, business):
+    """Four sums come back positionally, and two of them are usually equal.
+
+    CGST and SGST are half the rate each, so on a well-behaved intra-state
+    invoice they are the same number and a query that swapped the two columns
+    would be invisible in every other test here. They are not the same number
+    when a supplier's software puts the odd paisa of an odd taxable value on
+    one head — which is exactly the invoice a swap would misreport, and it
+    lands in the 3B as tax declared under the wrong head of a return that is
+    split between two governments.
+    """
+    db_session.add(
+        Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.SALES,
+            status=InvoiceStatus.PARSED,
+            invoice_number="S-1",
+            period=PERIOD,
+            taxable_value=Decimal("1000.05"),
+            cgst=Decimal("90.01"),
+            sgst=Decimal("90.00"),
+            igst=Decimal("0.00"),
+            cess=Decimal("12.34"),
+            total_value=Decimal("1192.40"),
+        )
+    )
+    db_session.commit()
+
+    output = itc_service._outward_tax(db_session, business.id, PERIOD)
+
+    assert output.igst == Decimal("0.00")
+    assert output.cgst == Decimal("90.01")
+    assert output.sgst == Decimal("90.00")
+    assert output.cess == Decimal("12.34")
 
 
 def test_turnover_split_ignores_a_sale_whose_extraction_failed(db_session, business):
