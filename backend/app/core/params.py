@@ -57,3 +57,23 @@ RowId = Annotated[int, Path(ge=MIN_ID, le=MAX_ID)]
 
 # ``offset: Offset = 0`` on every paginated list.
 Offset = Annotated[int, Query(ge=0, le=MAX_ID, description="Rows to skip.")]
+
+# The longest a path segment naming one of a fixed set may be. The sets it
+# guards are tiny — "gstr1", "gstr3b", "purchases", "json", "csv" — so this is
+# not a limit any caller meets; it is a ceiling on what an unknown value costs.
+#
+# A route that looks its segment up in a dict and 404s on a miss reads as
+# already safe, and mostly is: the lookup misses in constant time. What it does
+# next is the problem — each of them quotes the segment back ("Unknown return
+# type '...'"), and that detail leaves through the HTTPException handler, which
+# does not bound what a route hands it. Unbounded, the 404 is a reflector of
+# whatever was in the URL. The 422 handler learned the same lesson separately;
+# see ``_MAX_ECHOED_INPUT`` in ``app.core.errors``.
+MAX_SLUG_LENGTH = 32
+
+# A short, fixed-vocabulary name out of a path segment — a return type, a file
+# extension. Deliberately a length bound and not a pattern: the route owns the
+# vocabulary and answers 404 for a name outside it, which says more than a 422
+# on a regex would, and spelling the set here too would be a second place to
+# update whenever one is added.
+Slug = Annotated[str, Path(max_length=MAX_SLUG_LENGTH)]

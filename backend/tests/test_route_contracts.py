@@ -731,3 +731,84 @@ class TestEveryDecimalInAQueryStringIsBounded:
         # The guard against over-correcting into refusing real money.
         response = auth_client.get(path, params={name: "150000", "is_nil": "false"})
         assert response.status_code == 200, response.text
+
+
+class TestEveryStringInAUrlIsBounded:
+    """A bare ``str`` in a URL accepts as much as the server will read.
+
+    Unlike the integer and Decimal sweeps above, nothing here crashes. That is
+    what made it the last one found: every route handles its oversized input
+    perfectly well, and then *quotes it back*. The public GSTIN lookup echoed
+    a 20KB path segment into a 20KB response body, and the filing routes put
+    an unknown return type into a 404 detail. Reflection is the failure mode,
+    not a 500, so it shows up in a bandwidth graph rather than an error log.
+
+    Enums are absent by construction rather than by exception: a parameter
+    typed ``InvoiceType`` or ``RiskLevel`` is not a ``str`` here, and a closed
+    set needs no length. What this sweep catches is the parameter that is
+    genuinely free text — a search term, a slug, an id in another system.
+
+    A pattern counts as a bound. ``period`` carries the canonical ``YYYY-MM``
+    regex, and the sweep in ``TestEveryPeriodParameterNamesARealMonth`` is what
+    holds it to that; requiring a ``max_length`` on top would be noise.
+    """
+
+    def _string_params(self, route):
+        found = []
+        for param in (*route.dependant.query_params, *route.dependant.path_params):
+            annotation = param.field_info.annotation
+            options = [a for a in get_args(annotation) if a is not type(None)]
+            if len(options) == 1:
+                annotation = options[0]
+            if annotation is str:
+                found.append((param.name, param.field_info))
+        return found
+
+    def _is_bounded(self, field_info):
+        for meta in getattr(field_info, "metadata", []) or []:
+            if getattr(meta, "max_length", None) is not None:
+                return True
+            if getattr(meta, "pattern", None) is not None:
+                return True
+        return False
+
+    def test_the_sweep_finds_the_parameters_it_is_checking(self):
+        # A collector that finds nothing passes everything below. Named, not
+        # counted: these are the free-text parameters a caller can send today.
+        found = {
+            name
+            for route in collect_api_routes(app)
+            if hasattr(route, "dependant")
+            for name, _ in self._string_params(route)
+        }
+        assert {"search", "gstin", "return_type"} <= found, found
+
+    def test_every_string_parameter_declares_a_length_or_a_pattern(self):
+        offenders = []
+        for route in collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for name, field_info in self._string_params(route):
+                if not self._is_bounded(field_info):
+                    offenders.append(f"{route.path}:{name}")
+        assert not offenders, (
+            "these take a string of any length and every route here quotes its "
+            "input back in an error — bound them with ``max_length``, or spell "
+            f"a fixed-vocabulary segment ``app.core.params.Slug``: {offenders}"
+        )
+
+    def test_an_oversized_path_segment_is_refused_rather_than_echoed(self, auth_client):
+        # The end-to-end half: a declared bound that FastAPI ignored would
+        # still pass the metadata walk above.
+        oversized = "A" * 20_000
+        response = auth_client.get(f"/api/v1/filing/{oversized}/late-fee")
+        assert response.status_code == 422
+        assert len(response.content) < 2_000
+
+    def test_a_real_return_type_still_answers_and_an_unknown_one_still_404s(
+        self, auth_client
+    ):
+        # The guard against over-correcting: the bound must not disturb the
+        # vocabulary the route owns, nor the 404 it answers outside it.
+        assert auth_client.get("/api/v1/filing/gstr3b/late-fee").status_code == 200
+        assert auth_client.get("/api/v1/filing/gstr2b/late-fee").status_code == 404

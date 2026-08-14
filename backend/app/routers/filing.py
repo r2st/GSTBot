@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.deps import get_current_business
+from app.core.params import Slug
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnType
@@ -219,7 +220,7 @@ def filing_status(
     dependencies=[Depends(_read_limit)],
 )
 def late_fee(
-    return_type: str,
+    return_type: Slug,
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     is_nil: bool | None = Query(default=None),
     # Declared and bounded like every other money figure in a query string
@@ -297,7 +298,7 @@ def late_fee(
     dependencies=[Depends(_record_limit)],
 )
 def record_filed(
-    return_type: str,
+    return_type: Slug,
     payload: RecordFilingIn,
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
@@ -385,8 +386,8 @@ def _filed_out(record: GSTRReturn) -> FiledReturnOut:
     dependencies=[Depends(_export_limit)],
 )
 def export(
-    return_type: str,
-    extension: str,
+    return_type: Slug,
+    extension: Slug,
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
