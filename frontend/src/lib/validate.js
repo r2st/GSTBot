@@ -429,6 +429,12 @@ function invoiceDraftWarnings(draft, errors, options = {}) {
     const raw = String(draft[field] ?? "").trim();
     if (raw === "") return null;
     const value = Number(raw);
+    // The `: null` never fires: every field this is called for is run through
+    // `amountError` above, which rejects anything non-finite — so a raw that
+    // would land here has already put a message in `errors` and returned at
+    // the first line. Kept so the arithmetic below cannot inherit an Infinity
+    // if that pairing is ever broken; a warning computed on one reads as a
+    // confident claim about the invoice rather than as a bug.
     return Number.isFinite(value) ? value : null;
   };
 

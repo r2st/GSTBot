@@ -104,11 +104,17 @@ export default function UploadPage() {
   const [invoiceType, setInvoiceType] = useState("purchase");
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
-  // {done, total, current} while a batch is in flight, null otherwise.
+  // {done, total, count} while a batch is in flight, null otherwise.
   const [progress, setProgress] = useState(null);
   const inputRef = useRef(null);
+
+  // Derived rather than a second flag kept in step by hand. The two were
+  // separate state, set and cleared together on the same line every time, and
+  // "extracting, but with nothing to say about how far" was a fourth state the
+  // pair could spell but the loop below could never produce — so the spinner
+  // carried a caption no run of this page could ever show.
+  const busy = progress !== null;
 
   async function uploadFiles(files) {
     const list = Array.from(files ?? []);
@@ -153,7 +159,6 @@ export default function UploadPage() {
       return;
     }
 
-    setBusy(true);
     setError("");
 
     // Sent as batches rather than one request per file.
@@ -220,7 +225,6 @@ export default function UploadPage() {
       done += group.length;
     }
     setProgress(null);
-    setBusy(false);
     if (inputRef.current) inputRef.current.value = "";
   }
 
@@ -314,17 +318,15 @@ export default function UploadPage() {
         </p>
       </div>
 
-      {busy && (
+      {progress && (
         <p className="muted upload-progress" role="status">
           <Spinner label="Extracting" />
           {/* A range, because a request now carries several files and the line
               can only move between requests — naming one file of the ten in
               flight would be picking one at random and calling it the slow one. */}
-          {progress
-            ? progress.count === 1
-              ? `Extracting ${progress.done + 1} of ${progress.total}`
-              : `Extracting ${progress.done + 1}–${progress.done + progress.count} of ${progress.total}`
-            : "Extracting…"}
+          {progress.count === 1
+            ? `Extracting ${progress.done + 1} of ${progress.total}`
+            : `Extracting ${progress.done + 1}–${progress.done + progress.count} of ${progress.total}`}
         </p>
       )}
 

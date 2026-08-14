@@ -332,6 +332,104 @@ describe("UploadPage", () => {
     release();
   });
 
+  it("takes an accepted invoice that came back with no warnings list at all", async () => {
+    // `warnings` is the field the row's whole appearance keys off — an empty
+    // list is the clean case and prints a tick. Absent is not the same thing,
+    // and reading `.length` off it directly is a page that blanks on an
+    // upload the server actually accepted.
+    const user = userEvent.setup();
+    const { warnings: _dropped, ...rest } = invoiceResponse().invoice;
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({
+        total: 1,
+        accepted: 1,
+        rejected: 0,
+        items: [{ filename: "invoice.txt", accepted: true, queued: false, invoice: rest }],
+      }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), file());
+
+    expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+  });
+
+  it("keeps the rows already on screen when a batch answers with no outcomes", async () => {
+    // A 200 with no `items` is a truncated answer, not an empty one. Mapping
+    // over it directly throws inside the loop, which is caught as a *request*
+    // failure and relabels files the server may well have taken — so the safe
+    // reading is that this batch reported nothing, and the earlier rows stand.
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted({}, "first.txt")));
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), file("first.txt"));
+    expect(await screen.findByText("first.txt")).toBeInTheDocument();
+
+    global.fetch.mockResolvedValueOnce(jsonResponse({ total: 1, accepted: 0, rejected: 0 }));
+    await user.upload(screen.getByLabelText("Choose files"), file("second.txt"));
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalledTimes(2));
+    // The first upload's row is still there, and nothing was invented for the
+    // second — in particular it is not listed as having failed.
+    expect(screen.getByText("first.txt")).toBeInTheDocument();
+    expect(screen.queryByText("second.txt")).not.toBeInTheDocument();
+  });
+
+  it("never puts up a spinner that cannot say how far through the drop it is", async () => {
+    // The line and the spinner used to be two pieces of state — a `busy` flag
+    // and a `progress` object — set and cleared together on the same line
+    // every time. Together they could spell "extracting, position unknown",
+    // which the upload loop cannot produce, so the page carried a caption no
+    // run of it could ever reach. It is one piece of state now; this drives a
+    // batch across a chunk boundary, where the counter is rewritten mid-flight
+    // and a re-introduced second flag would fall out of step.
+    const user = userEvent.setup();
+    const seen = [];
+    const observer = new MutationObserver(() => {
+      const line = document.querySelector(".upload-progress");
+      if (line) seen.push(line.textContent);
+    });
+    observer.observe(document.body, { childList: true, subtree: true, characterData: true });
+
+    // Both requests are held, so the line can be read while each is in flight
+    // rather than after the batch has taken it down again.
+    let releaseFirst;
+    let releaseSecond;
+    global.fetch
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseFirst = () =>
+            resolve(jsonResponse(bulkResponse(Array.from({ length: 10 }, () => ({})))));
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          releaseSecond = () =>
+            resolve(jsonResponse(bulkResponse(Array.from({ length: 2 }, () => ({})))));
+        }),
+      );
+
+    renderPage();
+    await user.upload(
+      screen.getByLabelText("Choose files"),
+      Array.from({ length: 12 }, (_, i) => file(`invoice-${i}.txt`)),
+    );
+
+    // BULK_CHUNK is 10, so this is two requests and the line moves between them.
+    expect(await screen.findByText(/Extracting 1–10 of 12/)).toBeInTheDocument();
+    releaseFirst();
+    expect(await screen.findByText(/Extracting 11–12 of 12/)).toBeInTheDocument();
+    releaseSecond();
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    observer.disconnect();
+
+    // Every state the line was ever in named the files it was waiting on.
+    expect(seen.length).toBeGreaterThan(0);
+    for (const text of seen) {
+      expect(text).toMatch(/Extracting \d+(–\d+)? of 12/);
+    }
+  });
+
   it("surfaces the plan limit as the server stated it", async () => {
     const user = userEvent.setup();
     global.fetch.mockResolvedValueOnce(

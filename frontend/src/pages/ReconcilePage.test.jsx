@@ -1227,6 +1227,86 @@ describe("the runs a period accumulates", () => {
     expect(screen.getByText(/Last run/)).toBeInTheDocument();
   });
 
+  it("comes back to the latest run from the row that names it", async () => {
+    // The table's own way back, which is not the banner's. Once an earlier run
+    // is applied the newest row stops being the one on screen and grows a
+    // "View" of its own, and it is the control anyone reading the list reaches
+    // for — the banner is above the fold they are no longer looking at.
+    const user = userEvent.setup();
+    renderWithHistory({ detail: run({ id: 7, itc_at_risk: "90000.00" }) });
+    const table = await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+
+    await user.click(screen.getByRole("button", { name: /View the run from/ }));
+    await screen.findByRole("status");
+
+    // The newest row now offers itself, and the one being shown says so
+    // instead. Asked for by its own date so this cannot pass by clicking the
+    // button that was already there.
+    await user.click(
+      within(table).getByRole("button", { name: /View the run from 02 Jun 2026/ }),
+    );
+
+    await waitFor(() => expect(screen.queryByRole("status")).not.toBeInTheDocument());
+    expect(screen.getByText(/Last run/)).toBeInTheDocument();
+  });
+
+  it("counts a run that never got as far as matching as none matched", async () => {
+    // A run that failed or is still queued has no matched_count. Rendered
+    // straight, the cell reads " / 3" — a blank where a number belongs, on the
+    // one screen whose whole job is to show the figures moving between runs.
+    renderWithHistory({
+      history: [LATEST, { ...EARLIER, matched_count: null }],
+    });
+    const table = await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+
+    expect(within(table).getByText("0 / 3")).toBeInTheDocument();
+  });
+
+  it("does not report a superseded run list as one the server could not answer", async () => {
+    // Changing month aborts the list in flight, and a real browser rejects
+    // that request rather than resolving it. Treated as a failure it raises a
+    // banner blaming the server for an outage that never happened — over a
+    // month whose own list arrived perfectly well.
+    const user = userEvent.setup();
+    const body = (b, status = 200) =>
+      Promise.resolve({
+        ok: status < 400,
+        status,
+        statusText: "",
+        text: async () => JSON.stringify(b),
+      });
+    global.fetch = vi.fn((url, options = {}) => {
+      const path = String(url);
+      if (/\/reconciliation\?/.test(path)) {
+        // Only the month being left is held; the month arrived at answers
+        // normally, so anything on screen at the end came from the abort.
+        if (path.includes(SHOWN)) {
+          return new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () =>
+              reject(new DOMException("The operation was aborted.", "AbortError")),
+            );
+          });
+        }
+        return body({ items: [LATEST, EARLIER], total: 2 });
+      }
+      if (path.includes("/gstr2b/periods")) return body([]);
+      if (path.includes("/gstr2b/")) return body(imported());
+      if (path.includes("/latest")) return body(run());
+      return body({ detail: "Not found" }, 404);
+    });
+    render(
+      <MemoryRouter>
+        <ReconcilePage />
+      </MemoryRouter>,
+    );
+    await screen.findByText(/invoices imported/);
+
+    await selectPreviousPeriod(user);
+
+    await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+    expect(screen.queryByText(/Could not load the earlier runs/)).not.toBeInTheDocument();
+  });
+
   it("says why an earlier run would not open", async () => {
     // The row carries the counts but not the report, so opening one is a
     // request of its own and can fail on its own. Silently doing nothing looks

@@ -147,6 +147,15 @@ function Field({ spec, draft, message, setDraft, setTouched }) {
                   setDraft((prev) => ({ ...prev, [field]: e.target.checked })),
               }
             : {
+                // The `??` never fires and is not worth a test to prove it
+                // does: `adopt` builds the draft over ALL_FIELDS and coerces
+                // each one through `?? ""` already, and the only other write
+                // to it — the reset to `{}` on an id change — clears `invoice`
+                // in the same breath, which returns above before any Field
+                // renders. It stays because the alternative to a redundant
+                // guard here is React silently switching this input to
+                // uncontrolled, which loses the edit rather than announcing
+                // itself.
                 value: draft[field] ?? "",
                 onChange: (e) => setDraft((prev) => ({ ...prev, [field]: e.target.value })),
               })}

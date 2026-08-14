@@ -263,6 +263,24 @@ describe("BusinessSwitcher", () => {
     expect(screen.getByRole("button", { name: /^Umang Exports/ })).toBeInTheDocument();
   });
 
+  it("still offers the link form when the list comes back without a list in it", async () => {
+    // A 200 carrying no `items` is not an answer the server should give, but
+    // it is the shape a truncated proxy response arrives in. Taken literally
+    // it leaves `businesses` holding nothing iterable, and the way *out* of
+    // this menu — linking the registration whose absence is the whole reason
+    // it was opened — has to survive that, or the fix is unreachable from the
+    // screen that shows the problem.
+    await renderSwitcher({ mine: {} });
+    await userEvent.click(currentControl());
+
+    expect(
+      await screen.findByRole("button", { name: "Link another GSTIN" }),
+    ).toBeInTheDocument();
+    // No rows, and no complaint either: nothing failed.
+    expect(screen.queryByRole("list")).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("forgets the other account's password when the link form is cancelled", async () => {
     // It belongs to another login and this component has no further use for it;
     // leaving it in state means reopening the form re-fills it.
