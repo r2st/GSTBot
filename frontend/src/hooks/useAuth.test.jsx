@@ -364,3 +364,85 @@ describe("a business selection that outlives the membership behind it", () => {
     expect(getToken()).toBeNull();
   });
 });
+
+describe("a browser that will not store anything", () => {
+  // The boot effect calls `getToken()` synchronously, so a `localStorage` that
+  // throws used to take the provider down during commit — into the outer
+  // ErrorBoundary in main.jsx, which sits above the router. Every reload hit
+  // it again, and the crash screen was the entire app for a user whose browser
+  // is set to block site data. This is that case, at the seam where it broke.
+  afterEach(() => {
+    vi.restoreAllMocks();
+    setToken(null);
+    setActiveBusinessId(null);
+  });
+
+  function blockStorage() {
+    const real = globalThis.localStorage;
+    const refuse = () => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    };
+    Object.defineProperty(globalThis, "localStorage", {
+      value: { getItem: refuse, setItem: refuse, removeItem: refuse, clear: refuse },
+      configurable: true,
+      writable: true,
+    });
+    return () =>
+      Object.defineProperty(globalThis, "localStorage", {
+        value: real,
+        configurable: true,
+        writable: true,
+      });
+  }
+
+  it("boots to the sign-in screen instead of the crash screen", async () => {
+    const restore = blockStorage();
+    try {
+      const calls = mockApi();
+      renderWithProvider();
+
+      await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+      expect(screen.getByTestId("user")).toHaveTextContent("anonymous");
+      // And no session check: there is no stored token to confirm, which is a
+      // different thing from a token that could not be read.
+      expect(calls).toHaveLength(0);
+    } finally {
+      restore();
+    }
+  });
+
+  it("signs in, and holds the session for as long as the tab lives", async () => {
+    const restore = blockStorage();
+    try {
+      mockApi();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+
+      await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+
+      await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent(USER.email));
+      expect(screen.getByTestId("error")).toHaveTextContent("");
+      expect(getToken()).toBe("fresh-token");
+    } finally {
+      restore();
+    }
+  });
+
+  it("still signs out, on a browser that cannot forget the token either", async () => {
+    const restore = blockStorage();
+    try {
+      mockApi();
+      renderWithProvider();
+      await waitFor(() => expect(screen.getByTestId("loading")).toHaveTextContent("false"));
+      await userEvent.click(screen.getByRole("button", { name: "Sign in" }));
+      await waitFor(() => expect(screen.getByTestId("user")).toHaveTextContent(USER.email));
+
+      await userEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+      expect(screen.getByTestId("user")).toHaveTextContent("anonymous");
+      expect(getToken()).toBeNull();
+    } finally {
+      restore();
+    }
+  });
+});

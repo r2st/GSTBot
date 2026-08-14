@@ -1059,3 +1059,105 @@ describe("alerts", () => {
     await expect(api.dismissAlert(999)).rejects.toThrow("Alert not found");
   });
 });
+
+describe("a browser that will not store anything", () => {
+  // Blocked site data, a sandboxed iframe and a full quota all throw on
+  // `localStorage` access instead of answering null. This module read it bare,
+  // and `AuthProvider` calls `getToken()` inside an effect — so the throw
+  // reached the outer ErrorBoundary and the whole app became the crash screen,
+  // on every reload, with no way past it.
+
+  /**
+   * Run *body* with a `localStorage` that throws on every operation.
+   *
+   * Restored in a `finally`, and the session keys are cleared through a write
+   * that succeeds, because the in-memory fallback is sticky until one does —
+   * leaving an entry behind would shadow real storage for every later test in
+   * this file.
+   */
+  async function withBlockedStorage(body) {
+    const real = globalThis.localStorage;
+    const refuse = () => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    };
+    Object.defineProperty(globalThis, "localStorage", {
+      value: { getItem: refuse, setItem: refuse, removeItem: refuse, clear: refuse },
+      configurable: true,
+      writable: true,
+    });
+    try {
+      return await body();
+    } finally {
+      Object.defineProperty(globalThis, "localStorage", {
+        value: real,
+        configurable: true,
+        writable: true,
+      });
+      setToken(null);
+      setActiveBusinessId(null);
+      localStorage.clear();
+    }
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("answers no token rather than throwing", async () => {
+    await withBlockedStorage(() => {
+      expect(getToken()).toBeNull();
+      expect(getActiveBusinessId()).toBeNull();
+    });
+  });
+
+  it("still signs in, for the life of the tab", async () => {
+    // What is lost is precisely stated: the session does not survive a reload.
+    // Signing in, and every authenticated request after it, still work — which
+    // is the difference between a degraded app and an unusable one.
+    await withBlockedStorage(async () => {
+      global.fetch = vi.fn().mockResolvedValue(
+        jsonResponse({ access_token: "tok-blocked", token_type: "bearer" }),
+      );
+      await api.login("owner@example.com", "supersecret123");
+      expect(getToken()).toBe("tok-blocked");
+
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse({ items: [], total: 0 }));
+      await api.listInvoices();
+
+      expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer tok-blocked");
+    });
+  });
+
+  it("does not let a token it could not delete come back", async () => {
+    // The sign-out path. `removeItem` throws too, so the value written before
+    // storage went blind is still sitting there — and returning it would put a
+    // signed-out browser back into a session.
+    setToken("tok-from-a-working-browser");
+    await withBlockedStorage(() => {
+      setToken(null);
+      expect(getToken()).toBeNull();
+    });
+  });
+
+  it("switches business in memory, which is what X-Business-Id needs", async () => {
+    await withBlockedStorage(async () => {
+      setActiveBusinessId(9);
+      expect(getActiveBusinessId()).toBe("9");
+
+      global.fetch = vi.fn().mockResolvedValue(jsonResponse({ id: 1 }));
+      await api.me();
+
+      expect(global.fetch.mock.calls[0][1].headers["X-Business-Id"]).toBe("9");
+    });
+  });
+
+  it("goes back to real storage once a write succeeds", async () => {
+    // A quota freed by another tab. The fallback has to stop shadowing, or the
+    // session silently stops persisting for the rest of the browser's life.
+    await withBlockedStorage(() => setToken("tok-in-memory"));
+
+    setToken("tok-stored");
+    expect(localStorage.getItem("gstbot_token")).toBe("tok-stored");
+    expect(getToken()).toBe("tok-stored");
+  });
+});

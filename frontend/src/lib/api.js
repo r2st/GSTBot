@@ -5,13 +5,64 @@ const BASE = "/api/v1";
 const TOKEN_KEY = "gstbot_token";
 const ACTIVE_BUSINESS_KEY = "gstbot_active_business_id";
 
+/**
+ * Where a key goes when the browser will not store it.
+ *
+ * Touching `localStorage` is not a safe operation. A browser configured to
+ * block all site data, a sandboxed iframe, and a full quota each throw a
+ * `SecurityError` or `QuotaExceededError` on access rather than answering null
+ * — and this module was reading it bare. `AuthProvider` calls `getToken()`
+ * synchronously in an effect, so the throw landed in the outer ErrorBoundary:
+ * the whole app became the crash screen, on every reload, with no way through
+ * it. A compliance app that cannot be signed into by someone whose IT has
+ * locked the browser down is worse than one whose session ends with the tab.
+ *
+ * So this degrades the way the backend degrades when Redis is gone — falls back
+ * in-process, never fails the operation. The cost is precisely stated: the
+ * session lives for the life of the tab and does not survive a reload. Signing
+ * in, switching business, and every request in between still work.
+ *
+ * Guarded per call rather than probed once at import, because the two failures
+ * are not the same shape: blocked site data throws on the first read forever,
+ * while a quota fills up mid-session and throws on a write while reads keep
+ * working.
+ */
+const fallbackStore = new Map();
+
+function readStored(key) {
+  // The fallback wins wherever it holds the key. It only ever holds one
+  // because a write was refused, which makes whatever `localStorage` still
+  // answers for that key strictly older — a stale token that could not be
+  // overwritten must not beat the one this session actually signed in with.
+  if (fallbackStore.has(key)) return fallbackStore.get(key);
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStored(key, value) {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+    // Cleared on success so the two cannot diverge if storage comes back —
+    // a quota freed by another tab, say.
+    fallbackStore.delete(key);
+  } catch {
+    // `null` is stored rather than deleted: it has to shadow the value still
+    // sitting in a `localStorage` that would not let us remove it, or signing
+    // out would leave the old token readable on the next call.
+    fallbackStore.set(key, value);
+  }
+}
+
 export function getToken() {
-  return localStorage.getItem(TOKEN_KEY);
+  return readStored(TOKEN_KEY);
 }
 
 export function setToken(token) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  else localStorage.removeItem(TOKEN_KEY);
+  writeStored(TOKEN_KEY, token || null);
 }
 
 /**
@@ -24,12 +75,11 @@ export function setToken(token) {
  * `app.core.deps.get_current_business` in the backend.
  */
 export function getActiveBusinessId() {
-  return localStorage.getItem(ACTIVE_BUSINESS_KEY);
+  return readStored(ACTIVE_BUSINESS_KEY);
 }
 
 export function setActiveBusinessId(id) {
-  if (id) localStorage.setItem(ACTIVE_BUSINESS_KEY, String(id));
-  else localStorage.removeItem(ACTIVE_BUSINESS_KEY);
+  writeStored(ACTIVE_BUSINESS_KEY, id ? String(id) : null);
 }
 
 // Told when a credential this client actually sent comes back refused.
