@@ -20,7 +20,7 @@ from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_business
+from app.core.deps import get_current_business, require_writer
 from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.models.alert import (
@@ -179,7 +179,7 @@ def list_alerts(
         "comes back unchanged."
     ),
     responses={404: {"description": "No such alert in this tenant."}},
-    dependencies=[Depends(_write_limit)],
+    dependencies=[Depends(_write_limit), Depends(require_writer)],
 )
 def mark_read(
     alert_id: RowId,
@@ -214,7 +214,7 @@ def mark_read(
         "swatted away."
     ),
     responses={404: {"description": "No such alert in this tenant."}},
-    dependencies=[Depends(_write_limit)],
+    dependencies=[Depends(_write_limit), Depends(require_writer)],
 )
 def dismiss(
     alert_id: RowId,

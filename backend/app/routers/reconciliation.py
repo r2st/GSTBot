@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_business
+from app.core.deps import get_current_business, require_writer
 from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import safe_filename
@@ -86,7 +86,7 @@ _read_limit = RateLimit("reconcile_read", "240/minute")
             )
         },
     },
-    dependencies=[Depends(_import_limit)],
+    dependencies=[Depends(_import_limit), Depends(require_writer)],
 )
 async def import_gstr2b(
     file: UploadFile = File(..., description="GSTR-2B download: portal JSON or CSV export"),
@@ -271,7 +271,7 @@ def list_imported_periods(
         201: {"description": "Reconciled. The report is in the response."},
         409: {"description": "No GSTR-2B has been imported for that period yet."},
     },
-    dependencies=[Depends(_run_limit)],
+    dependencies=[Depends(_run_limit), Depends(require_writer)],
 )
 def run(
     payload: ReconcileRequest,

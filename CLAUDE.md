@@ -84,7 +84,7 @@ that reads `current_user.business_id` itself has no single place left to audit.
 Cross-tenant reads answer **404, never 403**. A 403 confirms the id exists, and
 ids are sequential, so a competitor's invoice count is a loop away.
 
-Three sweeps over the assembled route table enforce this rather than trusting
+Four sweeps over the assembled route table enforce this rather than trusting
 per-router habit, and they are the tests most likely to fail on a new endpoint:
 
 - `tests/test_tenancy_contract.py` — any route with an `*_id` path parameter
@@ -93,11 +93,39 @@ per-router habit, and they are the tests most likely to fail on a new endpoint:
   factory, or the file fails.
 - `tests/test_request_guards.py` — every route not on an explicit public
   allowlist must depend on `get_current_user` or `get_current_business`.
-- `tests/test_route_contracts.py` — shared route inventory the other two read.
+- `tests/test_rbac.py` — every route with a mutating method, outside an
+  explicit list, must depend on `require_writer`. See Roles below.
+- `tests/test_route_contracts.py` — shared route inventory the other three read.
 
 The public allowlist is deliberate and short: the three health probes,
 `/health/jobs`, the two `/meta/*` lookups, and login/register. Adding to it is a
 security decision, not a convenience.
+
+## Roles
+
+`owner` > `accountant` > `viewer`, and only one line between them is enforced:
+a viewer may not write. `Depends(require_writer)` on every mutating route says
+so, and `tests/test_rbac.py` sweeps that nothing new ships without it.
+
+The role is resolved with the tenant, in `get_active_tenant`, and for the same
+reason tenancy is: the answer depends on *which business the request acts for*.
+A login acting as itself carries `User.role`; one acting for a linked business
+through `X-Business-Id` carries that `BusinessMembership.role` instead. Reading
+`current_user.role` in a handler would give an owner of their own books an
+owner's authority over every client they have been linked into. `require_writer`
+and `get_current_business` share one dependency, so the membership is still read
+once per request.
+
+Role refusals are **403, not the tenancy 404**. The caller is a member of this
+business and knows it exists, and the answer does not depend on the id in the
+path — a viewer gets the same 403 for a real row, another tenant's row, and one
+that has never existed — so it confirms nothing a 404 would hide. The detail
+names the role held and who to ask, because that is the only thing the reader
+can act on.
+
+Owner and accountant are deliberately not separated. An outside CA doing a
+client's GST work needs every write this API has, and a product that refused
+them one would be routed around by sharing the owner's password.
 
 ## Rate limiting
 

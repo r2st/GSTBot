@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_business
+from app.core.deps import get_current_business, require_writer
 from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import search_pattern
@@ -122,7 +122,7 @@ def _owned_supplier(db: Session, business: Business, supplier_id: int) -> Suppli
         "Walks every supplier in the tenant, so it is limited tightly and is not "
         "something a screen should call on render."
     ),
-    dependencies=[Depends(_rescore_limit)],
+    dependencies=[Depends(_rescore_limit), Depends(require_writer)],
 )
 def rescore(
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),

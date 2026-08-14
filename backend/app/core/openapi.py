@@ -43,6 +43,12 @@ from app.core.routes import collect_api_routes, dependency_calls
 # site so the description a client reads is identical on all 35 routes.
 UNAUTHORIZED = {"description": "Missing, malformed or expired bearer token."}
 RATE_LIMITED = {"description": "Rate limit exceeded. See the `Retry-After` header."}
+FORBIDDEN = {
+    "description": (
+        "The caller's role on this business is read-only. Only an owner or an "
+        "accountant may change the tenant's books."
+    )
+}
 
 
 def is_guarded(route: Any) -> bool:
@@ -70,8 +76,24 @@ def is_metered(route: Any) -> bool:
     return route.path not in _UNLIMITED_PATHS
 
 
+def is_role_gated(route: Any) -> bool:
+    """Does *route* demand a role the caller may not hold? Then it can 403.
+
+    Only the role check earns the code here. Every guarded route can already
+    answer 403 for a business the caller is not a member of or one that has
+    been deactivated — but that is a property of the ``X-Business-Id`` header
+    rather than of the route, it applies uniformly to all thirty-odd of them,
+    and documenting it on each would say nothing a client could branch on.
+    A role refusal is the one 403 that distinguishes routes from each other:
+    it is exactly the set a read-only session must not offer.
+    """
+    from app.core.deps import RequireRole
+
+    return any(isinstance(call, RequireRole) for call in dependency_calls(route.dependant))
+
+
 def describe_conditional_responses(application: FastAPI, schema: dict[str, Any]) -> None:
-    """Add 401/429 to *schema* for the routes that can really return them."""
+    """Add 401/403/429 to *schema* for the routes that can really return them."""
     paths = schema.get("paths", {})
     for route in collect_api_routes(application):
         operations = paths.get(route.path)
@@ -80,6 +102,7 @@ def describe_conditional_responses(application: FastAPI, schema: dict[str, Any])
             continue
         guarded = is_guarded(route)
         metered = is_metered(route)
+        role_gated = is_role_gated(route)
         for method in route.methods or ():
             operation = operations.get(method.lower())
             if not isinstance(operation, dict):
@@ -89,6 +112,8 @@ def describe_conditional_responses(application: FastAPI, schema: dict[str, Any])
             # itself described a specific event and that wording wins.
             if guarded:
                 responses.setdefault("401", dict(UNAUTHORIZED))
+            if role_gated:
+                responses.setdefault("403", dict(FORBIDDEN))
             if metered:
                 responses.setdefault("429", dict(RATE_LIMITED))
 
@@ -116,10 +141,12 @@ def install_openapi(application: FastAPI) -> None:
 
 
 __all__ = [
+    "FORBIDDEN",
     "RATE_LIMITED",
     "UNAUTHORIZED",
     "describe_conditional_responses",
     "install_openapi",
     "is_guarded",
     "is_metered",
+    "is_role_gated",
 ]

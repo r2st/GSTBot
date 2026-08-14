@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_business
+from app.core.deps import get_current_business, require_writer
 from app.core.params import Offset, RowId
 from app.core.rate_limit import RateLimit
 from app.core.sanitize import safe_filename, search_pattern
@@ -256,7 +256,7 @@ def _store_and_extract(
         413: {"description": "Larger than `MAX_UPLOAD_MB`."},
         415: {"description": "Not a file type this product can read."},
     },
-    dependencies=[Depends(_upload_limit)],
+    dependencies=[Depends(_upload_limit), Depends(require_writer)],
 )
 async def upload_invoice(
     file: UploadFile = File(..., description="Invoice as PDF, image, CSV or Excel"),
@@ -324,7 +324,7 @@ MAX_BULK_FILES = 50
         200: {"description": "Every file was attempted; check each item's `accepted`."},
         413: {"description": "More than the per-file or per-batch limit."},
     },
-    dependencies=[Depends(_upload_limit)],
+    dependencies=[Depends(_upload_limit), Depends(require_writer)],
 )
 async def upload_invoices_bulk(
     files: list[UploadFile] = File(..., description="One or more invoices"),
@@ -549,7 +549,7 @@ def get_invoice(
             )
         },
     },
-    dependencies=[Depends(_write_limit)],
+    dependencies=[Depends(_write_limit), Depends(require_writer)],
 )
 def update_invoice(
     invoice_id: RowId,
@@ -685,7 +685,7 @@ def update_invoice(
         "limited more tightly than upload."
     ),
     responses={404: {"description": "No such invoice in this tenant."}},
-    dependencies=[Depends(_reparse_limit)],
+    dependencies=[Depends(_reparse_limit), Depends(require_writer)],
 )
 def reparse_invoice(
     invoice_id: RowId,
@@ -723,7 +723,7 @@ def reparse_invoice(
         204: {"description": "Deleted."},
         404: {"description": "No such invoice in this tenant."},
     },
-    dependencies=[Depends(_write_limit)],
+    dependencies=[Depends(_write_limit), Depends(require_writer)],
 )
 def delete_invoice(
     invoice_id: RowId,

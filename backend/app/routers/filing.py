@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.core.deps import get_current_business
+from app.core.deps import get_current_business, require_writer
 from app.core.params import Slug
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
@@ -295,7 +295,7 @@ def late_fee(
         404: {"description": "Unknown return type."},
         422: {"description": "The filing could not have happened as described."},
     },
-    dependencies=[Depends(_record_limit)],
+    dependencies=[Depends(_record_limit), Depends(require_writer)],
 )
 def record_filed(
     return_type: Slug,

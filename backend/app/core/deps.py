@@ -1,5 +1,8 @@
-"""Shared FastAPI dependencies: the current user, and the tenant they act for."""
+"""Shared FastAPI dependencies: the current user, the tenant they act for, and
+what they are allowed to do to it."""
 from __future__ import annotations
+
+from dataclasses import dataclass
 
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -11,7 +14,7 @@ from app.core.database import get_db
 from app.core.security import decode_access_token
 from app.models.business import Business
 from app.models.business_membership import BusinessMembership
-from app.models.user import User
+from app.models.user import User, UserRole
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.api_v1_prefix}/auth/login")
 
@@ -20,6 +23,35 @@ _credentials_exc = HTTPException(
     detail="Could not validate credentials",
     headers={"WWW-Authenticate": "Bearer"},
 )
+
+# The three roles, ordered. Everything a higher role may do a lower one may
+# not, which is the only relation between them this product needs — there are
+# no orthogonal permissions to model, and a grid of them would be a lie about
+# how the roles are actually used.
+_RANK: dict[UserRole, int] = {
+    UserRole.VIEWER: 0,
+    UserRole.ACCOUNTANT: 1,
+    UserRole.OWNER: 2,
+}
+
+
+@dataclass(frozen=True)
+class ActiveTenant:
+    """The business a request acts for, and the role it acts with.
+
+    The two are resolved together because they are the same lookup. A request
+    acting as its own tenant carries ``User.role``; one acting as a *linked*
+    business through ``X-Business-Id`` carries that membership's role instead,
+    and reading ``User.role`` in that case would apply the caller's authority
+    on their own books to somebody else's.
+    """
+
+    business: Business
+    role: UserRole
+
+    @property
+    def is_writer(self) -> bool:
+        return _RANK[self.role] >= _RANK[UserRole.ACCOUNTANT]
 
 
 def get_current_user(
@@ -39,18 +71,18 @@ def get_current_user(
     return user
 
 
-def get_current_business(
+def get_active_tenant(
     x_business_id: int | None = Header(default=None, alias="X-Business-Id"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
-) -> Business:
-    """The tenant the request acts for.
+) -> ActiveTenant:
+    """The tenant the request acts for, and the role it acts with.
 
-    Every business-scoped route depends on this rather than reading
-    ``current_user.business_id`` itself, so the tenant a request may touch is
-    resolved in exactly one place. A route that forgets it has no
-    ``business_id`` to filter on and fails loudly, instead of quietly reading
-    across tenants.
+    Every business-scoped route reaches this — through
+    :func:`get_current_business` for the tenant, through :class:`RequireRole`
+    for the authority — so the tenant a request may touch is resolved in
+    exactly one place. A route that forgets it has no ``business_id`` to filter
+    on and fails loudly, instead of quietly reading across tenants.
 
     Defaults to the caller's own tenant, exactly as it always has — a request
     that never sends ``X-Business-Id`` is unaffected by any of what follows.
@@ -61,8 +93,18 @@ def get_current_business(
     has since gone inactive — is a 403 rather than a silent fall-back to the
     caller's own tenant, because a client that believes it is acting for one
     business must never be quietly handed another's data instead.
+
+    FastAPI caches a dependency per request by the callable that declares it,
+    so a route depending on both ``get_current_business`` and a
+    ``RequireRole`` resolves this once and runs the membership query once.
+    That is why the role is returned from here rather than from a second
+    dependency that would repeat the lookup.
     """
     business_id = current_user.business_id
+    # Acting as one's own tenant: the role on the login is the role, and there
+    # is no membership row to read — the caller's own business is not linked to
+    # them, it *is* them.
+    role = current_user.role
     if x_business_id is not None and x_business_id != current_user.business_id:
         member = db.scalar(
             select(BusinessMembership).where(
@@ -77,10 +119,92 @@ def get_current_business(
                 detail="You do not have access to that business",
             )
         business_id = x_business_id
+        # MembershipRole and UserRole carry the same three values on purpose
+        # (see ``link_business``), so this is a rename rather than a mapping.
+        role = UserRole(member.role.value)
 
     business = db.get(Business, business_id)
     if business is None or business.deleted_at is not None or not business.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Business is inactive"
         )
-    return business
+    return ActiveTenant(business=business, role=role)
+
+
+def get_current_business(
+    tenant: ActiveTenant = Depends(get_active_tenant),
+) -> Business:
+    """The tenant the request acts for.
+
+    Kept as the name every business-scoped route depends on: what a route
+    needs is almost always the business alone, and threading an
+    :class:`ActiveTenant` through several dozen signatures to reach
+    ``.business`` on each would obscure that. The role travels beside it and
+    is read by :class:`RequireRole`, which is declared once per route rather
+    than unpacked in its body — an authority check written inside a handler is
+    one a new handler can be written without.
+    """
+    return tenant.business
+
+
+class RequireRole:
+    """Refuse the request unless the caller acts with at least *minimum*.
+
+    A dependency rather than a check inside each handler, for the same reason
+    ``get_current_business`` is one: a rule enforced in forty function bodies
+    is a rule the forty-first can be written without, and
+    ``tests/test_rbac.py`` can sweep a dependency off the assembled route
+    table but cannot sweep an ``if`` statement.
+
+    **403, not 404.** Cross-tenant reads answer 404 precisely so a refusal
+    never confirms that somebody else's row exists. This refusal confirms
+    nothing of the sort: the caller is a member of this business and knows it
+    exists, and the answer does not depend on the id in the path — a viewer
+    gets the same 403 whether the invoice they tried to patch is theirs, is
+    another tenant's, or does not exist at all. What it tells them is the one
+    thing they need in order to act on it: who to ask.
+    """
+
+    def __init__(self, minimum: UserRole) -> None:
+        self.minimum = minimum
+
+    def __call__(self, tenant: ActiveTenant = Depends(get_active_tenant)) -> ActiveTenant:
+        if _RANK[tenant.role] < _RANK[self.minimum]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                # Names the role held rather than the role required, because
+                # the reader of this sentence cannot change what a route
+                # demands and can ask somebody who holds more. A viewer who is
+                # told "accountant required" still has to work out that they
+                # are not one.
+                detail=(
+                    f"Your role on this business is '{tenant.role.value}', which is "
+                    "read-only. Ask an owner or an accountant to make this change."
+                ),
+            )
+        return tenant
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"RequireRole({self.minimum.value})"
+
+
+# The one authority this product distinguishes: may this request change the
+# tenant's books at all?
+#
+# Owner and accountant are deliberately not separated here. The difference
+# between them is who pays the bill, not what they may file — an outside CA
+# doing a client's GST work needs every write this API has, and a product that
+# refused them one would be routed around by sharing the owner's password,
+# which is strictly worse than granting the role. Viewer is the role that
+# means something: the person who is shown the books and does not touch them.
+require_writer = RequireRole(UserRole.ACCOUNTANT)
+
+__all__ = [
+    "ActiveTenant",
+    "RequireRole",
+    "get_active_tenant",
+    "get_current_business",
+    "get_current_user",
+    "oauth2_scheme",
+    "require_writer",
+]
