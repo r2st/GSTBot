@@ -52,6 +52,13 @@ function mockApi({ mine, mineStatus = 200, allow = [String(LINKED.id)] } = {}) {
       return reply({ id: 1, email: "a@b.in", business: LINKED });
     }
     if (path.endsWith("/businesses/mine") && method === "GET") {
+      // A tick before answering, because a mock that answers within the one it
+      // was called in is not a network and hid a real fault here. `load` sets
+      // `loading` true and, on the same tick, false again; React coalesced the
+      // pair into no change at all, no re-render followed, and the retry loop
+      // this endpoint was stuck in stopped after two requests under test while
+      // running unbounded in a browser. See `attempted` in the component.
+      await new Promise((resolve) => setTimeout(resolve, 0));
       if (mineStatus >= 400) return reply({ detail: "Server error" }, mineStatus);
       return reply(
         mine ?? {
@@ -146,6 +153,46 @@ describe("BusinessSwitcher", () => {
     await userEvent.click(currentControl());
     expect(await screen.findByRole("alert")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Umang Exports/ })).not.toBeInTheDocument();
+  });
+
+  it("asks once for a list that fails, however long the menu is left open", async () => {
+    // The failure used to re-arm the fetch that produced it: the effect fired
+    // on `businesses === null`, and a refusal is recorded by leaving it null.
+    // Every refusal therefore asked again immediately — 149 requests a second
+    // against a 5ms reply, on an endpoint metered by identity, for as long as
+    // the menu stayed open.
+    const calls = await renderSwitcher({ mineStatus: 500 });
+    await userEvent.click(currentControl());
+    await screen.findByRole("alert");
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(calls.filter((c) => c.path.endsWith("/businesses/mine")).length).toBe(1);
+  });
+
+  it("asks again when the menu is closed and reopened after a failure", async () => {
+    // Which is why the attempt is forgotten on close rather than held for the
+    // session: a panel saying it could not load has to have some gesture that
+    // tries again, and closing and reopening it is the one people make.
+    const calls = await renderSwitcher({ mineStatus: 500 });
+    await userEvent.click(currentControl());
+    await screen.findByRole("alert");
+
+    await userEvent.click(currentControl());
+    await userEvent.click(currentControl());
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path.endsWith("/businesses/mine")).length).toBe(2),
+    );
+  });
+
+  it("does not ask again when a list it already holds is reopened", async () => {
+    // The counterpart: forgetting the attempt must not throw away the answer.
+    const calls = await renderSwitcher();
+    await userEvent.click(currentControl());
+    await screen.findByRole("button", { name: /^Umang Exports/ });
+
+    await userEvent.click(currentControl());
+    await userEvent.click(currentControl());
+    await screen.findByRole("button", { name: /^Umang Exports/ });
+    expect(calls.filter((c) => c.path.endsWith("/businesses/mine")).length).toBe(1);
   });
 
   it("links another registration by its own credentials and reloads the list", async () => {

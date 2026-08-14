@@ -31,6 +31,18 @@ export default function BusinessSwitcher() {
   const [password, setPassword] = useState("");
   const toggleRef = useRef(null);
   const menuRef = useRef(null);
+  // Whether *this* opening of the menu has already asked. The list cannot
+  // record that, because a failure deliberately leaves it null — see `load`
+  // below — and null is also the condition to fetch on. Inferring the attempt
+  // from the data meant a failure re-entered the effect the moment it landed
+  // and asked again, as fast as the server could refuse, for as long as the
+  // menu stayed open: measured at 149 requests a second against a 5ms reply.
+  // Metered by identity, so the user spends their own bucket on it.
+  //
+  // Reset on close rather than kept for the session, so closing the menu and
+  // reopening it is the retry — the one gesture someone makes when a panel
+  // says it could not load.
+  const attempted = useRef(false);
 
   const current = user?.business;
 
@@ -52,9 +64,14 @@ export default function BusinessSwitcher() {
   }, []);
 
   useEffect(() => {
-    if (!open || businesses !== null || loading) return;
+    if (!open) {
+      attempted.current = false;
+      return;
+    }
+    if (attempted.current || businesses !== null) return;
+    attempted.current = true;
     load();
-  }, [open, businesses, loading, load]);
+  }, [open, businesses, load]);
 
   // Escape closes and returns focus to the control that opened it, matching the
   // nav drawer beside it — a menu that closes while focus stays on one of its
