@@ -43,13 +43,24 @@ class BusinessOut(BaseModel):
 
 
 class UserOut(BaseModel):
+    """The login itself, independent of which business a request acts for.
+
+    ``role`` here is the role on the login's *own* business, which is not
+    necessarily the role it acts with — see :attr:`MeOut.active_role`.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     email: EmailStr
     full_name: str | None = None
     phone: str | None = None
-    role: UserRole
+    role: UserRole = Field(
+        description=(
+            "Role on this login's own business. A request acting for a linked "
+            "business through `X-Business-Id` carries a different one."
+        )
+    )
     is_active: bool
     business_id: int
     created_at: datetime
@@ -63,6 +74,12 @@ class MeOut(UserOut):
     """
 
     business: BusinessOut
+    active_role: UserRole = Field(
+        description=(
+            "The role this login acts with **on `business`** — the one the API "
+            "enforces. Gate write controls on this, never on `role`."
+        )
+    )
 
 
 class RegisterRequest(BaseModel):

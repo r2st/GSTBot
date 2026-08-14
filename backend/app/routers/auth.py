@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_business, get_current_user
+from app.core.deps import ActiveTenant, get_active_tenant, get_current_user
 from app.core.rate_limit import (
     RateLimit,
     apply_headers,
@@ -290,15 +290,31 @@ def login(
         "page load, and a second round trip for the business would be one the "
         "app always makes.\n\n"
         "Also the session check: a 401 here means the stored token is expired or "
-        "belongs to a deleted user."
+        "belongs to a deleted user.\n\n"
+        "`active_role` is the role held **on the business in this response**, "
+        "which is what the API enforces. It differs from the top-level `role` "
+        "whenever `X-Business-Id` points at a linked business."
     ),
     dependencies=[Depends(_me_limit)],
 )
 def me(
     current_user: User = Depends(get_current_user),
-    business: Business = Depends(get_current_business),
+    tenant: ActiveTenant = Depends(get_active_tenant),
 ) -> MeOut:
+    # ``get_active_tenant`` rather than ``get_current_business``, for the role
+    # that comes with it. ``UserOut.role`` is the role on the login's own
+    # business, and answering with only that is the mistake the whole tenancy
+    # design exists to prevent one layer down: an owner of their own books who
+    # has been linked into a client as a *viewer* was told "owner" here while
+    # every write to that client answered 403. The frontend has no other way to
+    # know which controls to show, so it showed them all and let the user find
+    # out by being refused.
+    #
+    # ``get_current_business`` depends on this same callable, and FastAPI caches
+    # a dependency per request by the callable that declares it, so reading the
+    # tenant here still runs the membership lookup exactly once.
     return MeOut(
         **UserOut.model_validate(current_user).model_dump(),
-        business=BusinessOut.from_business(business),
+        business=BusinessOut.from_business(tenant.business),
+        active_role=tenant.role,
     )

@@ -3,8 +3,10 @@ from __future__ import annotations
 
 from app.core.security import create_access_token
 from app.models.business import Business, BusinessPlan
+from app.models.business_membership import BusinessMembership
 from app.models.user import User, UserRole
 from tests.conftest import BUSINESS_GSTIN, TEST_EMAIL, TEST_PASSWORD
+from tests.test_businesses import SECOND_GSTIN
 
 REGISTRATION = {
     "email": "new@example.com",
@@ -149,6 +151,79 @@ def test_me_returns_the_user_and_their_business(auth_client):
     assert body["business"]["gstin"] == BUSINESS_GSTIN
     assert body["business"]["state_name"] == "Maharashtra"
     assert "hashed_password" not in body
+
+
+class TestMeReportsTheRoleTheApiWillActuallyEnforce:
+    """``active_role`` is the role on the business in the response.
+
+    The frontend has no other way to decide which controls to show, and the
+    top-level ``role`` is the wrong input for that decision: it is the role on
+    the login's *own* business. An owner linked into a client as a viewer was
+    told "owner" here while every write to that client answered 403 — so the
+    app rendered a full set of buttons whose only outcome was a refusal, which
+    is the same failure the business switcher had and for the same reason.
+    """
+
+    def _linked_as(self, auth_client, client, db_session, role):
+        from tests.test_businesses import link, register_second_business
+
+        register_second_business(client, email="other@example.com", password="othersecret1")
+        other = db_session.query(User).filter_by(email="other@example.com").one()
+        other.role = role
+        db_session.commit()
+        response = link(auth_client, email="other@example.com", password="othersecret1")
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    def test_acting_as_your_own_tenant_it_is_the_role_on_the_login(self, auth_client):
+        body = auth_client.get("/api/v1/auth/me").json()
+        assert body["active_role"] == body["role"] == "owner"
+
+    def test_acting_for_a_linked_business_it_is_the_membership_role(
+        self, auth_client, client, db_session
+    ):
+        linked_id = self._linked_as(auth_client, client, db_session, UserRole.VIEWER)
+
+        body = auth_client.get(
+            "/api/v1/auth/me", headers={"X-Business-Id": str(linked_id)}
+        ).json()
+        assert body["business"]["id"] == linked_id
+        assert body["active_role"] == "viewer"
+        # The login's own role is unchanged and still reported — the two are
+        # different facts, and collapsing them would lose the one the account
+        # screen needs.
+        assert body["role"] == "owner"
+
+    def test_it_matches_what_a_write_to_that_business_actually_answers(
+        self, auth_client, client, db_session
+    ):
+        """The claim is only worth making if it predicts the API's behaviour.
+
+        Asserted against a real mutating route rather than against
+        ``require_writer`` directly: what the frontend needs to know is whether
+        a write will be refused, and this is that question asked end to end.
+        """
+        for role, writable in [(UserRole.VIEWER, False), (UserRole.ACCOUNTANT, True)]:
+            db_session.query(BusinessMembership).delete()
+            db_session.query(Business).filter(Business.gstin == SECOND_GSTIN).delete()
+            db_session.query(User).filter(User.email == "other@example.com").delete()
+            db_session.commit()
+
+            linked_id = self._linked_as(auth_client, client, db_session, role)
+            headers = {"X-Business-Id": str(linked_id)}
+
+            body = auth_client.get("/api/v1/auth/me", headers=headers).json()
+            write = auth_client.post(
+                "/api/v1/invoices/upload",
+                files={"file": ("b.txt", b"Invoice No: R-1\nTotal Amount: 100.00", "text/plain")},
+                data={"invoice_type": "purchase"},
+                headers=headers,
+            )
+            assert (body["active_role"] != "viewer") is writable
+            assert (write.status_code != 403) is writable, (
+                f"active_role={body['active_role']} but the write answered "
+                f"{write.status_code}"
+            )
 
 
 def test_me_requires_authentication(client):
