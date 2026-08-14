@@ -239,6 +239,70 @@ describe("LoginPage", () => {
     });
   });
 
+  it("sends the two optional fields when they are filled in", async () => {
+    // Neither had ever been typed into. They are the only pair of inputs on
+    // this form bound to different keys of the same state object, which is
+    // exactly the shape that survives a copy-paste with one key left behind:
+    // the trade name would land in `full_name`, both would arrive as one, and
+    // every existing test — none of which fills either — would stay green.
+    const user = userEvent.setup();
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse({ valid: true, state_name: "Maharashtra" }))
+      .mockResolvedValueOnce(jsonResponse({ access_token: "tok-3" }))
+      .mockResolvedValueOnce(jsonResponse({ email: "new@example.com", business: {} }));
+
+    renderPage();
+    await user.click(screen.getByRole("tab", { name: "Create account" }));
+    await user.type(screen.getByLabelText("GSTIN"), "27aapfu0939f1zv");
+    await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
+    await user.type(screen.getByLabelText("Trade name (optional)"), "Umang Traders");
+    await user.type(screen.getByLabelText("Your name (optional)"), "Umang Shah");
+    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "supersecret123");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => {
+      const registerCall = global.fetch.mock.calls.find(
+        ([url]) => url === "/api/v1/auth/register",
+      );
+      expect(registerCall).toBeDefined();
+      expect(JSON.parse(registerCall[1].body)).toMatchObject({
+        trade_name: "Umang Traders",
+        full_name: "Umang Shah",
+      });
+    });
+  });
+
+  it("sends nothing rather than an empty string for an optional field left blank", async () => {
+    // The half the server cares about: a blank input is absence, and `""` is
+    // a trade name of no characters. Only one of those round-trips back out
+    // of the API as "this business has no trade name".
+    const user = userEvent.setup();
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse({ valid: true, state_name: "Maharashtra" }))
+      .mockResolvedValueOnce(jsonResponse({ access_token: "tok-4" }))
+      .mockResolvedValueOnce(jsonResponse({ email: "new@example.com", business: {} }));
+
+    renderPage();
+    await user.click(screen.getByRole("tab", { name: "Create account" }));
+    await user.type(screen.getByLabelText("GSTIN"), "27aapfu0939f1zv");
+    await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
+    await user.type(screen.getByLabelText("Email"), "new@example.com");
+    await user.type(screen.getByLabelText("Password"), "supersecret123");
+    await user.click(screen.getByRole("button", { name: "Create account" }));
+
+    await waitFor(() => {
+      const registerCall = global.fetch.mock.calls.find(
+        ([url]) => url === "/api/v1/auth/register",
+      );
+      expect(registerCall).toBeDefined();
+      expect(JSON.parse(registerCall[1].body)).toMatchObject({
+        trade_name: null,
+        full_name: null,
+      });
+    });
+  });
+
   describe("validation", () => {
     /** Switch to the registration tab. */
     async function goToRegister(user) {

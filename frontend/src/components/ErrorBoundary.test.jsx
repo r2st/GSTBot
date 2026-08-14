@@ -163,15 +163,34 @@ describe("ErrorBoundary", () => {
     expect(screen.getByText("A different screen")).toBeInTheDocument();
   });
 
-  it("offers a reload as the second escape hatch", () => {
-    render(
-      <MemoryRouter>
-        <ErrorBoundary>
-          <Bomb explode />
-        </ErrorBoundary>
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole("button", { name: "Reload the app" })).toBeInTheDocument();
+  it("offers a reload as the second escape hatch, and it reloads", async () => {
+    // Clicked rather than merely found. "Try again" re-renders and nothing
+    // else, so when the cause is state a re-render cannot clear, this button
+    // is the last thing between the user and clearing site data — and one
+    // wired to nothing looks exactly like one that works.
+    const user = userEvent.setup();
+    const reload = vi.fn();
+    const real = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...real, reload },
+    });
+
+    try {
+      render(
+        <MemoryRouter>
+          <ErrorBoundary>
+            <Bomb explode />
+          </ErrorBoundary>
+        </MemoryRouter>,
+      );
+
+      await user.click(screen.getByRole("button", { name: "Reload the app" }));
+
+      expect(reload).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: real });
+    }
   });
 });
 

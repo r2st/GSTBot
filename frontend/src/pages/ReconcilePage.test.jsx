@@ -420,6 +420,32 @@ describe("ReconcilePage", () => {
     expect(screen.getByText(/This credit is at risk until they file/)).toBeInTheDocument();
   });
 
+  it("puts every outcome back when the filter is cleared", async () => {
+    // The way out of a filtered list. Every other chip narrows; this is the
+    // only one that widens, and nothing in this suite had ever clicked it — a
+    // screen that could be filtered and not unfiltered would have shipped
+    // green.
+    const user = userEvent.setup();
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage();
+
+    await screen.findByText("INV-2026-0042");
+    await user.click(screen.getByRole("button", { name: /Missing in 2B \(1\)/ }));
+    expect(screen.queryByText("INV-2026-0042")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^All \(/ }));
+
+    expect(screen.getByText("INV-2026-0042")).toBeInTheDocument();
+    expect(screen.getByText("GHOST-1")).toBeInTheDocument();
+    expect(screen.getByText("UNBOOKED-9")).toBeInTheDocument();
+    // And the category's explanation goes with it. It described the filter
+    // rather than the findings, so leaving it up would caption the whole list
+    // with advice about one quarter of it.
+    expect(
+      screen.queryByText(/This credit is at risk until they file/),
+    ).not.toBeInTheDocument();
+  });
+
   it("runs a reconciliation and shows the result", async () => {
     const user = userEvent.setup();
     mockApi({
