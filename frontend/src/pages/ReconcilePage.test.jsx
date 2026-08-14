@@ -1682,3 +1682,110 @@ describe("the period picker", () => {
     expect(screen.getByLabelText("Period").options).toHaveLength(12);
   });
 });
+
+describe("a viewer", () => {
+  // The API answers 403 to both writes this screen makes — the 2B import and
+  // the reconciliation run. Everything else on it is a read, and the split is
+  // the whole claim of these tests: the two controls go, and not one finding,
+  // figure or past run goes with them.
+  beforeEach(() => localStorage.clear());
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is not offered the import or the run", async () => {
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage({ role: "viewer" });
+    await screen.findByText(/invoices imported/);
+
+    expect(screen.queryByText(/^(Import|Replace) GSTR-2B$/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /Run reconciliation/ })).toBeNull();
+  });
+
+  it("is left no hidden file input to drive", async () => {
+    // The label is what a viewer would click, but the control is the input
+    // behind it. Hiding only the label would leave a working file picker one
+    // `dispatchEvent` away — and, in a browser, still reachable by tab.
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage({ role: "viewer" });
+    await screen.findByText(/invoices imported/);
+
+    expect(screen.queryByLabelText(/GSTR-2B$/)).toBeNull();
+  });
+
+  it("is told which role it holds and who can lift it", async () => {
+    // Without this the screen is a 2B panel with nothing to do in it, which
+    // reads as a page that failed to finish loading.
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage({ role: "viewer" });
+    await screen.findByText(/invoices imported/);
+
+    const notice = screen.getByText(/read-only/).closest(".banner");
+    expect(notice).toHaveTextContent("Umang Traders Private Limited");
+    expect(notice).toHaveTextContent("viewer");
+    expect(notice).toHaveTextContent(/import GSTR-2B or run a reconciliation/);
+  });
+
+  it("keeps the findings, which are what it came to read", async () => {
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage({ role: "viewer" });
+
+    // Every outcome, the ITC figures, and the link back to the invoice: what a
+    // reconciliation found is exactly what someone without the authority to
+    // re-run it is here for.
+    expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+    expect(screen.getByText("DH/451")).toBeInTheDocument();
+    expect(screen.getByText("GHOST-1")).toBeInTheDocument();
+    expect(screen.getByText("UNBOOKED-9")).toBeInTheDocument();
+    expect(screen.getByText("₹72,000.00")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "INV-2026-0042" })).toHaveAttribute(
+      "href",
+      "/invoices/11",
+    );
+  });
+
+  it("keeps the earlier runs, which are the evidence and not a write", async () => {
+    // The reason the history exists at all — a run that said credit was at
+    // risk in May, answering a reversal in November — is a question put to
+    // whoever is reading, and reading is all a viewer does.
+    const SHOWN = currentPeriod();
+    mockApi({
+      imported2b: imported(),
+      latest: run({ id: 9, period: SHOWN, matched_count: 3, itc_at_risk: "0.00" }),
+      history: [
+        { id: 9, period: SHOWN, total_invoices: 3, matched_count: 3, itc_at_risk: "0.00" },
+        {
+          id: 7,
+          period: SHOWN,
+          total_invoices: 3,
+          matched_count: 1,
+          itc_at_risk: "90000.00",
+          completed_at: "2026-05-14T10:01:02Z",
+        },
+      ],
+    });
+    renderPage({ role: "viewer" });
+
+    const table = await screen.findByRole("region", { name: "Earlier reconciliation runs" });
+    expect(within(table).getByText("₹90,000.00")).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: /View/ })).toBeInTheDocument();
+  });
+
+  it("keeps the period picker, so a viewer can read any month", async () => {
+    mockApi({ imported2b: imported(), latest: run(), periods: [PERIOD] });
+    renderPage({ role: "viewer" });
+    await screen.findByText(/invoices imported/);
+
+    expect(screen.getByLabelText("Period")).toBeEnabled();
+  });
+
+  it("leaves an owner both controls", async () => {
+    // The other half: the gate is the role, not something that removed the
+    // controls for everyone.
+    mockApi({ imported2b: imported(), latest: run() });
+    renderPage();
+    await screen.findByText(/invoices imported/);
+
+    expect(screen.getByText("Replace GSTR-2B")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Run reconciliation/ })).toBeEnabled();
+    expect(screen.queryByText(/read-only/)).toBeNull();
+  });
+});

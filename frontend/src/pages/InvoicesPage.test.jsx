@@ -609,3 +609,72 @@ describe("InvoicesPage", () => {
     });
   });
 });
+
+describe("a viewer", () => {
+  // This page has no write of its own — its one control is a link to Upload,
+  // whose every route is writer-only. So what goes is an invitation, and the
+  // list, the filters, the sort and the pages all stay: a viewer reading their
+  // books is the case this screen serves best.
+  afterEach(() => vi.restoreAllMocks());
+
+  it("is not invited to a screen where every control would be refused", async () => {
+    mockApi();
+    renderPage({ role: "viewer" });
+    await screen.findByText("INV-2026-0042");
+
+    expect(screen.queryByRole("link", { name: "Upload" })).toBeNull();
+  });
+
+  it("is told who can upload the first invoice, instead of being asked to", async () => {
+    // An empty state whose only sentence asks for something the reader cannot
+    // do is worse than one that names who to ask — the viewer would otherwise
+    // click through to Upload and find that screen empty too.
+    mockApi({ items: [], total: 0 });
+    renderPage({ role: "viewer" });
+
+    expect(await screen.findByText("No invoices yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Upload your first invoice/ })).toBeNull();
+    expect(
+      screen.getByText("An owner or an accountant can upload the first one."),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the whole list, and is not bannered about it", async () => {
+    // No ReadOnlyNotice on this screen on purpose: a table that lost one
+    // header button still does its job, and a banner on every page in the app
+    // is a banner people stop reading.
+    const urls = mockApi({ items: [invoice(), invoice({ id: 2, invoice_number: "INV-2" })] });
+    renderPage({ role: "viewer" });
+
+    expect(await screen.findByText("INV-2026-0042")).toBeInTheDocument();
+    expect(screen.getByText("INV-2")).toBeInTheDocument();
+    expect(screen.queryByText(/read-only/)).toBeNull();
+    expect(urls).toHaveLength(1);
+  });
+
+  it("keeps the filters and the sort, which are reads", async () => {
+    const urls = mockApi();
+    renderPage({ role: "viewer" });
+    await screen.findByText("INV-2026-0042");
+
+    await userEvent.selectOptions(screen.getByLabelText("Status"), "mismatched");
+    await waitFor(() => expect(lastQuery(urls).get("status")).toBe("mismatched"));
+
+    await userEvent.click(screen.getByRole("button", { name: /^Date/ }));
+    await waitFor(() => expect(lastQuery(urls).get("sort")).toBe("date_desc"));
+  });
+
+  it("leaves an owner both invitations", async () => {
+    mockApi({ items: [], total: 0 });
+    renderPage();
+
+    expect(await screen.findByText("No invoices yet.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Upload" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: /Upload your first invoice/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("An owner or an accountant can upload the first one."),
+    ).toBeNull();
+  });
+});
