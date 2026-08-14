@@ -86,7 +86,11 @@ def turnover_tier(previous_year_turnover: Decimal | None) -> TurnoverTier:
     understatement.
     """
     if previous_year_turnover is not None:
-        for threshold, tier in _TURNOVER_TIERS:
+        # The last tier's threshold is ``None`` — the top slab is open-ended —
+        # so a real turnover always returns from inside the loop and never
+        # falls out of it. The line below is reached only by ``None``, and
+        # stands as the answer if that table ever loses its open end.
+        for threshold, tier in _TURNOVER_TIERS:  # pragma: no branch
             if threshold is None or previous_year_turnover <= threshold:
                 return tier
     return _TURNOVER_TIERS[-1][1]

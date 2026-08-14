@@ -210,7 +210,10 @@ def chat_completion(
     # generic "gave up".
     last_error: OpenRouterError | None = None
 
-    for attempt in range(1, attempts + 1):
+    # No exit arc to cover: ``attempts`` is at least 1 and the last iteration
+    # always leaves through ``break`` on ``attempt == attempts``, so the raise
+    # below is reached that way and never by exhausting the range.
+    for attempt in range(1, attempts + 1):  # pragma: no branch
         retry_after: float | None = None
         try:
             response = httpx.post(

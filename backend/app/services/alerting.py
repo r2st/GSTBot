@@ -217,7 +217,11 @@ def _existing(
             # An alert covering a return type this build no longer knows about.
             # Leaving it alone is better than raising a duplicate beside it.
             continue
-        if row.period is not None:
+        # Narrowing, not a filter: the key this builds is typed on ``str`` and
+        # ``Alert.period`` is nullable. A row that fails it cannot arrive —
+        # ``period IN (...)`` is never true of NULL — so there is no case here
+        # to test and no coverage to be had.
+        if row.period is not None:  # pragma: no branch
             found[(row.period, return_type)] = row
     return found
 

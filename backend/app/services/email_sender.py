@@ -162,7 +162,11 @@ def send_email(*, to: str, subject: str, body: str) -> None:
     budget = settings.smtp_retry_max_wait_seconds
     waited = 0.0
 
-    for attempt in range(1, attempts + 1):
+    # No exit arc to cover: ``attempts`` is at least 1, and the last iteration
+    # either returns or raises — ``attempt == attempts`` is the first half of
+    # the refusal below. Falling out of this loop would be a silent success on
+    # a message that was never delivered, which is why it cannot be written to.
+    for attempt in range(1, attempts + 1):  # pragma: no branch
         try:
             _deliver(message)
         except (smtplib.SMTPException, OSError) as exc:

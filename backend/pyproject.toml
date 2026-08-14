@@ -31,7 +31,16 @@ branch = true
 # A gate rather than a target. It is set just under where the suite actually
 # sits so that deleting tests, or adding a module with none, fails CI — not so
 # that anyone writes a test purely to move it.
-fail_under = 98
+#
+# The suite covers every statement and every branch today. The gate is still
+# 99 rather than 100 deliberately: at 100 the next defensive guard someone
+# writes fails CI on the commit that adds it, which pressures the author into
+# either a test that asserts nothing or a pragma they have not thought about.
+# A branch that genuinely cannot be reached is marked `# pragma: no branch`
+# with the reason, and there are four — see alerting._existing,
+# late_fee.turnover_tier, and the retry loops in email_sender and
+# openrouter_client.
+fail_under = 99
 show_missing = true
 skip_covered = true
 exclude_also = [
