@@ -792,6 +792,126 @@ class TestTheExportsAUserActuallyOpens:
 
 
 # ---------------------------------------------------------------------------
+# The credit that quietly runs out of time
+# ---------------------------------------------------------------------------
+
+class TestCreditNobodyGotRoundToClaiming:
+    """s.16(4), from the invoice that carries the credit to the filing that saves it.
+
+    ``test_itc_deadline.py`` owns the arithmetic — which financial year an
+    invoice falls in, where the 30th of November lands, when the severity
+    escalates. What it cannot see is the handoff this journey is about: the
+    deadline screen names a *period*, the filing endpoint takes a *period*,
+    and the credit only stops being at risk if those two are the same string.
+    They are produced by different modules from different columns, and a
+    disagreement between them would show up as an alert that a business
+    cannot clear by doing exactly what it asks for.
+
+    The dates are fixed rather than relative. The whole subject is a distance
+    between an invoice date and a deadline nineteen months later, so a journey
+    that read the clock would assert something different every morning and
+    would stop exercising the expired branch the moment the calendar caught up.
+    """
+
+    # PERIOD is 2026-04, so FY 2026-27, so the credit dies on 30 Nov 2027.
+    DEADLINE = "2027-11-30"
+    # Exactly LEAD_DAYS before it — the day the alerting would first speak.
+    SIXTY_DAYS_OUT = "2027-10-01"
+    THE_DAY_AFTER = "2027-12-01"
+
+    @pytest.fixture()
+    def bought(self, client, stub_openrouter):
+        """One purchase, ₹81,000 of IGST on it, and no return recorded."""
+        client.headers.update({"Authorization": f"Bearer {register(client)}"})
+        invoice = upload(
+            client,
+            stub_openrouter,
+            text=PURCHASE_TEXT,
+            extraction=PURCHASE_EXTRACTION,
+            invoice_type="purchase",
+            name="northwind-0042.txt",
+        )
+        assert invoice["period"] == PERIOD
+        return client
+
+    def _lapsing(self, client, as_of: str) -> dict:
+        response = client.get("/api/v1/itc/lapsing", params={"as_of": as_of})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def _record_3b(self, client, *, period: str = PERIOD):
+        return client.post(
+            "/api/v1/filing/gstr3b/filed",
+            json={"period": period, "filed_at": "2026-05-20", "arn": "AA270426000001X"},
+        )
+
+    def test_the_period_the_deadline_names_is_the_one_that_clears_it(self, bought):
+        lapsing = self._lapsing(bought, self.SIXTY_DAYS_OUT)
+        (year,) = lapsing["years"]
+        assert year["financial_year"] == "2026-27"
+        assert year["deadline"] == self.DEADLINE
+        assert year["days_remaining"] == 60
+        assert year["expired"] is False
+        assert money(lapsing["total_at_risk"]) == Decimal("81000.00")
+
+        # The actionable half of the answer: not "you have credit at risk" but
+        # "file these". Fed straight back into the filing endpoint, with
+        # nothing in this test reshaping it — a period spelled one way here
+        # and another way there is exactly the defect that survives both
+        # modules' own tests.
+        (period,) = year["periods"]
+        assert self._record_3b(bought, period=period).status_code in (200, 201)
+
+        after = self._lapsing(bought, self.SIXTY_DAYS_OUT)
+        assert after["years"] == []
+        assert money(after["total_at_risk"]) == Decimal("0")
+
+    def test_the_credit_and_the_summary_are_talking_about_the_same_money(self, bought):
+        summary = bought.get("/api/v1/itc", params={"period": PERIOD})
+        assert summary.status_code == 200, summary.text
+
+        (year,) = self._lapsing(bought, self.SIXTY_DAYS_OUT)["years"]
+        # One screen says what may be claimed for the month, the other what is
+        # lost if nobody does. A business reading both has to be able to put
+        # them side by side, and two figures for one invoice would make the
+        # deadline screen look like it is about some other purchase.
+        assert money(year["tax"]["total"]) == money(
+            summary.json()["available"]["total"]
+        )
+        assert year["invoice_count"] == 1
+
+    def test_the_day_after_the_deadline_the_credit_is_reported_lost_rather_than_dropped(
+        self, bought
+    ):
+        # The morning the loss becomes permanent is the morning it most needs
+        # to be on the screen. A list that only showed savable credit would go
+        # empty overnight and read as good news.
+        lapsing = self._lapsing(bought, self.THE_DAY_AFTER)
+
+        (year,) = lapsing["years"]
+        assert year["expired"] is True
+        assert year["days_remaining"] == -1
+        assert money(lapsing["total_expired"]) == Decimal("81000.00")
+        assert money(lapsing["total_at_risk"]) == Decimal("0")
+
+    def test_recording_the_gstr1_does_not_claim_the_purchase_credit(self, bought):
+        # Credit reaches a return through GSTR-3B table 4(A) and nowhere else,
+        # so the outward return is not the one that saves it. Worth a journey
+        # of its own because both are recorded through the same endpoint with
+        # one path segment between them: a filing recorded against the wrong
+        # return type must not quietly make the warning go away.
+        recorded = bought.post(
+            "/api/v1/filing/gstr1/filed",
+            json={"period": PERIOD, "filed_at": "2026-05-11", "arn": "AA270426000002X"},
+        )
+        assert recorded.status_code in (200, 201), recorded.text
+
+        (year,) = self._lapsing(bought, self.SIXTY_DAYS_OUT)["years"]
+        assert year["periods"] == [PERIOD]
+        assert money(year["tax"]["total"]) == Decimal("81000.00")
+
+
+# ---------------------------------------------------------------------------
 # The request as an operator sees it
 # ---------------------------------------------------------------------------
 
