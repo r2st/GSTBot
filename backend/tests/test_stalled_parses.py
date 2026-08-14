@@ -312,7 +312,9 @@ class TestTheRowBecomesVisible:
         )
         reap_stalled_parses(db_session)
 
-        def fake_process(db, row):
+        # Takes the keyword the route now passes: the tenant's GSTIN is read
+        # once by the caller rather than walked off the invoice per file.
+        def fake_process(db, row, *, business_gstin=None):
             row.status = InvoiceStatus.PARSED
             row.parse_error = None
             db.commit()

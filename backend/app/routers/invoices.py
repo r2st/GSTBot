@@ -173,6 +173,7 @@ def _store_and_extract(
     filename: str,
     content_type: str | None,
     invoice_type: InvoiceType,
+    business_gstin: str,
 ) -> tuple[Invoice, bool]:
     """Commit an upload and extract it, exactly as ``upload_invoice`` always has.
 
@@ -180,6 +181,12 @@ def _store_and_extract(
     ways storing the file itself can fail — so both callers report them the
     same way: as the request's own failure when there is only one file, and as
     one line in a batch when there are many.
+
+    *business_gstin* is passed in rather than read off *business* here, and
+    that is not redundancy: this function commits, a commit expires *business*
+    along with everything else, and so a ``business.gstin`` on this line would
+    be a fresh ``SELECT`` on the second file of a batch and every file after
+    it. Read once by the caller, outside its loop.
     """
     try:
         invoice = invoice_service.create_pending_invoice(
@@ -212,7 +219,7 @@ def _store_and_extract(
             logger.warning("Could not queue invoice %s, parsing inline: %s", invoice.id, exc)
 
     if not queued:
-        invoice = invoice_service.process_invoice(db, invoice)
+        invoice = invoice_service.process_invoice(db, invoice, business_gstin=business_gstin)
 
     return invoice, queued
 
@@ -280,6 +287,7 @@ async def upload_invoice(
         filename=filename,
         content_type=file.content_type,
         invoice_type=invoice_type,
+        business_gstin=business.gstin,
     )
 
     return InvoiceUploadResponse(
@@ -334,6 +342,12 @@ async def upload_invoices_bulk(
             detail=f"A batch is limited to {MAX_BULK_FILES} files; this one has {len(files)}.",
         )
 
+    # Read once, before the loop, and held as a plain string. Every file in the
+    # batch commits, and each commit expires ``business`` — so this same line
+    # inside the loop would be a ``SELECT`` per file for a value that cannot
+    # change between them.
+    business_gstin = business.gstin
+
     items: list[InvoiceBulkUploadItemOut] = []
     for upload in files:
         filename = safe_filename(upload.filename, fallback="invoice")
@@ -347,6 +361,7 @@ async def upload_invoices_bulk(
                 filename=filename,
                 content_type=upload.content_type,
                 invoice_type=invoice_type,
+                business_gstin=business_gstin,
             )
         except HTTPException as exc:
             detail = exc.detail
@@ -683,7 +698,12 @@ def reparse_invoice(
     unlike an upload where the queue is what keeps the request fast.
     """
     invoice = _owned_invoice(db, business, invoice_id)
-    return InvoiceDetailOut.from_invoice(invoice_service.process_invoice(db, invoice))
+    # One invoice, so this is not the loop the parameter exists for — but the
+    # tenant is already loaded and in hand, and taking it here keeps the
+    # relationship walk to the one caller that genuinely has nothing else.
+    return InvoiceDetailOut.from_invoice(
+        invoice_service.process_invoice(db, invoice, business_gstin=business.gstin)
+    )
 
 
 @router.delete(

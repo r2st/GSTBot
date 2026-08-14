@@ -372,15 +372,33 @@ def create_pending_invoice(
     return invoice
 
 
-def apply_parsed(db: Session, invoice: Invoice, parsed: ParsedInvoice) -> Invoice:
+def apply_parsed(
+    db: Session,
+    invoice: Invoice,
+    parsed: ParsedInvoice,
+    *,
+    business_gstin: str | None = None,
+) -> Invoice:
     """Write an extraction onto an invoice row and link its counterparty.
 
     Which party is "the counterparty" flips with direction: on a purchase we
     are the buyer and the supplier is the other side, on a sale it is the
     reverse. Getting this backwards would file our own GSTIN as the vendor on
     every purchase, so it is decided here once rather than at each call site.
+
+    *business_gstin* is the tenant's own GSTIN, and it is a parameter rather
+    than a walk down ``invoice.business`` because of who calls this in a loop.
+    That relationship is lazy, and :func:`process_invoice` commits immediately
+    before reaching here — a commit expires every instance in the session, so
+    the walk costs a fresh ``SELECT`` on ``businesses`` *every* time, not just
+    the first. One per file through a fifty-file batch, for a value that is
+    the same on all fifty. A caller holding the tenant passes it; the walk
+    stays as the fallback for the one caller that does not.
     """
-    business_gstin = invoice.business.gstin if invoice.business else None
+    if business_gstin is None:
+        # The Celery path: the task has an invoice id and nothing else. One
+        # invoice per task, so the read here is per task and not per file.
+        business_gstin = invoice.business.gstin if invoice.business else None
 
     if invoice.invoice_type == InvoiceType.PURCHASE:
         counterparty = parsed.supplier_gstin
@@ -429,8 +447,13 @@ def apply_parsed(db: Session, invoice: Invoice, parsed: ParsedInvoice) -> Invoic
     return invoice
 
 
-def process_invoice(db: Session, invoice: Invoice) -> Invoice:
+def process_invoice(
+    db: Session, invoice: Invoice, *, business_gstin: str | None = None
+) -> Invoice:
     """Parse a stored invoice and record the outcome. Never raises.
+
+    *business_gstin* is threaded straight through to :func:`apply_parsed`; see
+    there for why a caller in a loop should pass it.
 
     A failure is written to the row as ``FAILED`` with the reason, rather than
     propagating: this runs on a Celery worker where an exception would be a
@@ -463,7 +486,7 @@ def process_invoice(db: Session, invoice: Invoice) -> Invoice:
             filename=invoice.source_filename,
             text=invoice.raw_text,
         )
-        apply_parsed(db, invoice, parsed)
+        apply_parsed(db, invoice, parsed, business_gstin=business_gstin)
         number, counterparty = invoice.invoice_number, invoice.counterparty_gstin
         db.commit()
     except IntegrityError:

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from sqlalchemy import event
+
 from app.models.invoice import Invoice, InvoiceStatus
 from app.routers.invoices import MAX_BULK_FILES
 from tests.conftest import BUSINESS_GSTIN, SUPPLIER_GSTIN_OTHER_STATE
@@ -393,3 +395,66 @@ class TestTheBatchAndTheSingleUploadAgree:
         assert {field: one[field] for field in compared} == {
             field: two[field] for field in compared
         }
+
+
+class TestTheBatchDoesNotRereadTheTenantPerFile:
+    """The tenant's own GSTIN is the same on all fifty files in a batch.
+
+    ``apply_parsed`` needs it to tell which side of the invoice is the
+    counterparty, and used to walk ``invoice.business`` for it. That
+    relationship is lazy and ``process_invoice`` commits immediately before
+    reaching it — a commit expires every instance in the session, so the walk
+    was a fresh ``SELECT`` on ``businesses`` for *every* file rather than just
+    the first. It is read once per request now and threaded down.
+
+    Only the inline path does this at all: with a live broker each file goes
+    to its own Celery task, one invoice per task. The suite runs with Redis
+    unreachable, which is exactly the degraded path where the batch parses in
+    a loop — so this is measured where it actually happened.
+    """
+
+    @staticmethod
+    def _business_reads(auth_client, db_session, count: int, tag: str) -> int:
+        reads: list[str] = []
+
+        def _record(conn, cursor, statement, parameters, context, executemany):
+            squashed = " ".join(statement.split()).lower()
+            if squashed.startswith("select") and "from businesses" in squashed:
+                reads.append(squashed)
+
+        engine = db_session.get_bind()
+        event.listen(engine, "before_cursor_execute", _record)
+        try:
+            response = bulk_upload(
+                auth_client,
+                [(f"{tag}-{i}.txt", _invoice_text(f"{tag}-{i}")) for i in range(count)],
+            )
+            assert response.status_code == 200, response.text
+            assert response.json()["accepted"] == count
+        finally:
+            event.remove(engine, "before_cursor_execute", _record)
+        return len(reads)
+
+    def test_the_extraction_no_longer_reads_the_business_for_each_file(
+        self, auth_client, db_session
+    ):
+        """One read per file, where there used to be two.
+
+        A ratchet rather than a flat line, because one per-file read is still
+        there and this test would be a lie if it claimed otherwise:
+        ``check_plan_limit`` reads ``business.plan``, and ``business`` is
+        expired by each file's commit exactly as it was before. That one is
+        worth removing the same way and is not removed here.
+
+        Stated as the *slope* so it still fails for the bug it is about: if
+        extraction goes back to walking ``invoice.business``, six more files
+        cost twelve more reads instead of six.
+        """
+        at_two = self._business_reads(auth_client, db_session, 2, "TWO")
+        at_eight = self._business_reads(auth_client, db_session, 8, "EIGHT")
+
+        assert at_eight - at_two == 6, (
+            f"{at_two} reads of businesses for two files and {at_eight} for eight — "
+            f"{(at_eight - at_two) / 6:g} per extra file rather than 1. Extraction is "
+            "reading the tenant per file again."
+        )
