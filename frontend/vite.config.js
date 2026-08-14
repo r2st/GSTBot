@@ -34,17 +34,19 @@ export default defineConfig({
       // none — not a target to code towards. Raise it in the commit that
       // earns it, the same way backend/pyproject.toml does.
       //
-      // `functions` still sits below the rest, for the reason it always has:
-      // v8 counts every inline JSX arrow as its own function, so a component
-      // whose lines are fully covered still scores well under 100 when it
-      // renders a row of handlers that no single test clicks. Statements and
-      // lines remain the honest signal.
+      // `functions` sat below the rest for as long as v8's count of inline JSX
+      // arrows was the reason it could not reach the others: a component whose
+      // lines are fully covered still scores under 100 when it renders a row
+      // of handlers no single test clicks. 87 → 95 when the flow tests landed
+      // and drove the app across pages, which measured 97.
       //
-      // It moved 87 → 95 when the flow tests landed. Driving the app across
-      // pages clicks the handlers a page mounted on its own never gets asked
-      // to — the measured figure went from the high eighties to 97 — and the
-      // gate follows what the suite now actually reaches, with the same kind
-      // of headroom the other three keep.
+      // The remaining three points were not the JSX artifact at all. They were
+      // one handler, written seven times: the `onDismiss` on every page's
+      // error banner, which no test had ever clicked — the banner's appearance
+      // is what each page test was written about, and the × beside it went in
+      // with it and was asserted nowhere. `src/App.dismiss.test.jsx` sweeps
+      // the route table for it and the measured figure is 100, so the gate
+      // joins the other three at one point under what the suite reaches.
       //
       // `branches` is at 99.5 rather than at the 99.81 actually measured, and
       // the gap is deliberate. Three branches are unreachable by construction
@@ -63,7 +65,7 @@ export default defineConfig({
       //
       // A gate at the measured figure would make removing any of those guards
       // the way to keep CI green.
-      thresholds: { statements: 99, branches: 99.5, functions: 95, lines: 99 },
+      thresholds: { statements: 99, branches: 99.5, functions: 99, lines: 99 },
     },
   },
 });
