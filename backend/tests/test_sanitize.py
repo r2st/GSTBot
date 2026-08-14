@@ -8,6 +8,9 @@ upload directory.
 """
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 from app.core.sanitize import (
@@ -232,3 +235,70 @@ class TestCsvSafe:
         visible apostrophe is recoverable by anyone reading the file back.
         """
         assert csv_safe("-Trading Co")[1:] == "-Trading Co"
+
+
+class TestEveryLikeInTheProductDeclaresItsEscape:
+    """The pairing ``escape_like`` depends on, enforced over the source.
+
+    :func:`app.core.sanitize.escape_like` prefixes ``%`` and ``_`` with a
+    backslash, and that backslash means nothing to SQL unless the comparison
+    says so: ``ilike(pattern, escape="\\\\")``. Get the pattern right and omit
+    the ``escape=`` and the escaping is worse than absent — the search now
+    looks for a literal backslash that the user never typed, so a supplier
+    named "A_B" stops being findable at all, and the ``%`` the escaping was
+    there to defuse goes back to being a wildcard.
+
+    That pairing lives in a docstring today and is kept by two call sites
+    remembering it. A third endpoint with a search box is the likely next
+    change to this codebase, and nothing would fail if it forgot. So this is a
+    sweep over the assembled source rather than a test of any one route, for
+    the same reason the tenancy contract is a sweep over the assembled route
+    table: per-router habit is not a thing a test can rely on.
+    """
+
+    @staticmethod
+    def _like_calls() -> list[tuple[str, int, ast.Call]]:
+        found: list[tuple[str, int, ast.Call]] = []
+        for path in sorted((Path(__file__).resolve().parents[1] / "app").rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"like", "ilike", "not_like", "notilike"}
+                ):
+                    found.append((path.name, node.lineno, node))
+        return found
+
+    def test_the_sweep_finds_the_calls_it_is_meant_to_police(self):
+        # Without this the whole class passes by finding nothing — which is
+        # exactly what a rename of `ilike` or a move of the routers would do.
+        calls = self._like_calls()
+        assert len(calls) >= 5, f"the LIKE sweep found only {len(calls)} calls; it has gone blind"
+
+    def test_no_like_comparison_omits_its_escape_character(self):
+        offenders = [
+            f"{name}:{lineno}"
+            for name, lineno, node in self._like_calls()
+            if not any(kw.arg == "escape" for kw in node.keywords)
+        ]
+        assert offenders == [], (
+            "these LIKE comparisons do not declare an escape character, so the "
+            "backslashes escape_like puts in the pattern are searched for "
+            "literally: " + ", ".join(offenders)
+        )
+
+    def test_the_escape_declared_is_the_one_escape_like_uses(self):
+        # A different character silently un-escapes the pattern just as
+        # completely as omitting it, and reads as correct.
+        wrong = [
+            f"{name}:{lineno}"
+            for name, lineno, node in self._like_calls()
+            for kw in node.keywords
+            if kw.arg == "escape"
+            and not (isinstance(kw.value, ast.Constant) and kw.value.value == "\\")
+        ]
+        assert wrong == [], (
+            "these LIKE comparisons declare an escape character other than the "
+            "backslash escape_like emits: " + ", ".join(wrong)
+        )
