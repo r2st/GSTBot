@@ -492,6 +492,11 @@ def match(
     # this run has no evidence about a month it is not reconciling, and saying
     # "missing at the supplier's end" about an invoice whose own period matched
     # it cleanly would be a false alarm invented out of nothing.
+    #
+    # The record and the ``matched_on`` beside it are set together and cleared
+    # together, so reading either says the same thing and the mutation run's
+    # surviving ``entry[1]`` -> ``entry[2]`` is an equivalent mutant rather
+    # than an unasserted branch.
     paired = [
         entry
         for entry in paired
@@ -595,7 +600,10 @@ def match(
 
         # Credit is capped by what the supplier actually declared: claiming
         # more than the portal shows is what a notice is issued over. Anything
-        # booked above that figure is at risk.
+        # booked above that figure is at risk. The guard is strict only to skip
+        # the addition, not to change it — at equality the amount added is
+        # zero either way, which is why the mutation run leaves a survivor on
+        # this comparison and why it is not a missing assertion.
         portal_tax = _sum_tax(record)
         allowed = min(booked_tax, portal_tax)
         result.itc_eligible += allowed
@@ -646,6 +654,11 @@ def match(
 # How many GSTINs go into one ``IN`` clause. Every driver bounds the parameters
 # a statement may carry — SQLite's default is under a thousand — and a tenant
 # whose month happens to cross that bound must not be the one who finds out.
+#
+# The figure is headroom under that bound rather than a rule, so the tests that
+# assert chunking shrink it instead of building five hundred suppliers to cross
+# it. That leaves the literal itself unasserted, which is the right trade: a
+# test pinning it to 500 would only restate this line.
 _SUPPLIER_LOOKUP_CHUNK = 500
 
 
@@ -713,7 +726,10 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
 
         # When the supplier actually filed, taken from the earliest 2B row seen
         # for them: a statement carries one filing date per supplier, and the
-        # earliest is the one the buyer's claim depends on.
+        # earliest is the one the buyer's claim depends on. Strict only to skip
+        # a pointless write — two rows carrying the same date store the same
+        # date whichever wins — so the surviving mutant on this comparison is
+        # an equivalent one.
         if finding.record is not None and finding.record.supplier_filing_date:
             existing = filing_dates.get(gstin)
             if existing is None or finding.record.supplier_filing_date < existing:
@@ -823,7 +839,14 @@ def _apply_statuses(result: ReconciliationResult) -> None:
 
 
 def latest_gstr2b(db: Session, business_id: int, period: str) -> GSTRReturn | None:
-    """The most recently imported GSTR-2B for *period*, if there is one."""
+    """The most recently imported GSTR-2B for *period*, if there is one.
+
+    The ``ORDER BY`` is what picks the row and is asserted; the ``LIMIT`` only
+    keeps the driver from carrying rows nobody reads, because ``scalar`` takes
+    the first and discards the rest whatever the limit says. Same in
+    :func:`latest_completed_run`, and it is why both leave a mutation survivor
+    on the number.
+    """
     return db.scalar(
         select(GSTRReturn)
         .where(

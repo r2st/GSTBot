@@ -195,6 +195,54 @@ class TestBlockedCreditOnAMatchedInvoice:
 
 
 # ---------------------------------------------------------------------------
+# Which side of a finding each field is read off
+# ---------------------------------------------------------------------------
+
+class TestWhereAFindingsInvoiceDateComesFrom:
+    """One key, filled from whichever side of the finding actually has it.
+
+    The date is not a compared field — books and portal routinely disagree
+    about it without that being a mismatch, because the buyer keys the date
+    they received the invoice and the supplier keys the date they raised it.
+    So it is reported rather than reconciled, and where it is read from is a
+    decision: the books' copy when there is one, because that is the date the
+    rest of the user's own records are filed under, and the portal's only when
+    there is no invoice behind the finding at all.
+
+    The key is always present either way. Every row on the reconciliation
+    screen shows a date, and a finding that omitted the field would be the one
+    row rendering blank.
+    """
+
+    def test_a_matched_finding_reports_the_date_the_books_hold(self):
+        result = reconciliation.match(
+            [book(invoice_date=date(2026, 4, 15))],
+            [portal(invoice_date=date(2026, 4, 2))],
+            period=PERIOD,
+        )
+
+        (finding,) = result.findings
+        assert finding.category is MatchCategory.MATCHED
+        assert finding.as_dict()["invoice_date"] == "2026-04-15"
+
+    def test_a_finding_with_no_invoice_behind_it_reports_the_portals_date(self):
+        # In the 2B and in no purchase register: there is no books' copy to
+        # prefer, and the statement's date is the only one there is.
+        result = reconciliation.match(
+            [], [portal(invoice_date=date(2026, 4, 2))], period=PERIOD
+        )
+
+        (finding,) = result.findings
+        assert finding.category is MatchCategory.MISSING_IN_BOOKS
+        assert finding.as_dict()["invoice_date"] == "2026-04-02"
+
+    def test_a_portal_row_with_no_date_still_carries_the_key(self):
+        result = reconciliation.match([], [portal(invoice_date=None)], period=PERIOD)
+
+        assert result.findings[0].as_dict()["invoice_date"] is None
+
+
+# ---------------------------------------------------------------------------
 # Reading a stored 2B back
 # ---------------------------------------------------------------------------
 
@@ -303,6 +351,63 @@ class TestRecordsFromReturn:
             db_session, business.id, {"invoices": [{"invoice_number": "INV-1"}]}
         )
         assert reconciliation.records_from_return(stored)[0].itc_available is True
+
+    def test_reverse_charge_defaults_to_off_when_the_row_does_not_say(
+        self, db_session, business
+    ):
+        # The mirror of the flag above, and it defaults the other way for the
+        # same reason: absent means the portal said nothing, and the ordinary
+        # supply is forward charge. Defaulting to True would take every credit
+        # in a statement that omits the field out of `claims_credit` and out of
+        # the period's eligible pool — a business shown no ITC at all on a 2B
+        # that granted it in full.
+        stored = _stored_return(
+            db_session, business.id, {"invoices": [{"invoice_number": "INV-1"}]}
+        )
+        assert reconciliation.records_from_return(stored)[0].reverse_charge is False
+
+    def test_a_stated_reverse_charge_flag_is_read_rather_than_assumed(
+        self, db_session, business
+    ):
+        stored = _stored_return(
+            db_session,
+            business.id,
+            {"invoices": [{"invoice_number": "INV-1", "reverse_charge": True}]},
+        )
+        assert reconciliation.records_from_return(stored)[0].reverse_charge is True
+
+    def test_the_rate_breakdown_survives_the_round_trip(self, db_session, business):
+        # The per-rate split is what `filing` builds the rate-wise tables from.
+        # Dropped here it is not recoverable from the totals beside it — 18% on
+        # one line and 5% on another add to the same tax as one line at neither.
+        stored = _stored_return(
+            db_session,
+            business.id,
+            {
+                "invoices": [
+                    {
+                        "invoice_number": "INV-1",
+                        "rate_items": [
+                            {"rate": "18", "taxable_value": "450000.00"},
+                            {"rate": "5", "taxable_value": "10000.00"},
+                        ],
+                    }
+                ]
+            },
+        )
+        record = reconciliation.records_from_return(stored)[0]
+        assert [item["rate"] for item in record.rate_items] == ["18", "5"]
+
+    def test_a_row_with_no_rate_breakdown_gets_an_empty_list_not_none(
+        self, db_session, business
+    ):
+        # A CSV export carries no rate split at all, and every reader of this
+        # field iterates it. `None` would raise on a statement that is not
+        # malformed, merely less detailed.
+        stored = _stored_return(
+            db_session, business.id, {"invoices": [{"invoice_number": "INV-1"}]}
+        )
+        assert reconciliation.records_from_return(stored)[0].rate_items == []
 
 
 # ---------------------------------------------------------------------------
@@ -616,6 +721,145 @@ class TestScoringDoesNotQueryPerSupplier:
 
 
 # ---------------------------------------------------------------------------
+# What a statement reaches back into the other periods for
+# ---------------------------------------------------------------------------
+
+class TestWhichInvoicesAStatementCarriesIn:
+    """`_carried_invoices` on its own, rather than through a whole run.
+
+    Through a run this lookup is nearly invisible: an invoice it reaches for by
+    mistake finds no counterpart in the statement and :func:`match` drops it
+    without reporting anything, so the run's counts, findings and statuses come
+    out identical whether the lookup returned one row or fifty. That is exactly
+    what makes it worth asserting directly — the query it builds is a widening
+    of a reconciliation across periods, and the only thing keeping it from
+    dragging in a supplier's entire history is the number filter underneath it.
+
+    Two halves do two different jobs and neither is sufficient alone: the GSTIN
+    narrows the query, the number decides which rows survive it. `TestASupplierWhoFilesLate`
+    in test_reconciliation.py covers what the run then does with them.
+    """
+
+    LATE = "2026-03"
+
+    def _booked(self, db_session, business, number, **kwargs):
+        kwargs.setdefault("period", self.LATE)
+        kwargs.setdefault("invoice_date", date(2026, 3, 10))
+        return save(db_session, business.id, invoice_number=number, **kwargs)
+
+    def _declared(self, number, **kwargs):
+        """A statement row for an earlier period — the late filing's shape."""
+        return portal(
+            invoice_number=number,
+            period=self.LATE,
+            invoice_date=date(2026, 3, 10),
+            **kwargs,
+        )
+
+    def _carried(self, db_session, business, records):
+        return reconciliation._carried_invoices(
+            db_session, business.id, records, PERIOD
+        )
+
+    def test_only_the_invoices_the_statement_names_are_reached_for(
+        self, db_session, business
+    ):
+        # The GSTIN query returns everything this supplier ever sold us. What
+        # comes back from it is whichever of those rows the statement actually
+        # names — invert that filter and a run for May carries in a supplier's
+        # whole back catalogue.
+        self._booked(db_session, business, "LATE-1")
+        self._booked(db_session, business, "MARCH-9", invoice_date=date(2026, 3, 4))
+
+        carried = self._carried(db_session, business, [self._declared("LATE-1")])
+
+        assert [row.invoice_number for row in carried] == ["LATE-1"]
+
+    def test_a_number_the_supplier_punctuated_differently_is_still_reached_for(
+        self, db_session, business
+    ):
+        # The buyer's data entry and the supplier's portal entry punctuate the
+        # same number differently, which is why `match` has a second pass at
+        # all. Requiring both the exact and the loose form to agree here would
+        # leave the late filing unfound and back to being reported as an
+        # invoice the business never booked.
+        self._booked(db_session, business, "LATE-1")
+
+        carried = self._carried(db_session, business, [self._declared("late/001")])
+
+        assert [row.invoice_number for row in carried] == ["LATE-1"]
+
+    def test_an_invoice_with_no_number_of_its_own_is_left_where_it_is(
+        self, db_session, business
+    ):
+        # OCR loses a number as readily as it loses a GSTIN, and the row is
+        # still in the books with the supplier on it — so this query returns
+        # it and the filter has to decide. Nothing identifies it as one of the
+        # ones the statement declares, so it stays in its own period.
+        self._booked(db_session, business, None)
+        self._booked(db_session, business, "LATE-1")
+
+        carried = self._carried(db_session, business, [self._declared("LATE-1")])
+
+        assert [row.invoice_number for row in carried] == ["LATE-1"]
+
+    def test_they_come_back_oldest_first(self, db_session, business):
+        # Same order `_book_invoices` returns this period's own in, and for the
+        # same reason: findings are read down the page in the order the
+        # business incurred them, not the order rows happened to be inserted.
+        newer = self._booked(db_session, business, "LATE-1", invoice_date=date(2026, 3, 20))
+        older = self._booked(db_session, business, "LATE-2", invoice_date=date(2026, 3, 5))
+
+        carried = self._carried(
+            db_session,
+            business,
+            [self._declared("LATE-1"), self._declared("LATE-2")],
+        )
+
+        assert [row.id for row in carried] == [older.id, newer.id]
+
+    def test_an_invoice_with_no_date_sorts_last_rather_than_raising(
+        self, db_session, business
+    ):
+        # A date the parser never found cannot be ordered against one it did.
+        # Sorted last rather than first: an undated row is not evidence that it
+        # is the oldest thing here, and it must not head a list a user reads as
+        # chronological.
+        dated = self._booked(db_session, business, "LATE-1", invoice_date=date(2026, 3, 5))
+        undated = self._booked(db_session, business, "LATE-2", invoice_date=None)
+
+        carried = self._carried(
+            db_session,
+            business,
+            [self._declared("LATE-1"), self._declared("LATE-2")],
+        )
+
+        assert [row.id for row in carried] == [dated.id, undated.id]
+
+    def test_a_statement_naming_no_invoice_numbers_never_reaches_the_books(
+        self, db_session, business, monkeypatch
+    ):
+        # Half-identified rows are ordinary in a portal export. With no number
+        # among them there is nothing for the filter to keep, so the query is
+        # skipped rather than run and thrown away — and skipping it is the
+        # point: it is an unindexed scan of every purchase this tenant has ever
+        # made from the suppliers named, inside a request someone is waiting on.
+        self._booked(db_session, business, "LATE-1")
+
+        statements: list[str] = []
+        original = db_session.scalars
+
+        def _record(statement, *args, **kwargs):
+            statements.append(str(statement))
+            return original(statement, *args, **kwargs)
+
+        monkeypatch.setattr(db_session, "scalars", _record)
+
+        assert self._carried(db_session, business, [self._declared(None)]) == []
+        assert [s for s in statements if "FROM invoices" in s] == []
+
+
+# ---------------------------------------------------------------------------
 # What a run writes onto the supplier
 # ---------------------------------------------------------------------------
 
@@ -748,6 +992,42 @@ class TestTheObservationARunRecords:
         assert history[-1]["period"] == PERIOD
         assert history[0]["period"] == "2021-02"
 
+    def test_a_supplier_who_matched_nothing_is_recorded_as_having_matched_nothing(
+        self, db_session, business
+    ):
+        # Zero is a figure here, not an absence. Every counter is rebuilt from
+        # the history with `int(entry.get(...) or 0)`, and the supplier who
+        # filed nothing is the one whose `matched` is missing-shaped — read as
+        # anything but zero it becomes the evidence `supplier_score` weighs
+        # most heavily, and the worst filer a business has comes back scored as
+        # one of its better ones.
+        self._supplier(db_session, business)
+        save(db_session, business.id, invoice_number="G-1")
+        save(db_session, business.id, invoice_number="G-2")
+        import_2b(db_session, business.id, [])
+
+        reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        supplier = self._reload(db_session)
+        assert supplier.matched_invoices == 0
+        assert supplier.missing_invoices == 2
+        # The total is the three outcomes added, so a matched that is not zero
+        # shows up here too.
+        assert supplier.total_invoices == 2
+
+    def test_a_supplier_who_matched_nothing_is_scored_as_the_risk_they_are(
+        self, db_session, business
+    ):
+        # The counters above are not decoration: this is what they buy.
+        self._supplier(db_session, business)
+        save(db_session, business.id, invoice_number="G-1")
+        import_2b(db_session, business.id, [])
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+        assert run.report["suppliers"][SUPPLIER_GSTIN_OTHER_STATE]["matched"] == 0
+        assert self._reload(db_session).compliance_score == 0
+
     def test_a_supplier_with_no_row_of_their_own_is_skipped_not_created(
         self, db_session, business
     ):
@@ -824,6 +1104,18 @@ class TestWhenTheSupplierFiled:
 
         assert supplier.filing_history[-1]["filing_delay_days"] == 0
         assert supplier.late_filings == 0
+
+    def test_filing_one_day_late_is_a_late_filing(self, db_session, business):
+        # The other edge of the same threshold. `test_filing_on_the_due_date_itself_is_not_late`
+        # holds the bottom of it; without this one the count could just as well
+        # be "late by more than a day" — which sounds like a rounding
+        # allowance and is not one. The 12th is a month's credit claimed in the
+        # wrong period, and it is the commonest lateness there is.
+        self._supplier(db_session, business)
+        supplier = self._run_with_filing_date(db_session, business, date(2026, 5, 12))
+
+        assert supplier.filing_history[-1]["filing_delay_days"] == 1
+        assert supplier.late_filings == 1
 
     def test_the_earliest_date_in_the_statement_is_the_one_kept(
         self, db_session, business

@@ -175,6 +175,34 @@ def test_rounding_within_tolerance_is_not_a_mismatch():
     assert categories(result) == [MatchCategory.MATCHED]
 
 
+def test_a_gap_of_exactly_the_tolerance_is_still_agreement():
+    """The rupee itself is inside the rupee.
+
+    The comparison is strict on purpose. GST is computed to the paisa and
+    reported to the rupee, so a one-rupee gap is what independent rounding on
+    the two sides produces — the difference the tolerance exists to absorb.
+    Comparing with ``>=`` would report exactly that difference as a mismatch,
+    and every invoice the tolerance was written for would come back as an
+    argument to have with a supplier.
+    """
+    result = reconciliation.match(
+        [book()], [portal(igst=Decimal("81001.00"))], period=PERIOD
+    )
+
+    assert categories(result) == [MatchCategory.MATCHED]
+
+
+def test_a_paisa_past_the_tolerance_is_a_mismatch():
+    """The other edge: the tolerance absorbs a rupee, not a rupee and one paisa."""
+    result = reconciliation.match(
+        [book()], [portal(igst=Decimal("81001.01"))], period=PERIOD
+    )
+
+    (finding,) = result.findings
+    assert finding.category is MatchCategory.MISMATCHED
+    assert [d.field for d in finding.differences] == ["igst"]
+
+
 class TestAnInvoiceWithNoGrandTotalOnIt:
     """A total the parser never found is not a difference with the supplier.
 
