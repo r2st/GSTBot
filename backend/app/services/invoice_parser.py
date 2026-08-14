@@ -461,6 +461,13 @@ def normalize_rate(value: object) -> Decimal | None:
     the two readings never both land on a slab. 0.25 as a fraction is 25%, and
     0.1 as a fraction is 10%; neither is a rate GST levies, so preferring the
     literal costs nothing anywhere it does not gain a real one.
+
+    That ordering is also why the fraction window below leaves a mutation
+    survivor on each of its two comparisons. Both of its edges are themselves
+    slabs — 0% is nil-rated and 1% is levied — so the membership check above
+    has already returned by the time either edge could be tested, and neither
+    ``<`` can be widened to ``<=`` by anything a caller can pass. The edges are
+    unreachable rather than unasserted.
     """
     rate = to_decimal(value, default=None)
     if rate is None:
@@ -683,10 +690,22 @@ def _invoice_number_in(text: str) -> str | None:
     position of a confirmed label is a first-year series, not a column heading.
     """
     for match in _INVOICE_NO_PATTERN.finditer(text):
+        # The ``0`` here and in :func:`_invoice_date_in` both leave a mutation
+        # survivor, and for a reason that is a property of the two guards below
+        # rather than of this line. Starting the search at 1 instead can only
+        # change ``line_start`` when the last newline before the match sits at
+        # index 0, and the window it then widens by is that newline alone —
+        # which neither guard can begin a match on, both starting at a word
+        # character. So no document distinguishes the two.
         line_start = text.rfind("\n", 0, match.start()) + 1
         before = (line_start, match.start())
         if _REFERENCE_PREFIX.search(text, *before) or _EWAY_PREFIX.search(text, *before):
             continue
+        # Well clear of anything the pattern can hand over: both of its value
+        # groups are capped at thirty characters, so this truncation has never
+        # fired and the mutation survivor on the length is an equivalent one.
+        # Kept as the module-wide backstop against a stored field of unbounded
+        # length, which is the same reason :func:`_clean_str` has a default.
         value = _clean_str(match.group(1) or match.group(2), 64)
         if value is None:
             continue
@@ -866,6 +885,9 @@ def _invoice_date_in(text: str) -> date | None:
     """
     marked: list[str] = []
     for start, raw in _date_candidates(text):
+        # Survives mutation for the reason given at the same line in
+        # :func:`_invoice_number_in`: the only window the change can widen is a
+        # lone newline, and no guard here starts on one.
         line_start = text.rfind("\n", 0, start) + 1
         before = (line_start, start)
         if (
@@ -1402,7 +1424,11 @@ def parse_heuristic(text: str) -> ParsedInvoice:
         )
         if value
     )
-    result.confidence = round(found / 5 * 0.6, 2)  # Capped: shape is not comprehension.
+    # Capped: shape is not comprehension. Rounding is presentational — six
+    # fields over five give 0, 0.12, 0.24, 0.36, 0.48, 0.6, every one of them
+    # exact at two places already — so the mutation survivor on the precision
+    # is an equivalent mutant, not an unasserted figure.
+    result.confidence = round(found / 5 * 0.6, 2)
     return result
 
 
@@ -1633,6 +1659,12 @@ def validate(parsed: ParsedInvoice) -> ParsedInvoice:
     if parsed.cgst and parsed.sgst and parsed.cgst != parsed.sgst:
         parsed.warnings.append(f"CGST {parsed.cgst} and SGST {parsed.sgst} should be equal")
 
+    # Both GSTINs, because a split can only be called wrong against a border,
+    # and one party's state does not locate a border. The guard is a shortcut
+    # rather than the decision: `is_interstate` answers None when either side
+    # is missing or unreadable, and neither branch below fires on None — which
+    # is why relaxing this `and` to `or` survives mutation. Kept because the
+    # cheap read should not depend on the expensive one staying careful.
     if parsed.supplier_gstin and parsed.buyer_gstin:
         interstate = gstin_service.is_interstate(parsed.supplier_gstin, parsed.buyer_gstin)
         if interstate is True and not parsed.igst and parsed.total_tax:
