@@ -21,7 +21,7 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Path, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -37,6 +37,11 @@ router = APIRouter(tags=["health"])
 # These are public, so they are limited by address rather than by identity —
 # there is no identity to key on before a caller has signed in.
 _gstin_limit = RateLimit("gstin_lookup", "120/minute", by="ip")
+
+# Longest input the GSTIN lookup will look at. A GSTIN is 15 characters; this
+# leaves room for the spaces and hyphens people paste out of PDFs, which
+# ``gstin.normalize`` strips. See the route for why it is bounded at all.
+_GSTIN_INPUT_MAX = 64
 _meta_limit = RateLimit("meta", "60/minute", by="ip")
 
 # The two operator views cost real work per call, unlike the probes below them:
@@ -251,12 +256,26 @@ def states() -> dict[str, str]:
         "Always 200: an invalid GSTIN comes back as "
         '`{"valid": false, "error": ...}` rather than a 4xx, because the '
         "sign-up form calls this on every keystroke and a 4xx per character is "
-        "indistinguishable from the endpoint being broken.\n\n"
+        "indistinguishable from the endpoint being broken. Input longer than "
+        f"{_GSTIN_INPUT_MAX} characters is the exception and is refused.\n\n"
         "Public — it is called before an account exists."
     ),
     dependencies=[Depends(_gstin_limit)],
 )
-def validate_gstin(gstin: str) -> dict[str, Any]:
+def validate_gstin(
+    # The one route that echoes its own path segment back to an unauthenticated
+    # caller: an unparseable input is answered with ``normalize(gstin)`` so the
+    # form can show what it read. Unbounded, that made a 20KB path segment a
+    # 20KB response body — work and bandwidth, before any account exists,
+    # behind nothing but an IP-keyed limit.
+    #
+    # The ceiling is well clear of anything a person can type. A GSTIN is 15
+    # characters, and this accepts the separators people paste out of PDFs and
+    # spreadsheets ("27 AAPFU0939F 1ZV") with room to spare, so the documented
+    # always-200 contract still holds for every keystroke the sign-up form
+    # makes. What is refused is not a mistyped GSTIN; it is not a GSTIN.
+    gstin: str = Path(max_length=_GSTIN_INPUT_MAX),
+) -> dict[str, Any]:
     try:
         parts = gstin_service.parse(gstin)
     except gstin_service.InvalidGSTIN as exc:

@@ -178,3 +178,45 @@ def test_gstin_lookup_explains_an_invalid_one(client):
 
 def test_gstin_lookup_needs_no_authentication(client):
     assert client.get(f"/api/v1/meta/gstin/{BUSINESS_GSTIN}").status_code == 200
+
+
+class TestTheGstinLookupDoesNotEchoUnboundedInput:
+    """The only route that reflects its path segment to an anonymous caller.
+
+    An unparseable input is answered with ``normalize(gstin)`` so the sign-up
+    form can show what was read. Unbounded, that made a 20KB path segment a
+    20KB response body — work and bandwidth before any account exists, behind
+    nothing but an IP-keyed limit.
+    """
+
+    def test_an_input_no_gstin_could_be_is_refused(self, client):
+        response = client.get("/api/v1/meta/gstin/" + "A" * 20_000)
+        assert response.status_code == 422
+
+    def test_the_refusal_does_not_echo_the_input_back(self, client):
+        """The point of the bound. A 4xx that still reflected 20KB would have
+        moved the response code and left the behaviour."""
+        response = client.get("/api/v1/meta/gstin/" + "A" * 20_000)
+        assert len(response.content) < 2_000
+
+    def test_a_gstin_pasted_with_separators_is_still_read(self, client):
+        """The bound has to clear what people actually paste out of a PDF.
+
+        ``normalize`` strips the spaces and hyphens, so this is the same GSTIN
+        as the valid one above — it must not be refused for being longer than
+        fifteen characters.
+        """
+        body = client.get("/api/v1/meta/gstin/27 AAPFU0939F 1ZV").json()
+        assert body["valid"] is True
+        assert body["gstin"] == BUSINESS_GSTIN
+
+    def test_the_keystroke_contract_still_holds(self, client):
+        """Every prefix a person types on the way to a full GSTIN stays a 200.
+
+        This is the contract the route documents and the reason it does not
+        answer 4xx for an invalid GSTIN. The bound is only allowed to catch
+        input that is not a GSTIN at all, so nothing on this path may move.
+        """
+        for length in range(1, len(BUSINESS_GSTIN) + 1):
+            response = client.get(f"/api/v1/meta/gstin/{BUSINESS_GSTIN[:length]}")
+            assert response.status_code == 200, BUSINESS_GSTIN[:length]

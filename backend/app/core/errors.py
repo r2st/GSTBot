@@ -97,6 +97,53 @@ def _summarise(detail: Any) -> str:
     return str(detail)
 
 
+# How much of a rejected value is quoted back in a 422.
+#
+# Pydantic puts the offending value in each error's ``input``, and that field
+# is what makes a validation error actionable — "we read '2026-13', which is
+# not a month" beats "invalid period". So it is truncated rather than dropped.
+#
+# The ceiling exists because the value is the *caller's*, and echoing it whole
+# turns any 422 into a reflector: a 20KB path segment came back as a 20KB
+# response body on the one public route that takes a string, before any
+# account exists. Long enough that a real field — a GSTIN, a period, an
+# invoice number — is quoted in full and nobody notices this constant.
+_MAX_ECHOED_INPUT = 200
+
+_TRUNCATION_MARKER = "…[truncated]"
+
+
+def _bounded(value: Any) -> Any:
+    """*value* with anything longer than the ceiling above cut down.
+
+    Only strings are shortened in place. A rejected *body* arrives as the whole
+    parsed dict or list, which has no meaningful prefix, so an oversized one is
+    replaced by a note of its type rather than a mangled fragment of itself.
+    """
+    if isinstance(value, str):
+        if len(value) <= _MAX_ECHOED_INPUT:
+            return value
+        return value[:_MAX_ECHOED_INPUT] + _TRUNCATION_MARKER
+    if isinstance(value, (dict, list, tuple, set)):
+        if len(value) <= _MAX_ECHOED_INPUT:
+            return value
+        return f"<{type(value).__name__} of {len(value)} items{_TRUNCATION_MARKER}>"
+    return value
+
+
+def _bounded_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
+    """``exc.errors()`` with every echoed value bounded.
+
+    Applied to the whole error dict rather than to ``input`` alone: ``msg``
+    quotes the value too on some pydantic errors, and ``ctx`` carries whatever
+    a custom validator put in its message.
+    """
+    bounded: list[dict[str, Any]] = []
+    for error in exc.errors():
+        bounded.append({key: _bounded(value) for key, value in error.items()})
+    return bounded
+
+
 def _field_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
     """Flatten pydantic's error list into ``{field, message, type}`` entries.
 
@@ -104,12 +151,12 @@ def _field_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
     something follows it, so a whole-body error still names where it came from.
     """
     fields: list[dict[str, Any]] = []
-    for error in exc.errors():
+    for error in _bounded_errors(exc):
         location = [str(part) for part in error.get("loc", ())]
         name = ".".join(location[1:]) if len(location) > 1 else ".".join(location)
         fields.append(
             {
-                "field": name or "body",
+                "field": _bounded(name or "body"),
                 "message": error.get("msg", "Invalid value"),
                 "type": error.get("type", "value_error"),
             }
@@ -138,9 +185,13 @@ def register_exception_handlers(app: FastAPI) -> None:
             # they always have. It goes through jsonable_encoder because a
             # validator that raised carries the exception object in ``ctx``,
             # which json.dumps cannot serialise.
+            #
+            # Bounded first: the list carries the rejected value in each
+            # error's ``input``, so an unbounded one made every 422 in the API
+            # a reflector of whatever the caller sent.
             content=error_body(
                 422,
-                jsonable_encoder(exc.errors()),
+                jsonable_encoder(_bounded_errors(exc)),
                 code="validation_error",
                 fields=fields,
             ),

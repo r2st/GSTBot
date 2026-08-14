@@ -318,6 +318,74 @@ def test_validation_errors_are_json_serialisable(client):
     assert response.json()["error"]["code"] == "validation_error"
 
 
+class TestA422DoesNotEchoTheWholeRequestBack:
+    """Pydantic puts the rejected value in each error's ``input``.
+
+    That field is what makes a 422 actionable — "we read '2026-13'" beats
+    "invalid period" — so it is truncated rather than dropped. But it is the
+    *caller's* value, and echoing it whole made every validation error in the
+    API a reflector: a bound added to the public GSTIN lookup moved that route
+    to a 422 and left the 20KB response body exactly as it was, because the
+    reflection had moved into the error handler rather than gone away.
+
+    Bounded here, in the one handler every 422 leaves through, rather than at
+    each route that takes a string.
+    """
+
+    OVERSIZED = "A" * 20_000
+
+    def test_a_rejected_query_value_is_not_echoed_whole(self, client):
+        response = client.get(f"/api/v1/meta/gstin/{self.OVERSIZED}")
+        assert response.status_code == 422
+        assert len(response.content) < 2_000
+
+    def test_a_rejected_body_field_is_not_echoed_whole(self, client):
+        """The same hole through a JSON body rather than a path segment.
+
+        The body-size middleware caps what can be sent at all, but a body well
+        under that ceiling still round-tripped in full through the 422.
+        """
+        response = client.post(
+            "/api/v1/auth/register",
+            json={
+                "email": self.OVERSIZED,
+                "password": "supersecret123",
+                "gstin": "27AAPFU0939F1ZV",
+                "legal_name": self.OVERSIZED,
+            },
+        )
+        assert response.status_code == 422
+        assert len(response.content) < 4_000
+
+    def test_what_survives_says_it_was_cut(self, client):
+        """A silently truncated value would read as the value itself, which is
+        worse than either the whole thing or nothing — a caller debugging a
+        rejected field would compare it against what they sent and conclude
+        the API had mangled it."""
+        response = client.get(f"/api/v1/meta/gstin/{self.OVERSIZED}")
+        assert "truncated" in response.text
+
+    def test_a_value_short_enough_to_be_useful_is_still_quoted_in_full(self, auth_client):
+        """The bound must not cost a 422 its usefulness. A real field — a
+        GSTIN, a period, an invoice number — is nowhere near the ceiling and
+        has to come back intact, or the truncation has broken the thing it was
+        protecting."""
+        response = auth_client.get("/api/v1/invoices", params={"period": "2026-13"})
+        assert response.status_code == 422
+        assert "2026-13" in response.text
+
+    def test_the_detail_list_keeps_its_shape(self, client):
+        """The frontend walks ``detail`` as a list of {msg}. Bounding the
+        values must not turn the list into a string, which is the obvious way
+        to implement this and would break that formatter silently."""
+        response = client.post(
+            "/api/v1/auth/register", json={"email": self.OVERSIZED}
+        )
+        detail = response.json()["detail"]
+        assert isinstance(detail, list)
+        assert all("msg" in entry for entry in detail)
+
+
 def test_a_404_from_a_route_keeps_its_own_wording(auth_client):
     # The generic handler must not overwrite a message a route wrote on purpose.
     body = auth_client.get("/api/v1/invoices/999999").json()
