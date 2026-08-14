@@ -496,3 +496,70 @@ class TestParseInvoiceNeverRaises:
         monkeypatch.setattr(document_text, "ocr_image", lambda content: "")
 
         assert parse_invoice(content=PNG_1PX, content_type="image/png") is not None
+
+
+class TestADocumentThatYieldedNoTextAndIsNotAnImage:
+    """Nothing to read, and nothing an image path can be tried on.
+
+    A .docx the extractor has no reader for, a .txt saved empty, a file whose
+    extension lies about what is in it: the content is there, no text came out
+    of it, and it is neither a picture nor a PDF, so the vision model and the
+    OCR fallback are both inapplicable. What is left is an empty body, and the
+    question is what happens to it with a model *configured*.
+
+    The answer has to be "nothing is sent". Handing an empty document to a
+    language model does not fail — it returns a confidently invented invoice,
+    because that is what it was asked for — and the fields would be stored as
+    an extraction over a file nobody could read. It also spends a request per
+    unreadable upload against a free-tier quota the whole tenant shares.
+    """
+
+    def _unreadable_upload(self, monkeypatch, *, configured: bool):
+        _no_text_from(monkeypatch)
+        monkeypatch.setattr(invoice_parser, "is_configured", lambda: configured)
+        monkeypatch.setattr(
+            invoice_parser,
+            "chat_json",
+            lambda messages, model: pytest.fail("the model was asked to read nothing"),
+        )
+        monkeypatch.setattr(
+            document_text,
+            "ocr_image",
+            lambda content: pytest.fail("OCR ran on something that is not an image"),
+        )
+        return parse_invoice(
+            content=b"PK\x03\x04not-really-readable",
+            content_type=(
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+            ),
+            filename="bill.docx",
+        )
+
+    def test_an_empty_body_is_not_sent_to_the_model(self, monkeypatch):
+        parsed = self._unreadable_upload(monkeypatch, configured=True)
+
+        assert parsed.parsed_with == "heuristic"
+        assert parsed.supplier_gstin is None
+        assert parsed.invoice_number is None
+
+    def test_the_upload_still_becomes_a_row_the_user_can_correct(self, monkeypatch):
+        """The whole fallback chain exists so an upload never fails outright.
+        Reaching the end of it with nothing read is still a row, with the
+        warning that routes it to somebody holding the paper."""
+        parsed = self._unreadable_upload(monkeypatch, configured=True)
+
+        assert any("No text could be read" in warning for warning in parsed.warnings)
+        assert parsed.confidence < 0.5
+
+    def test_it_lands_the_same_way_with_no_model_configured(self, monkeypatch):
+        """A configured model must not change the outcome for a file it was
+        never given. If these two diverged, the same unreadable upload would
+        produce different rows on the box that has a key and the box that does
+        not — and the suite runs without one, so the divergence would be
+        invisible here."""
+        with_model = self._unreadable_upload(monkeypatch, configured=True)
+        without = self._unreadable_upload(monkeypatch, configured=False)
+
+        assert with_model.warnings == without.warnings
+        assert with_model.parsed_with == without.parsed_with
+        assert with_model.confidence == without.confidence

@@ -291,6 +291,46 @@ class TestMalformedCsv:
         records = parse_csv(("﻿" + csv_text).encode("utf-8"))
         assert records[0].supplier_gstin == SUPPLIER_GSTIN_OTHER_STATE
 
+    def test_a_row_with_fewer_cells_than_the_heading_keeps_what_it_has(self):
+        """Short rows are ordinary, and losing one loses a real invoice.
+
+        A portal export whose trailing columns are empty is commonly saved
+        without the trailing commas — by Excel, by a hand-edit, by anything
+        that round-trips the file — so its data rows are simply narrower than
+        the heading. Each mapped column is read only when the row is long
+        enough to have it, and what is read stays right: a row that stops
+        after IGST is an invoice with no CGST or SGST on it, which is what an
+        inter-state supply is.
+
+        What this rules out is an IndexError on the first short row, which
+        would reject the whole statement — and a rejected 2B is every invoice
+        in it reported as one the supplier never filed.
+        """
+        csv_text = (
+            "GSTIN of Supplier,Invoice Number,Invoice Date,Taxable Value,IGST,CGST,SGST\n"
+            f"{SUPPLIER_GSTIN_OTHER_STATE},INV-SHORT,15-04-2026,1000,180\n"
+        )
+        (record,) = parse_csv(csv_text)
+
+        assert record.supplier_gstin == SUPPLIER_GSTIN_OTHER_STATE
+        assert record.invoice_number == "INV-SHORT"
+        assert record.taxable_value == Decimal("1000")
+        assert record.igst == Decimal("180")
+        assert record.cgst == Decimal("0")
+        assert record.sgst == Decimal("0")
+
+    def test_a_row_too_short_to_name_a_document_is_skipped(self):
+        """The other end of the same rule. A row that reaches neither
+        identifying column names no document, and is the trailing total line
+        or the note under the table rather than a supply — so it is dropped
+        instead of being stored as a record with everything blank."""
+        csv_text = (
+            "Sr No,GSTIN of Supplier,Invoice Number,Invoice Date,Taxable Value,IGST\n"
+            f"1,{SUPPLIER_GSTIN_OTHER_STATE},INV-1,15-04-2026,1000,180\n"
+            "Total\n"
+        )
+        assert [r.invoice_number for r in parse_csv(csv_text)] == ["INV-1"]
+
     def test_undecodable_bytes_do_not_raise(self):
         # A latin-1 export. Replacement characters in a trade name are far
         # better than refusing the file.

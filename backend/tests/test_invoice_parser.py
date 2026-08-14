@@ -876,6 +876,31 @@ class TestWhichDateOnTheInvoiceIsTheInvoiceDate:
             2026, 4, 15
         )
 
+    def test_an_unparseable_marked_date_does_not_end_the_second_pass_either(self):
+        """The same rule has to hold on the fallback tier, and holds separately.
+
+        The two tiers are two loops and only the first was covered. This is the
+        shape a scanned delivery-and-payment slip actually has: every date on
+        it is marked, so the first pass yields nothing and the second decides —
+        and the topmost is the one the OCR mangled, a smudged month being the
+        single commonest thing to lose off a scan.
+
+        Stopping at the first unreadable marked value files this document with
+        no date at all, which is worse than filing it with one a few weeks out:
+        the period is derived from this field, so the invoice lands in no
+        return rather than in an adjacent one.
+        """
+        assert self._date(
+            "TAX INVOICE\nDue Date: 12/ABC/34\nPayment Date: 20/05/2026\n"
+        ) == date(2026, 5, 20)
+
+    def test_a_document_whose_dates_are_all_unreadable_gets_none(self):
+        """And the second pass still has to end empty-handed rather than
+        settle. ``None`` is what the warning downstream is raised from; a date
+        invented here would file the invoice under a month nobody chose and
+        nothing would flag it."""
+        assert self._date("TAX INVOICE\nDue Date: 12/ABC/34\nPO Date: 99/XY/00\n") is None
+
 
 class TestOneLineThatNamesTwoTaxHeads:
     """A line can name CGST and SGST at once, and the two ways it does are opposites.
