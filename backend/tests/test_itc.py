@@ -1307,18 +1307,28 @@ class TestRule37GivesTheCreditBackWhenTheSupplierIsPaid:
 
 
 def test_net_available_never_goes_negative(db_session, business):
-    """A reversal larger than the period's credit is a liability, not negative credit."""
+    """A reversal larger than the period's credit is a liability, not negative credit.
+
+    Dated so the 181st day is 30 April. It was 1 June 2025, which lapses in
+    *November* — so April's reversal was zero and this asserted 0 == 0 over an
+    empty formula, passing whichever way the reversal was signed. The floor it
+    is named for was never reached.
+    """
     save(
         db_session,
         business.id,
         invoice_number="OLD-1",
-        invoice_date=date(2025, 6, 1),
-        period="2025-06",
+        invoice_date=date(2025, 10, 31),
+        period="2025-10",
     )
 
     summary = itc_service.summarise(
         db_session, business.id, PERIOD, as_of=date(2026, 4, 30)
     )
+
+    # There is something to floor: ₹18,000 reversed against no credit at all.
+    assert summary.rule_37_reversal.igst == Decimal("18000.00")
+    assert summary.available.igst == Decimal("0.00")
 
     assert summary.net_available.igst == Decimal("0.00")
     assert summary.net_available.total == Decimal("0.00")
@@ -1404,6 +1414,111 @@ def test_net_available_combines_every_term_in_the_same_period(db_session, busine
     assert summary.net_available.cgst == Decimal("6325.00")
     assert summary.net_available.sgst == Decimal("6325.00")
     assert summary.net_available.cess == Decimal("750.00")
+    assert summary.net_available.igst == Decimal("0.00")
+
+
+def test_net_available_adds_reverse_charge_and_re_availed_credit_on_the_intra_state_split(
+    db_session, business
+):
+    """The other two terms of the same formula, on the heads an SMB actually has.
+
+    ``net_available`` adds four things and subtracts one, and the test above
+    proves the signs of ``available``, the capital instalment and the reversal.
+    The remaining two — the credit a reverse-charge purchase earns, and credit
+    re-availed under the proviso to s.16(2)(d) when a supplier is finally paid
+    — are asserted only on IGST, and only one at a time. Flipping either sign
+    on CGST or SGST changed nothing anywhere in this suite.
+
+    That is the split that matters for both. Reverse charge for a small
+    business is freight under a GTA and an advocate's fee, which are local
+    supplies carrying CGST+SGST; and the invoice paid six months late is
+    usually the local supplier who was patient about it. A sign wrong here
+    understates the credit by twice the reverse-charge tax — on the return of
+    a business whose only reverse-charge exposure is intra-state, which is
+    most of them.
+
+    Worked through by hand:
+
+    ==========================  =======  =======  =====
+    Term                          CGST     SGST    Cess
+    ==========================  =======  =======  =====
+    Credit on this period's
+    inputs                       9000     9000    1000
+    Capital credit 6000/60        100      100      10
+    Reverse charge, claimed
+    back at 4(A)(3)              2000     2000     200
+    Re-availed on payment         500      500      50
+    ==========================  =======  =======  =====
+    Net available               11600    11600    1260
+    """
+    # This period's input credit.
+    save(
+        db_session,
+        business.id,
+        invoice_number="IN-1",
+        counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        igst=Decimal("0.00"),
+        cgst=Decimal("9000.00"),
+        sgst=Decimal("9000.00"),
+        cess=Decimal("1000.00"),
+    )
+    # A capital good: Rule 43 gives this month one of its sixty instalments.
+    save(
+        db_session,
+        business.id,
+        invoice_number="CAP-1",
+        counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        is_capital_good=True,
+        igst=Decimal("0.00"),
+        cgst=Decimal("6000.00"),
+        sgst=Decimal("6000.00"),
+        cess=Decimal("600.00"),
+    )
+    # Freight under a GTA: the business owes this tax itself and claims the
+    # same figure straight back, so it is credit that never sat in `available`.
+    save(
+        db_session,
+        business.id,
+        invoice_number="GTA-1",
+        counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        reverse_charge=True,
+        taxable_value=Decimal("22222.22"),
+        igst=Decimal("0.00"),
+        cgst=Decimal("2000.00"),
+        sgst=Decimal("2000.00"),
+        cess=Decimal("200.00"),
+    )
+    # Last August's invoice, reversed when its 180 days ran out in February and
+    # paid this month. Dated so it had already lapsed before April began: an
+    # invoice that lapses and is paid inside one period was never reversed, and
+    # re-availing it would hand back credit the return never gave up.
+    save(
+        db_session,
+        business.id,
+        invoice_number="OLD-1",
+        counterparty_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        invoice_date=date(2025, 8, 1),
+        period="2025-08",
+        paid_at=date(2026, 4, 10),
+        igst=Decimal("0.00"),
+        cgst=Decimal("500.00"),
+        sgst=Decimal("500.00"),
+        cess=Decimal("50.00"),
+    )
+
+    summary = itc_service.summarise(
+        db_session, business.id, PERIOD, as_of=date(2026, 4, 30)
+    )
+
+    # The terms, so a failure below says which one moved.
+    assert summary.available.cgst == Decimal("9000.00")
+    assert summary.proportionate.capital_credit_this_month.cgst == Decimal("100.00")
+    assert summary.reverse_charge.credit.cgst == Decimal("2000.00")
+    assert summary.rule_37_reversal.cgst == Decimal("0.00")
+
+    assert summary.net_available.cgst == Decimal("11600.00")
+    assert summary.net_available.sgst == Decimal("11600.00")
+    assert summary.net_available.cess == Decimal("1260.00")
     assert summary.net_available.igst == Decimal("0.00")
 
 
