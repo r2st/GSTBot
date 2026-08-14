@@ -739,6 +739,16 @@ class TestTheScheduledTask:
         # and the sweep silently never runs.
         from app.celery_app import celery_app
 
+        # What the worker does on boot, and the only thing that puts the
+        # ``include`` modules' tasks in the registry — constructing the app
+        # merely records the module names. Without this the assertion below
+        # passes on whether some *earlier test file* happened to import
+        # app.tasks.invoice_tasks, which is why it read green in a full run and
+        # red on its own: alert_tasks is imported by this file's own subject,
+        # invoice_tasks by nothing here. Registering the schedule's tasks is a
+        # property of the worker, so the worker's own import is what to ask.
+        celery_app.loader.import_default_modules()
+
         scheduled = {
             entry["task"] for entry in celery_app.conf.beat_schedule.values()
         }
