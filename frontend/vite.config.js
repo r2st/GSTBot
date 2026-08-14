@@ -46,8 +46,8 @@ export default defineConfig({
       // gate follows what the suite now actually reaches, with the same kind
       // of headroom the other three keep.
       //
-      // `branches` is at 99.5 rather than at the 99.87 actually measured, and
-      // the gap is deliberate. Two branches are unreachable by construction
+      // `branches` is at 99.5 rather than at the 99.81 actually measured, and
+      // the gap is deliberate. Three branches are unreachable by construction
       // and are left in as guards rather than deleted:
       //
       //   * InvoiceDetailPage's `draft[field] ?? ""` — `adopt` already
@@ -55,9 +55,14 @@ export default defineConfig({
       //     invoice.
       //   * validate.js's `Number.isFinite(value) ? value : null` — a field
       //     the amount check let through is finite by then.
+      //   * ReconcilePage's `|| "Could not load this period."` — every
+      //     rejection this page can see is raised by `lib/api.js`, and since
+      //     `errorMessage` stopped being able to produce a blank line there is
+      //     no API failure left with an empty message. It now answers a
+      //     rejection from somewhere else, which is why it stays.
       //
-      // A gate at the measured figure would make removing either of those
-      // guards the way to keep CI green.
+      // A gate at the measured figure would make removing any of those guards
+      // the way to keep CI green.
       thresholds: { statements: 99, branches: 99.5, functions: 95, lines: 99 },
     },
   },

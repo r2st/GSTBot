@@ -1112,13 +1112,23 @@ describe("a finding assembled from what the parser could not read", () => {
 
   it("says something when the refusal it was handed carries no words", async () => {
     // `{"detail": ""}` from a proxy that rewrote the body. An empty string is
-    // not nullish, so it survives every `??` on the way here and lands as an
+    // not nullish, so it survived every `??` on the way here and landed as an
     // error banner with nothing in it — which reads as a rendering bug rather
     // than as a period that could not be loaded.
+    //
+    // It is now caught a layer earlier, in `errorMessage`, where it can be
+    // answered with the status the response actually carried rather than with
+    // this page's guess at what the request was for. Every screen shares that
+    // path and only this one had a fallback of its own, so the assertion moved
+    // to the sentence the client supplies. The page's own "Could not load this
+    // period." stays as the answer for a rejection that did not come from the
+    // API at all, which is a thing this fetch mock cannot produce.
     mockApi({ fail: { status: 500, message: "" } });
     renderPage();
 
-    expect(await screen.findByText("Could not load this period.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("The server is having trouble (500). Please try again in a moment."),
+    ).toBeInTheDocument();
   });
 });
 

@@ -332,9 +332,30 @@ export function isAbortError(err) {
   return err?.name === "AbortError";
 }
 
-/** Flatten whatever FastAPI put in `detail` into one readable line. */
+/**
+ * Flatten whatever FastAPI put in `detail` into one readable line.
+ *
+ * A `detail` that is present but says nothing counts as absent. `??` alone
+ * only catches `null` and `undefined`, so `{"detail": ""}`, `{"detail": []}`
+ * and `{"detail": {"message": ""}}` each came through as themselves and the
+ * caller raised an error with an empty message — which renders as an error
+ * banner with nothing written in it, the exact failure `fallback` exists to
+ * prevent and the one that looks least like a bug and most like the app having
+ * frozen. None of the three is hypothetical: a proxy rewriting the API's
+ * envelope produces the first, a field list filtered to nothing produces the
+ * second, and the third is our own conflict shape with an unset field.
+ */
 export function errorMessage(data, fallback = "Request failed") {
   const detail = data?.detail ?? fallback;
+  // Checked on the way out rather than on the way in, so that one guard covers
+  // every shape `detail` arrives in. A blank string, an empty list, and a
+  // structured conflict whose `message` is "" each flatten to nothing by a
+  // different route, and each of the three is a body a proxy or a filter can
+  // produce.
+  return flatten(detail).trim() || fallback;
+}
+
+function flatten(detail) {
   if (typeof detail === "string") return detail;
   // Validation errors arrive as a list of {loc, msg} objects.
   if (Array.isArray(detail)) {

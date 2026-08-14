@@ -56,6 +56,23 @@ describe("errorMessage", () => {
     expect(errorMessage({ detail: { code: "rate_limited" } })).toBe('{"code":"rate_limited"}');
   });
 
+  // A `detail` that is there and says nothing. Three shapes, three routes to
+  // the same outcome — an error raised with an empty message, which renders as
+  // a banner with nothing written in it. That is the failure that looks least
+  // like a failure: not "the server refused", but the app appearing to have
+  // stopped mid-thought.
+  it.each([
+    ["an empty string, from a proxy that rewrote the envelope", ""],
+    ["a string of nothing but space", "   "],
+    ["a field list filtered down to nothing", []],
+    ["a structured conflict whose message was never set", { message: "" }],
+    ["a structured conflict whose message is blank", { message: " ", invoice_id: 7 }],
+  ])("falls back rather than saying nothing when the detail is %s", (unused, detail) => {
+    expect(errorMessage({ detail }, "The server is having trouble (503).")).toBe(
+      "The server is having trouble (503).",
+    );
+  });
+
   it("falls back to JSON for a validation entry with no msg", () => {
     // Not FastAPI's own shape — a gateway that rewrote the list, or a
     // middleware error serialized into it. Rendering `undefined` in the banner
