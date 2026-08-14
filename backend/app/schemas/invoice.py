@@ -156,7 +156,16 @@ class InvoiceUpdate(BaseModel):
     on the 180-day clock, so it has to be expressible.
     """
 
-    counterparty_gstin: str | None = None
+    # The same generous bound as ``RegisterRequest.gstin``, and for the same
+    # reason: the validator below normalises away the spacing people paste out
+    # of a registration certificate, so refusing "27 AAPFU0939F 1ZV" on length
+    # before that runs would be a worse error than the one it is trying to give.
+    #
+    # The validator already refuses everything that is not a real GSTIN, so this
+    # changes no verdict. It stops an arbitrarily long value reaching the parse
+    # and the error that quotes it back, and it was the last string the API
+    # accepted anywhere with no declared bound.
+    counterparty_gstin: str | None = Field(default=None, max_length=32)
     counterparty_name: str | None = Field(default=None, max_length=255)
     invoice_number: str | None = Field(default=None, max_length=64)
     invoice_date: date | None = None

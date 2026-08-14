@@ -812,3 +812,106 @@ class TestEveryStringInAUrlIsBounded:
         # vocabulary the route owns, nor the 404 it answers outside it.
         assert auth_client.get("/api/v1/filing/gstr3b/late-fee").status_code == 200
         assert auth_client.get("/api/v1/filing/gstr2b/late-fee").status_code == 404
+
+
+class TestEveryStringInARequestBodyIsBounded:
+    """The same property as the URL sweep above, on the other input surface.
+
+    A body field is the easier one to leave open, because most of them are
+    already validated for *meaning* — a GSTIN is parsed and checksummed, a
+    period is matched against a real month — and a field that cannot hold a
+    wrong value reads as one that needs no length. It still runs whatever the
+    caller sent through that validator, and the resulting 422 quotes it.
+
+    The body-size middleware is a ceiling on all of this and not a substitute
+    for it: it bounds the request, not the field, so it is satisfied by one
+    field carrying the entire allowance.
+
+    Nested models are walked, so a field added inside one is not exempt by
+    being one level down.
+    """
+
+    def _models(self):
+        """Every model the API accepts as a request body, nested ones included."""
+        seen: dict[str, type] = {}
+        pending = []
+        for route in collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for param in route.dependant.body_params:
+                pending.append(param.field_info.annotation)
+        while pending:
+            annotation = pending.pop()
+            for option in get_args(annotation) or ():
+                pending.append(option)
+            if not hasattr(annotation, "model_fields"):
+                continue
+            if annotation.__name__ in seen:
+                continue
+            seen[annotation.__name__] = annotation
+            for field in annotation.model_fields.values():
+                pending.append(field.annotation)
+        return seen
+
+    def _string_fields(self, model):
+        for name, field in model.model_fields.items():
+            annotation = field.annotation
+            options = [a for a in get_args(annotation) if a is not type(None)]
+            if len(options) == 1:
+                annotation = options[0]
+            if annotation is str:
+                yield name, field
+
+    def _is_bounded(self, field):
+        for meta in getattr(field, "metadata", []) or []:
+            if getattr(meta, "max_length", None) is not None:
+                return True
+            if getattr(meta, "pattern", None) is not None:
+                return True
+        return False
+
+    def test_the_sweep_finds_the_models_it_is_checking(self):
+        # A collector that finds nothing passes everything below.
+        found = set(self._models())
+        assert {"RegisterRequest", "InvoiceUpdate"} <= found, found
+
+    def test_every_string_field_declares_a_length_or_a_pattern(self):
+        offenders = []
+        for name, model in self._models().items():
+            for field_name, field in self._string_fields(model):
+                if not self._is_bounded(field):
+                    offenders.append(f"{name}.{field_name}")
+        assert not offenders, (
+            "these accept a string of any length. A validator that refuses the "
+            "value is not a bound — it still runs on what was sent, and the 422 "
+            f"quotes it: {offenders}"
+        )
+
+    def test_an_oversized_body_field_is_refused_rather_than_parsed(
+        self, auth_client, sample_invoice_text
+    ):
+        # End to end, on the field that was the last one open. A declared bound
+        # the model ignored would still pass the walk above.
+        invoice_id = _upload(auth_client, sample_invoice_text)
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}",
+            json={"counterparty_gstin": "2" * 20_000},
+        )
+        assert response.status_code == 422
+        assert len(response.content) < 2_000
+
+    def test_a_gstin_pasted_with_its_spacing_is_still_accepted(
+        self, auth_client, sample_invoice_text
+    ):
+        # The guard against over-correcting: the bound is generous precisely so
+        # the validator gets to give the better error, and so a real paste out
+        # of a registration certificate still lands.
+        invoice_id = _upload(auth_client, sample_invoice_text)
+
+        response = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}",
+            json={"counterparty_gstin": "27 AAPFU0939F 1ZV"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["counterparty_gstin"] == "27AAPFU0939F1ZV"
