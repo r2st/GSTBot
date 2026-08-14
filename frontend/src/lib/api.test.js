@@ -228,6 +228,42 @@ describe("api", () => {
       expect(String(url)).toBe("/api/v1/itc/lapsing?as_of=2026-11-01");
     });
 
+    it("asks the Rule 37 pool about today when given no date", async () => {
+      // Same shape as `lapsingCredit`, for the same reason: the 180-day clock
+      // is measured against a date, and an empty `as_of` is a different
+      // question from an absent one — so it must not reach the query string.
+      global.fetch.mockResolvedValueOnce(jsonResponse({ items: [] }));
+
+      await api.rule37(undefined);
+
+      const [url] = global.fetch.mock.calls[0];
+      expect(String(url)).toBe("/api/v1/itc/rule37");
+    });
+
+    it("measures the Rule 37 clock against a date when given one", async () => {
+      global.fetch.mockResolvedValueOnce(jsonResponse({ items: [] }));
+
+      await api.rule37("2026-09-30");
+
+      const [url] = global.fetch.mock.calls[0];
+      expect(String(url)).toBe("/api/v1/itc/rule37?as_of=2026-09-30");
+    });
+
+    it("posts a set-off rather than asking for one", async () => {
+      // The one ITC call that writes. A GET would be answered by the read
+      // route and quietly return a summary instead of applying anything, so
+      // the method is asserted here and not only the path.
+      global.fetch.mockResolvedValueOnce(jsonResponse({ set_off: {} }));
+      const payload = { period: "2026-04", igst: "81000.00" };
+
+      await api.setOff(payload);
+
+      const [url, options] = global.fetch.mock.calls[0];
+      expect(String(url)).toBe("/api/v1/itc/set-off");
+      expect(options.method).toBe("POST");
+      expect(JSON.parse(options.body)).toEqual(payload);
+    });
+
     it("still works for a caller that does not want to cancel", async () => {
       global.fetch.mockResolvedValueOnce(jsonResponse({ items: [], total: 0 }));
 

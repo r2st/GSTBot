@@ -594,6 +594,31 @@ describe("running out of the monthly allowance mid-batch", () => {
     expect(screen.getByRole("alert")).not.toHaveTextContent(/Upgrade the plan/);
   });
 
+  it("clears the banner when it is dismissed, and leaves the rows alone", async () => {
+    // `ErrorBanner.test.jsx` proves the button calls back; this proves the
+    // page's half of it, that the callback actually empties the state the
+    // banner renders from. Nothing in the suite clicked dismiss on any page
+    // before, so a banner that could be raised and never cleared would have
+    // shipped green.
+    //
+    // The rows must survive it. The banner counts what did not upload and the
+    // rows say which files those were — dismissing the summary is not a
+    // reason to lose the detail it was summarising.
+    const user = userEvent.setup();
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ detail: "Too many requests. Try again in 45s." }, { status: 429 }),
+    );
+
+    renderPage();
+    await user.upload(screen.getByLabelText("Choose files"), manyFiles(15));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("file-14.txt")).toBeInTheDocument();
+  });
+
   it("leaves the seconds to the rows the server answered", async () => {
     // The banner says only what the rows cannot: how much of the drop never
     // went. The wait itself is the server's sentence, and it is already on the
