@@ -36,6 +36,7 @@ import argparse
 import ast
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -359,14 +360,39 @@ TARGETS: tuple[Target, ...] = (
     Target(
         "gstr2b",
         "app/services/gstr2b.py",
-        ("tests/test_gstr2b.py", "tests/test_gstr2b_edges.py"),
+        (
+            "tests/test_gstr2b.py",
+            "tests/test_gstr2b_edges.py",
+            # Credit and debit notes are a separate document section of the
+            # 2B, and only this file parses one.
+            "tests/test_gstr2b_notes.py",
+            # The overflow rails on the parsed amounts: the only tests that
+            # feed the parser a figure too large to be money.
+            "tests/test_money_bounds.py",
+        ),
     ),
     Target(
         "invoice_parser",
         "app/services/invoice_parser.py",
-        ("tests/test_invoice_parser.py", "tests/test_invoice_parser_edges.py"),
+        (
+            "tests/test_invoice_parser.py",
+            "tests/test_invoice_parser_edges.py",
+            # The format corpus. The label regexes look covered without it,
+            # because the other two files ride on one sample invoice each.
+            "tests/test_invoice_formats.py",
+            "tests/test_money_bounds.py",
+        ),
     ),
-    Target("supplier_score", "app/services/supplier_score.py", ("tests/test_supplier_score.py",)),
+    Target(
+        "supplier_score",
+        "app/services/supplier_score.py",
+        (
+            "tests/test_supplier_score.py",
+            # Scores are read back out of a reconciliation run, and the
+            # zero-invoice supplier only ever arises there.
+            "tests/test_reconciliation_edges.py",
+        ),
+    ),
     Target("security", "app/core/security.py", ("tests/test_security.py",)),
     # The calendar every deadline in the product is derived from. Its coverage
     # is split three ways and the split is the point: the financial-year
@@ -387,8 +413,28 @@ TARGETS: tuple[Target, ...] = (
     # split, nothing downstream re-derives a fee or an interest figure, so a
     # wrong one is never contradicted by anything — it is simply paid.
     Target("late_fee", "app/services/late_fee.py", ("tests/test_late_fee.py",)),
-    Target("itc", "app/services/itc.py", ("tests/test_itc.py",)),
-    Target("filing", "app/services/filing.py", ("tests/test_filing.py",)),
+    Target(
+        "itc",
+        "app/services/itc.py",
+        (
+            "tests/test_itc.py",
+            # The ineligible-ITC reversal reached through a filing, which is
+            # the only path that carries a return period into the ledger.
+            "tests/test_filing_journeys.py",
+        ),
+    ),
+    Target(
+        "filing",
+        "app/services/filing.py",
+        (
+            "tests/test_filing.py",
+            # A seventh of this module — the GSTR-1 and 3B section assembly —
+            # is only ever run by writing a return and reading it back, and
+            # test_filing.py never does. Without this file every mutant in
+            # those lines survives for want of a caller, not an assertion.
+            "tests/test_filing_record.py",
+        ),
+    ),
     Target(
         "reconciliation",
         "app/services/reconciliation.py",
@@ -519,6 +565,60 @@ def _run_tests(workspace: Path, tests: tuple[str, ...], timeout: float) -> bool:
     return completed.returncode == 0
 
 
+# ---------------------------------------------------------------------------
+# Verifying the mapping
+# ---------------------------------------------------------------------------
+#
+# A target's test list is a claim about where a module's coverage comes from,
+# and until now nothing checked it. It was wrong for five of the fourteen: the
+# GSTR-1 section assembly in `filing` is only ever run by writing a return and
+# reading it back, which `test_filing.py` does not do, so a seventh of that
+# module was mutated against tests that never called it. Every mutant there
+# survived, and the score read 68.8% — as if the assertions were missing, when
+# in fact the caller was.
+#
+# A line the listed tests never execute can only produce survivors, so the
+# cheap check is coverage, not mutation: one pytest run per target instead of
+# one per mutant. It is on demand rather than in CI for the same reason the
+# mutation run is — it costs a suite run per target — but it is what these
+# lists are maintained with.
+
+
+def _uncovered(payload: dict, module: str) -> list[int]:
+    """Lines of *module* that the coverage *payload* records as never run."""
+    files = payload.get("files", {})
+    key = next((k for k in files if k.replace("\\", "/").endswith(module)), None)
+    if key is None:
+        raise RuntimeError(f"{module} is absent from the coverage report")
+    return sorted(files[key]["missing_lines"])
+
+
+def verify_target(target: Target, *, timeout: float = 600.0, root: Path = BACKEND) -> list[int]:
+    """Lines of *target*'s module that its own test files never reach."""
+    with tempfile.TemporaryDirectory(prefix="gstbot-verify-") as tmp:
+        report = Path(tmp) / "coverage.json"
+        subprocess.run(
+            [
+                sys.executable, "-m", "pytest", *target.tests,
+                "-q", "--no-header", "-p", "no:warnings", "-p", "no:cacheprovider",
+                # --cov takes the package, not the file: pointing it at a path
+                # measures nothing and reports "No data to report", which reads
+                # like a clean result.
+                "--cov=app", f"--cov-report=json:{report}", "--cov-fail-under=0",
+            ],
+            cwd=root,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+            # The suite's own conftest sets what it needs; an inherited
+            # COVERAGE_FILE from an outer run would be written to instead.
+            env={k: v for k, v in os.environ.items() if k != "COVERAGE_FILE"},
+        )
+        if not report.is_file():
+            raise RuntimeError(f"{target.name}: the tests produced no coverage report")
+        return _uncovered(json.loads(report.read_text()), target.module)
+
+
 def run_target(
     target: Target,
     *,
@@ -611,6 +711,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--limit", type=int, help="only the first N mutants (for a smoke run)")
     parser.add_argument("--json", type=Path, help="write the full report here")
     parser.add_argument(
+        "--verify-tests",
+        action="store_true",
+        help="report module lines the target's own tests never run, and stop",
+    )
+    parser.add_argument(
         "--fail-under",
         type=float,
         default=None,
@@ -631,11 +736,38 @@ def _selected(args: argparse.Namespace) -> list[Target]:
     raise SystemExit("choose --target, --all or --module")
 
 
+def _verify(targets: list[Target], *, timeout: float) -> int:
+    """Print each target's unreachable lines. Non-zero when any target has some.
+
+    Non-zero because a gap here is not a finding about the code, the way a
+    survivor is — it is the tool being pointed at the wrong tests, and the
+    score it would go on to print would be wrong rather than low.
+    """
+    incomplete = 0
+    for target in targets:
+        missing = verify_target(target, timeout=timeout)
+        listed = " ".join(target.tests)
+        if not missing:
+            print(f"{target.name}: {listed} run every line of {target.module}", flush=True)
+            continue
+        incomplete += 1
+        print(
+            f"{target.name}: {len(missing)} line(s) of {target.module} are never run "
+            f"by {listed} — every mutant there survives for want of a caller",
+            flush=True,
+        )
+        print(f"    {', '.join(str(line) for line in missing)}", flush=True)
+    return 1 if incomplete else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     targets = _selected(args)
     reports: list[Report] = []
     failed = False
+
+    if args.verify_tests:
+        return _verify(targets, timeout=max(args.timeout, 600.0))
 
     for target in targets:
         total = len(mutations((BACKEND / target.module).read_text()))

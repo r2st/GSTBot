@@ -340,3 +340,72 @@ class TestTheCommandLine:
     def test_selecting_nothing_is_an_error_rather_than_a_silent_pass(self):
         with pytest.raises(SystemExit):
             mutation._selected(mutation._parse_args([]))
+
+
+class TestVerifyingThatATargetNamesTheRightTests:
+    """The check for the failure the operators cannot see.
+
+    A survivor means one of two things, and the report cannot tell them apart:
+    the tests reach the line and assert nothing about it, or they never reach
+    it at all. Only the first is a finding. The second is the target being
+    wrong about where its module's coverage comes from — which is what it was
+    for `filing`, whose GSTR-1 section assembly is written and read back only
+    in `test_filing_record.py`.
+    """
+
+    def _payload(self, missing: list[int]) -> dict:
+        return {"files": {"app/services/filing.py": {"missing_lines": missing}}}
+
+    def test_lines_the_tests_never_run_are_reported(self):
+        assert mutation._uncovered(self._payload([12, 4]), "app/services/filing.py") == [4, 12]
+
+    def test_a_module_the_tests_fully_run_reports_nothing(self):
+        assert mutation._uncovered(self._payload([]), "app/services/filing.py") == []
+
+    def test_a_module_absent_from_the_report_is_an_error(self):
+        """Silence here would read as a clean result for a module never measured."""
+        with pytest.raises(RuntimeError):
+            mutation._uncovered(self._payload([]), "app/services/itc.py")
+
+    def test_a_windows_separator_still_matches_the_module(self):
+        payload = {"files": {"app\\services\\filing.py": {"missing_lines": [7]}}}
+        assert mutation._uncovered(payload, "app/services/filing.py") == [7]
+
+    def test_a_gap_exits_non_zero(self, monkeypatch):
+        """Not a low score but a wrong one: the run that followed would lie."""
+        monkeypatch.setattr(mutation, "verify_target", lambda target, **kw: [41])
+        assert mutation._verify([mutation.TARGETS[0]], timeout=1.0) == 1
+
+    def test_a_target_whose_tests_run_every_line_exits_zero(self, monkeypatch):
+        monkeypatch.setattr(mutation, "verify_target", lambda target, **kw: [])
+        assert mutation._verify(list(mutation.TARGETS), timeout=1.0) == 0
+
+    def test_verify_tests_stops_before_mutating_anything(self, monkeypatch):
+        """--verify-tests is the cheap check, and must not spend a mutation run."""
+        monkeypatch.setattr(mutation, "verify_target", lambda target, **kw: [])
+        monkeypatch.setattr(
+            mutation, "run_target", lambda *a, **kw: pytest.fail("mutated anyway")
+        )
+        assert mutation.main(["--target", "gstin", "--verify-tests"]) == 0
+
+    def test_it_measures_a_real_module_against_real_tests(self, tmp_path):
+        """End to end, because the whole check is what pytest actually reports.
+
+        Small enough to run in the suite: `--cov=app` names a package, and any
+        package called `app` will do. Pointing it at a file path instead
+        measures nothing and reports "No data to report", which is the one
+        wrong answer that reads like a clean one.
+        """
+        (tmp_path / "app").mkdir()
+        (tmp_path / "app" / "__init__.py").write_text("")
+        (tmp_path / "app" / "half.py").write_text(
+            "def f(x):\n    if x:\n        return 1\n    return 2\n"
+        )
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_half.py").write_text(
+            "from app.half import f\n\n\ndef test_truthy():\n    assert f(1) == 1\n"
+        )
+        target = mutation.Target("half", "app/half.py", ("tests/test_half.py",))
+
+        # Line 4 is the `return 2` that the one test never reaches.
+        assert mutation.verify_target(target, root=tmp_path) == [4]
