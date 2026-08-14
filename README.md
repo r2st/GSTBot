@@ -88,9 +88,9 @@ get exercised. `backend/tests/conftest.py` sets its own environment with
 what is under test. Never export test environment variables in a CI step or a
 shell wrapper.
 
-Coverage gates (98% backend in `pyproject.toml`; statements, lines and branches
-at 99 in `frontend/vite.config.js`) are ratchets against tests being deleted or a
-module landing with none — not targets to code towards.
+Coverage gates (99% backend in `pyproject.toml`; frontend statements and lines
+at 99 and branches at 99.5 in `frontend/vite.config.js`) are ratchets against
+tests being deleted or a module landing with none — not targets to code towards.
 
 ## Layout
 

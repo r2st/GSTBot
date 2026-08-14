@@ -363,18 +363,26 @@ class TestTheREADMEDescribesThisRepository:
         assert f"{backend_gate.group(1)}% backend" in readme
 
         vite = (REPO_ROOT / "frontend" / "vite.config.js").read_text()
+        # `[\d.]+`, not `\d+`. A gate is not always a whole number — branches
+        # sits at 99.5 — and the integer pattern matched the "99" off the front
+        # of it and stopped. That is the one failure this test cannot afford:
+        # it read a raised gate as the old one, agreed with a README quoting
+        # the old one, and passed. A drift check that cannot see the drift is
+        # worse than no drift check, because it is believed.
         thresholds = dict(
             (name, value)
-            for name, value in re.findall(r"(\w+): (\d+)", _thresholds_block(vite))
+            for name, value in re.findall(r"(\w+): ([\d.]+)", _thresholds_block(vite))
         )
         assert thresholds, "could not read the frontend thresholds"
-        # Quoted as one figure for the three that share it, so the test asserts
-        # the sharing as well as the number — a threshold raised on its own has
-        # to be written out separately, and this fails until it is.
-        shared = {thresholds[name] for name in ("statements", "lines", "branches")}
+        # Statements and lines still share a figure, and are quoted as one. A
+        # threshold that leaves the group has to be written out on its own, so
+        # each is asserted where it is actually stated.
+        shared = {thresholds[name] for name in ("statements", "lines")}
         assert (
-            f"branches at {sole(shared, 'frontend statements/lines/branches')}" in prose
+            f"statements and lines at {sole(shared, 'frontend statements/lines')}"
+            in prose
         )
+        assert f"branches at {thresholds['branches']}" in prose
 
     def test_it_names_the_route_count_the_api_actually_publishes(self, readme, client):
         # The one number in it that no other file states, and the one a reader
@@ -393,6 +401,25 @@ class TestTheREADMEDescribesThisRepository:
             if method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}
         )
         assert int(claimed.group(1)) == published
+
+    def test_it_reads_a_gate_that_is_not_a_whole_number(self):
+        # The check above is only worth anything if it can see the gate it is
+        # checking. Read with `\d+`, "99.5" matched as "99" — so a raised gate
+        # was read as the old one, the README quoting the old one agreed with
+        # it, and the drift check passed over exactly the drift it exists to
+        # catch. Asserted on a literal block rather than on the real config,
+        # because the real one will not always have a decimal in it and this
+        # has to keep failing when the pattern narrows again.
+        block = _thresholds_block(
+            "thresholds: { statements: 99, branches: 99.5, functions: 87, lines: 99 },"
+        )
+        found = dict(re.findall(r"(\w+): ([\d.]+)", block))
+        assert found == {
+            "statements": "99",
+            "branches": "99.5",
+            "functions": "87",
+            "lines": "99",
+        }
 
 
 def _thresholds_block(vite: str) -> str:
