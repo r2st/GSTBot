@@ -1369,3 +1369,124 @@ class TestTheHundredAndEightyDayClockAndWhatItReverses:
         assert money(summary["output_tax"]["total"]) == Decimal("36000.00")
         assert money(summary["set_off"]["credit_used"]["total"]) == Decimal("36000.00")
         assert money(summary["set_off"]["total_cash"]) == Decimal("0")
+
+
+# ---------------------------------------------------------------------------
+# The credit a supplier took back
+# ---------------------------------------------------------------------------
+
+def portal_2b_with_a_credit_note(*, taxable: float, igst: float) -> bytes:
+    """April's 2B, where the supplier also filed a credit note against it.
+
+    A note in ``cdnr`` states its figures positive like every other document
+    the portal writes; ``typ`` is the only thing that says the money moves the
+    other way. It is issued in the same month as the invoice it corrects,
+    which is the ordinary case — a short-shipped line credited back before the
+    period closed.
+    """
+    payload = json.loads(portal_2b().decode())
+    payload["data"]["docdata"]["cdnr"] = [
+        {
+            "ctin": SUPPLIER_GSTIN_OTHER_STATE,
+            "trdnm": "Northwind Supplies",
+            "nt": [
+                {
+                    "nt_num": "CN-2026-0009",
+                    "nt_dt": "28-04-2026",
+                    "typ": "C",
+                    "val": taxable + igst,
+                    "items": [{"rt": 18, "txval": taxable, "igst": igst}],
+                }
+            ],
+        }
+    ]
+    return json.dumps(payload).encode()
+
+
+class TestASupplierWhoCreditedPartOfWhatTheyBilled:
+    """One credit note, from the portal's file to the figure on the return.
+
+    Both ends of this are tested and the middle is not. ``test_gstr2b.py``
+    reads the note out of ``cdnr``, ``test_reconciliation.py`` asserts it comes
+    off ``itc_eligible``, and ``test_itc.py`` asserts the pool is capped at
+    whatever the run found eligible. Nothing joins them up, and a note that
+    reversed the credit in the run while the return went on declaring the full
+    invoice would pass all three: the reconciliation screen would be right,
+    and the business would over-claim ₹9,000 on the strength of it.
+
+    Over-claimed ITC is recovered with interest under s.50, so the figure that
+    matters is the one in 4(A) of the 3B — not the one in the run's report.
+    """
+
+    NOTE_TAXABLE = 50000.00
+    NOTE_IGST = 9000.00
+
+    @pytest.fixture()
+    def credited(self, client, stub_openrouter):
+        """The purchase booked, the 2B imported with the note, reconciled."""
+        client.headers.update({"Authorization": f"Bearer {register(client)}"})
+        upload(
+            client,
+            stub_openrouter,
+            text=PURCHASE_TEXT,
+            extraction=PURCHASE_EXTRACTION,
+            invoice_type="purchase",
+            name="northwind-0042.txt",
+        )
+        import_2b(
+            client,
+            portal_2b_with_a_credit_note(taxable=self.NOTE_TAXABLE, igst=self.NOTE_IGST),
+        )
+        return client, reconcile(client, PERIOD)
+
+    def test_the_note_is_reported_without_being_counted_as_a_missing_invoice(self, credited):
+        """A note is not an invoice the supplier failed to declare.
+
+        It arrives in the same file, against the same supplier, and the one
+        thing it must not do is read as a document the books are short of —
+        that would send a user chasing a supplier who has done nothing wrong.
+        """
+        client, run = credited
+
+        assert run["matched_count"] == 1
+        assert run["missing_in_2b_count"] == 0
+        assert run["mismatched_count"] == 0
+
+        report = client.get(f"/api/v1/reconciliation/{run['id']}").json()["report"]
+        assert money(report["credit_notes"]) == money(self.NOTE_IGST)
+
+    def test_the_credit_the_itc_screen_offers_is_net_of_the_note(self, credited):
+        client, _ = credited
+
+        itc = client.get("/api/v1/itc", params={"period": PERIOD}).json()
+        assert itc["reconciled"] is True
+        # ₹81,000 billed, ₹9,000 credited back.
+        assert money(itc["available"]["igst"]) == Decimal("72000.00")
+
+    def test_the_return_declares_the_net_figure_and_not_the_invoice(self, credited):
+        """The assertion the seam exists for, in the field that is filed."""
+        client, _ = credited
+
+        document = client.get("/api/v1/filing/gstr3b", params={"period": PERIOD}).json()[
+            "document"
+        ]
+        other_itc = next(
+            row for row in document["itc_elg"]["itc_avl"] if row["ty"] == "OTH"
+        )
+        assert money(other_itc["iamt"]) == Decimal("72000.00")
+        assert money(document["itc_elg"]["itc_net"]["iamt"]) == Decimal("72000.00")
+
+    def test_the_books_still_hold_the_invoice_at_what_it_was_billed_at(self, credited):
+        """The note is the supplier's document, not a correction to ours.
+
+        Netting it into the stored invoice would lose the fact that ₹81,000
+        was charged and ₹9,000 credited — which is what the purchase register
+        has to show, and what an assessing officer compares against the return.
+        """
+        client, _ = credited
+
+        (invoice,) = client.get("/api/v1/invoices").json()["items"]
+        assert money(invoice["igst"]) == Decimal("81000.00")
+
+        dashboard = client.get("/api/v1/dashboard", params={"period": PERIOD}).json()
+        assert money(dashboard["purchase"]["igst"]) == Decimal("81000.00")
