@@ -1181,3 +1181,191 @@ class TestAClientGivesTheirAccountantReadOnlyAccess:
             "/api/v1/reconciliation/run", json={"period": PERIOD}
         )
         assert response.status_code != 403, response.text
+
+
+# ---------------------------------------------------------------------------
+# The money a supplier's unpaid bill costs, and where it is charged
+# ---------------------------------------------------------------------------
+
+class TestTheHundredAndEightyDayClockAndWhatItReverses:
+    """Rule 37, from the screen that has no period to the return that has one.
+
+    ``test_itc.py`` owns the arithmetic — when day 180 falls, which head the
+    reversal lands on, how re-availment puts it back. What it cannot see is the
+    handoff this journey is about, and it is a handoff between two *shapes* of
+    answer rather than two figures.
+
+    ``/itc/rule37`` is deliberately period-less: the invoice whose clock runs
+    out this month was issued six months ago, and a period filter would never
+    surface it. So it reports a standing exposure — everything unpaid past 180
+    days, whenever it lapsed. ``/itc`` and the return built from it are
+    period-scoped and must charge that exposure to exactly one month: the one
+    the 180 days ran out in.
+
+    The failure that shape difference invites is not a wrong total on either
+    screen. It is the same invoice reversed again in every return that follows
+    the lapse, each time as though it were new — every figure defensible read
+    on its own, and a business that filed four months of returns giving back
+    four times the credit the rule asks for. Nothing a single period's response
+    contains can distinguish that from correct; only asking several periods in
+    a row and adding them up can.
+
+    The dates are ``as_of`` rather than the clock, for the reason the s.16(4)
+    journey uses fixed dates: the subject is a distance of 180 days from an
+    invoice date, so a test that read the clock would assert something
+    different every morning and would stop exercising the overdue branch
+    entirely on the days the calendar had not reached yet.
+    """
+
+    # PURCHASE_EXTRACTION is dated 15/04/2026. The Act allows the whole of day
+    # 180, so the credit survives the 12th of October and lapses on the 13th.
+    LAST_GOOD_DAY = "2026-10-12"
+    THE_DAY_IT_LAPSES = "2026-10-13"
+    # The month that lapse date falls in — the one return that gives the
+    # credit back, out of the several this journey asks.
+    LAPSE_PERIOD = "2026-10"
+    IGST_ON_THE_PURCHASE = Decimal("81000.00")
+
+    @pytest.fixture()
+    def unpaid(self, client, stub_openrouter):
+        """One purchase never paid for, and one sale in the same month.
+
+        The sale is what gives April a liability for the credit to be set off
+        against, so the settlement this journey round-trips through the
+        what-if endpoint is a real one rather than an arithmetic identity over
+        zeroes.
+        """
+        client.headers.update({"Authorization": f"Bearer {register(client)}"})
+        purchase = upload(
+            client,
+            stub_openrouter,
+            text=PURCHASE_TEXT,
+            extraction=PURCHASE_EXTRACTION,
+            invoice_type="purchase",
+            name="northwind-0042.txt",
+        )
+        upload(
+            client,
+            stub_openrouter,
+            text=SALES_TEXT,
+            extraction=SALES_EXTRACTION,
+            invoice_type="sales",
+            name="ut-0101.txt",
+        )
+        # Nothing in this journey pays it. `paid_at` staying null is the whole
+        # premise, and an extraction that had guessed one would make every
+        # assertion below vacuous rather than failing.
+        assert purchase["paid_at"] is None
+        return client
+
+    def _rule_37(self, client, as_of: str) -> dict:
+        response = client.get("/api/v1/itc/rule37", params={"as_of": as_of})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def _summary(self, client, period: str, as_of: str) -> dict:
+        response = client.get("/api/v1/itc", params={"period": period, "as_of": as_of})
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    def test_the_day_the_credit_lapses_is_the_day_the_screen_changes_its_mind(self, unpaid):
+        # Day 180: still claimable, and already worth warning about. The two
+        # lists are not two severities of the same row — `reversal` is money
+        # this business has to give back and `approaching_amount` is money it
+        # can still keep by paying the supplier, and a screen that added them
+        # together would overstate the loss by the whole of the second.
+        day_180 = self._rule_37(unpaid, self.LAST_GOOD_DAY)
+        assert day_180["overdue"] == []
+        (warned,) = day_180["approaching"]
+        assert warned["invoice_number"] == "INV-2026-0042"
+        assert warned["days_outstanding"] == 180
+        assert warned["days_remaining"] == 0
+        assert warned["overdue"] is False
+        assert money(day_180["reversal"]["total"]) == Decimal("0")
+        assert money(day_180["approaching_amount"]["total"]) == self.IGST_ON_THE_PURCHASE
+
+        # Day 181, and the same invoice has moved across.
+        day_181 = self._rule_37(unpaid, self.THE_DAY_IT_LAPSES)
+        assert day_181["approaching"] == []
+        (lapsed,) = day_181["overdue"]
+        assert lapsed["invoice_id"] == warned["invoice_id"]
+        assert lapsed["days_outstanding"] == 181
+        assert lapsed["overdue"] is True
+        assert money(day_181["reversal"]["total"]) == self.IGST_ON_THE_PURCHASE
+        assert money(day_181["approaching_amount"]["total"]) == Decimal("0")
+
+    def test_the_standing_exposure_is_charged_to_one_return_and_not_the_rest(self, unpaid):
+        """The claim no single period's response can support on its own.
+
+        Asked of eight months in a row — the month the credit was claimed in,
+        the month it lapsed in, and the six in between and after — exactly one
+        return may carry the reversal, and it has to be the month the clock ran
+        out rather than the month the invoice belongs to.
+        """
+        standing = money(
+            self._rule_37(unpaid, self.THE_DAY_IT_LAPSES)["reversal"]["total"]
+        )
+        assert standing == self.IGST_ON_THE_PURCHASE
+
+        months = [f"2026-{month:02d}" for month in range(4, 13)]
+        charged = {
+            period: money(
+                self._summary(unpaid, period, self.THE_DAY_IT_LAPSES)["rule_37_reversal"][
+                    "total"
+                ]
+            )
+            for period in months
+        }
+
+        assert charged[self.LAPSE_PERIOD] == standing
+        # Including PERIOD itself. April is the month that *claimed* the
+        # credit, which makes it the plausible wrong answer rather than an
+        # arbitrary one: the reversal belongs to the month the payment window
+        # closed, not to the month the purchase was made.
+        assert charged[PERIOD] == Decimal("0")
+        assert sum(charged.values()) == standing
+
+    def test_the_reversal_a_return_declares_is_the_credit_it_stops_claiming(self, unpaid):
+        # Table 4(B) and table 4(C) of the same return. The reversal is
+        # declared, and the net credit is what is left after it — a 3B that
+        # showed the reversal in 4(B) and went on claiming the credit in 4(C)
+        # is arithmetically inconsistent in the way the portal itself rejects.
+        lapsed = self._summary(unpaid, self.LAPSE_PERIOD, self.THE_DAY_IT_LAPSES)
+        assert money(lapsed["rule_37_reversal"]["total"]) == self.IGST_ON_THE_PURCHASE
+        assert money(lapsed["total_reversal"]["total"]) == self.IGST_ON_THE_PURCHASE
+        assert money(lapsed["net_available"]["total"]) == Decimal("0")
+
+    def test_the_what_if_screen_and_the_books_are_one_settlement(self, unpaid):
+        """``/itc/set-off`` reads no database, which is what makes this worth asking.
+
+        It settles whatever the caller sends, so it is the one money endpoint
+        in the product whose answer nothing else in a response can contradict.
+        Fed the two figures this same API publishes for the period — the credit
+        after every reversal, and the output tax — it has to reproduce the
+        settlement that API published alongside them. Anything else means the
+        screen a CA tries a what-if on and the return the business files are
+        applying credit in two different orders, and the disagreement would
+        first be noticed as cash that had already been paid.
+        """
+        summary = self._summary(unpaid, PERIOD, self.THE_DAY_IT_LAPSES)
+        heads = ("igst", "cgst", "sgst", "cess")
+
+        response = unpaid.post(
+            "/api/v1/itc/set-off",
+            json={f"credit_{head}": summary["net_available"][head] for head in heads}
+            | {f"liability_{head}": summary["output_tax"][head] for head in heads},
+        )
+        assert response.status_code == 200, response.text
+
+        # Compared whole rather than head by head. The steps are the part a
+        # user reads as an explanation — "IGST credit paid your CGST" — and a
+        # settlement that reached the same cash figure by a different order
+        # would be a different answer to the question that was asked.
+        assert response.json() == summary["set_off"]
+
+        # And the settlement is a real one: IGST credit crossing into both
+        # halves of an intra-state liability is the case the statutory order
+        # exists for, so this is not an identity over zeroes.
+        assert money(summary["output_tax"]["total"]) == Decimal("36000.00")
+        assert money(summary["set_off"]["credit_used"]["total"]) == Decimal("36000.00")
+        assert money(summary["set_off"]["total_cash"]) == Decimal("0")
