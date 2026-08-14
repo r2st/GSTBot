@@ -153,8 +153,14 @@ describe("SuppliersPage", () => {
     expect(screen.getByText("Low risk")).toBeInTheDocument();
     expect(screen.getByText("Northwind Supplies Pvt Ltd")).toBeInTheDocument();
     expect(screen.getByText("29AAGCB7383J1Z4")).toBeInTheDocument();
-    // The score renders as a meter, labelled for anyone not seeing the bar.
-    expect(screen.getByRole("img", { name: "92 out of 100" })).toBeInTheDocument();
+    // The score renders as a meter, labelled for anyone not seeing the bar —
+    // and named for the supplier, because a column of bars all called
+    // "Compliance score" says nothing about which row is which.
+    expect(
+      screen.getByRole("progressbar", {
+        name: "Compliance score for Northwind Supplies Pvt Ltd",
+      }),
+    ).toHaveAttribute("aria-valuetext", "92 of 100");
     expect(screen.getByText("April 2026")).toBeInTheDocument();
   });
 
@@ -376,6 +382,160 @@ describe("SuppliersPage", () => {
     expect(
       screen.queryByRole("heading", { name: "How the score is made up" }),
     ).not.toBeInTheDocument();
+  });
+
+  describe("reaching the detail panel without a mouse", () => {
+    // The panel renders above the table it is opened from. So tabbing on from
+    // the Details button walks *away* from what the click produced, and a
+    // keyboard user never arrives at it at all — the click appears to have
+    // done nothing. Focus is what makes the button report its own result.
+
+    it("moves focus into the panel when it opens", async () => {
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      const panel = await screen.findByRole("region", {
+        name: "Northwind Supplies Pvt Ltd",
+      });
+      await waitFor(() => expect(panel).toHaveFocus());
+    });
+
+    it("names the panel by the supplier in it", async () => {
+      // Not by a fixed caption. The panel is one slot that several rows open,
+      // and "Supplier detail" gives a screen reader no way to tell which
+      // supplier it landed on.
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      expect(
+        await screen.findByRole("region", { name: "Northwind Supplies Pvt Ltd" }),
+      ).toBeInTheDocument();
+    });
+
+    it("does not add a tab stop everyone has to pass through", async () => {
+      // tabIndex -1: a programmatic target, not a new stop on the way to the
+      // table below it.
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      const panel = await screen.findByRole("region", {
+        name: "Northwind Supplies Pvt Ltd",
+      });
+      expect(panel).toHaveAttribute("tabindex", "-1");
+    });
+
+    it("puts focus back on the row that opened it when it closes", async () => {
+      // Focus was sitting on a Close button about to be unmounted, so the
+      // browser dropped it to <body> and the next Tab restarted from the top
+      // of the document — past the header, the filters and every row above.
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      const trigger = screen.getByRole("button", { name: "Details" });
+      await user.click(trigger);
+      await screen.findByRole("heading", { name: "How the score is made up" });
+
+      await user.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(trigger).toHaveFocus();
+    });
+
+    it("closes on Escape, like the nav drawer and the switcher", async () => {
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+      await screen.findByRole("heading", { name: "How the score is made up" });
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("heading", { name: "How the score is made up" }),
+        ).not.toBeInTheDocument(),
+      );
+    });
+
+    it("returns focus to the row on Escape too", async () => {
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      const trigger = screen.getByRole("button", { name: "Details" });
+      await user.click(trigger);
+      await screen.findByRole("heading", { name: "How the score is made up" });
+
+      await user.keyboard("{Escape}");
+
+      await waitFor(() => expect(trigger).toHaveFocus());
+    });
+
+    it("stops listening for Escape once the panel is gone", async () => {
+      // The listener is on `document`, so an un-removed one would keep firing
+      // `onClose` on every Escape pressed anywhere on the page afterwards —
+      // including the one that dismisses the browser's own find bar.
+      const user = userEvent.setup();
+      const remove = vi.spyOn(document, "removeEventListener");
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+      await screen.findByRole("heading", { name: "How the score is made up" });
+      await user.click(screen.getByRole("button", { name: "Close" }));
+
+      expect(remove).toHaveBeenCalledWith("keydown", expect.any(Function));
+    });
+  });
+
+  describe("the score bars in the breakdown", () => {
+    it("reports each component as a progress bar named for its component", async () => {
+      // They were `role="img"` captioned "94 out of 100": four pictures, none
+      // of which said which component it was a picture of, while the
+      // identical-looking bar on the dashboard was a progressbar carrying its
+      // value and range. One widget, two readings, one set of tests.
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      const bar = await screen.findByRole("progressbar", { name: "Match rate score" });
+      expect(bar).toHaveAttribute("aria-valuenow", "94");
+      expect(bar).toHaveAttribute("aria-valuemax", "100");
+    });
+
+    it("still renders an unscored component as words rather than an empty bar", async () => {
+      // `recency` has no score in the fixture. A bar at zero would read as
+      // "scored zero" instead of "never seen filing".
+      const user = userEvent.setup();
+      mockApi();
+      renderPage();
+
+      await loaded();
+      await user.click(screen.getByRole("button", { name: "Details" }));
+
+      expect(await screen.findByText("No evidence yet")).toBeInTheDocument();
+      expect(screen.queryByRole("progressbar", { name: "Recency score" })).toBeNull();
+    });
   });
 
   it("filters the list by risk band", async () => {

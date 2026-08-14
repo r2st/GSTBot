@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ErrorBanner from "../components/ErrorBanner";
+import Meter from "../components/Meter";
 import { SkeletonTable } from "../components/Skeleton";
 import TableScroll from "../components/TableScroll";
 import { useAuth } from "../hooks/useAuth";
@@ -21,30 +22,72 @@ const COMPONENT_LABELS = {
   recency: "Recency",
 };
 
+/** The Details button for a row, addressable after the list has re-rendered. */
+const detailsButtonId = (id) => `supplier-details-${id}`;
+
 function RiskChip({ level }) {
   const meta = RISK[level] ?? RISK.unknown;
   return <span className={`chip chip-${meta.tone}`}>{meta.label}</span>;
 }
 
-/** A 0-100 bar. Unscored components render as a dash, never as an empty bar. */
-function ScoreMeter({ value }) {
+/**
+ * A 0-100 bar. Unscored components render as a dash, never as an empty bar.
+ *
+ * Delegates to `Meter` rather than laying out its own pair of divs. The two
+ * had already drifted: this one announced itself as `role="img"`, so the four
+ * component bars in the breakdown were a picture captioned "58 out of 100"
+ * while the identical-looking bar on the dashboard was a progressbar carrying
+ * its value, its range and its own label. Same widget, two readings, and only
+ * one of them had tests.
+ */
+function ScoreMeter({ value, label }) {
   if (value === null || value === undefined) {
     return <span className="muted">No evidence yet</span>;
   }
-  return (
-    <div className="meter" role="img" aria-label={`${Math.round(value)} out of 100`}>
-      <div className="meter-fill" style={{ width: `${Math.max(0, Math.min(100, value))}%` }} />
-    </div>
-  );
+  return <Meter value={Math.round(value)} max={100} label={label} />;
 }
 
 function SupplierDetail({ supplier, onClose }) {
   const detail = supplier.score_detail;
+  const panelRef = useRef(null);
+
+  // The panel renders above the table it was opened from, so tabbing on from
+  // the Details button moves *away* from what the click just produced — a
+  // keyboard user never reaches it, and a screen reader is told nothing
+  // happened at all. Moving focus into the panel is what makes the button
+  // report its own result.
+  //
+  // Keyed on the supplier, so clicking Details on a second row while the panel
+  // is open moves focus again rather than leaving it on the previous heading.
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, [supplier.id]);
+
+  // Escape closes it, like the nav drawer and the business switcher. Without
+  // this the only way out is to find the Close button, which is the one thing
+  // a keyboard user who has just been moved here cannot do by muscle memory.
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
   return (
-    <section className="panel">
+    <section
+      className="panel"
+      ref={panelRef}
+      // -1, not 0: a programmatic focus target, not a new stop on the tab
+      // order that everyone has to pass through on the way to the table.
+      tabIndex={-1}
+      aria-labelledby="supplier-detail-heading"
+    >
       <div className="page-head">
         <div>
-          <h2>{supplier.legal_name || supplier.trade_name || supplier.gstin}</h2>
+          <h2 id="supplier-detail-heading">
+            {supplier.legal_name || supplier.trade_name || supplier.gstin}
+          </h2>
           <p className="muted small">{supplier.gstin}</p>
         </div>
         <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -94,7 +137,13 @@ function SupplierDetail({ supplier, onClose }) {
                 <td>{COMPONENT_LABELS[component.name] ?? component.name}</td>
                 <td className="numeric">{component.weight}%</td>
                 <td>
-                  <ScoreMeter value={component.score} />
+                  {/* Named per row. Four bars all called "Score" is what a
+                      screen reader reads out when it lists the controls on
+                      this panel, and none of them says which component. */}
+                  <ScoreMeter
+                    value={component.score}
+                    label={`${COMPONENT_LABELS[component.name] ?? component.name} score`}
+                  />
                 </td>
                 <td className="muted small">{component.detail}</td>
               </tr>
@@ -190,6 +239,9 @@ export default function SuppliersPage() {
   // Details buttons stay live while it loads, so an answer has to prove it is
   // still the one that was asked for.
   const detailRequest = useRef(0);
+  // The supplier whose Details button opened the panel, so closing it can put
+  // focus back on that row rather than dropping it to the top of the document.
+  const openedFrom = useRef(null);
 
   const load = useCallback(async (params, { signal } = {}) => {
     setLoading(true);
@@ -236,13 +288,40 @@ export default function SuppliersPage() {
     return () => controller.abort();
   }, [load, risk, search, reloadToken]);
 
-  /** Stop whatever the panel is waiting for from arriving in it. */
-  function closeDetail() {
+  /**
+   * Stop whatever the panel is waiting for from arriving in it, and put focus
+   * back where it came from.
+   *
+   * Closing moved focus nowhere, which meant it was sitting on a Close button
+   * about to be unmounted: the browser drops it to `<body>`, and the next Tab
+   * starts again from the top of the document. Someone who opened one row's
+   * breakdown to compare it with the next had to tab past the whole header,
+   * the filters and the rows above to get back to where they were.
+   *
+   * The button is found by id rather than held as a node, because the list
+   * behind the panel refetches — a filter typed, a rescore finished — and the
+   * node captured when the panel opened is by then detached and unfocusable.
+   * A row that has since filtered out of the list has no button to go back to;
+   * `?.` is that case, and it leaves focus alone rather than moving it
+   * somewhere arbitrary.
+   *
+   * `useCallback` because the panel's Escape handler depends on it, and a new
+   * identity every render would rebind that listener on every keystroke typed
+   * into the search box.
+   */
+  const closeDetail = useCallback(() => {
     detailRequest.current += 1;
     setSelected(null);
-  }
+    const id = openedFrom.current;
+    openedFrom.current = null;
+    if (id !== null) document.getElementById(detailsButtonId(id))?.focus();
+  }, []);
 
   async function handleSelect(id) {
+    // Which row to hand focus back to on close. Recorded before the request
+    // rather than on arrival, so a click on a second row while the first is
+    // still loading returns to the row actually clicked last.
+    openedFrom.current = id;
     // Answers do not come back in the order they were sent, and the panel is
     // captioned by the supplier in it rather than by the row that was clicked
     // — so a slow first answer landing after a second one did not look stale.
@@ -414,7 +493,12 @@ export default function SuppliersPage() {
                       <div className="muted small">{supplier.gstin}</div>
                     </td>
                     <td>
-                      <ScoreMeter value={supplier.compliance_score} />
+                      <ScoreMeter
+                        value={supplier.compliance_score}
+                        label={`Compliance score for ${
+                          supplier.legal_name || supplier.trade_name || supplier.gstin
+                        }`}
+                      />
                     </td>
                     <td className="numeric">{supplier.matched_invoices}</td>
                     <td className="numeric">{supplier.missing_invoices}</td>
@@ -428,6 +512,7 @@ export default function SuppliersPage() {
                     <td>
                       <button
                         type="button"
+                        id={detailsButtonId(supplier.id)}
                         className="btn btn-ghost"
                         onClick={() => handleSelect(supplier.id)}
                       >
