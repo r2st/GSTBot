@@ -16,6 +16,10 @@ from app.core.config import settings
 from app.services import email_sender
 from app.services.email_sender import EmailSendError, send_email
 
+# The unpatched sleep, captured before the autouse fixture below can replace
+# it. See test_the_backoff_is_actually_waited_out_and_not_merely_computed.
+_REAL_SLEEP = email_sender._sleep
+
 
 class _FakeSMTP:
     """Stands in for smtplib.SMTP, recording what was called on it."""
@@ -339,3 +343,27 @@ def test_the_retried_send_is_the_same_message_not_a_rebuilt_one(monkeypatch):
     assert delivered["Subject"] == "Deadlines"
     assert delivered["From"] == "alerts@gstbot.aiknol.com"
     assert delivered.get_content().strip() == "Body text"
+
+
+def test_the_backoff_is_actually_waited_out_and_not_merely_computed():
+    """Every other test in this file replaces ``_sleep`` with a recorder.
+
+    That is what makes the schedule above assertable without a nine-second
+    suite, and it also means none of those tests would notice if ``_sleep``
+    stopped sleeping. An indirection that had lost its body — refactored to a
+    ``pass``, or shadowed by a stub left behind — would keep all of them green
+    while turning the retry loop into three immediate reconnections against a
+    relay that has just rate-limited us, which is the burst the jitter and the
+    doubling exist to prevent.
+
+    So the one thing those tests cannot check is checked here directly, at a
+    duration short enough to pay for. ``_REAL_SLEEP`` is bound at import, which
+    happens before the autouse fixture can replace the module attribute —
+    reading ``email_sender._sleep`` here would find the recorder instead and
+    assert nothing at all.
+    """
+    import time
+
+    before = time.perf_counter()
+    _REAL_SLEEP(0.05)
+    assert time.perf_counter() - before >= 0.04

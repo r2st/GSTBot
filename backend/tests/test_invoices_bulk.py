@@ -471,3 +471,86 @@ class TestTheBatchDoesNotRereadTheTenantPerFile:
         exactly where it should happen and nowhere else.
         """
         assert self._business_reads(auth_client, db_session, 6, "SIX") == 1
+
+
+class TestTheCallerThatPassesNoTenant:
+    """The optimisation above must not be the only way the GSTIN is found.
+
+    ``apply_parsed`` takes the tenant's own GSTIN as a parameter so the batch
+    loop does not re-read it per file. The Celery path has no such loop and no
+    such value: the task is handed an invoice id and nothing else, so it calls
+    through without one and the fallback walk down ``invoice.business`` is what
+    supplies it.
+
+    That fallback is load-bearing rather than defensive. Without the tenant's
+    own GSTIN the counterparty flip below cannot happen, and a purchase whose
+    supplier printed our GSTIN in the supplier field would be filed with *our*
+    GSTIN as the vendor — a purchase from ourselves, in the books the ITC claim
+    is computed from. Deleting the parameter's default, or letting the walk
+    become dead code behind an always-passing caller, would surface as wrong
+    numbers on the worker path only.
+    """
+
+    @staticmethod
+    def _parsed():
+        from app.services.invoice_parser import ParsedInvoice
+
+        # What a one-GSTIN invoice looks like after extraction: the supplier
+        # filled in a single GSTIN field and put ours in it.
+        return ParsedInvoice(
+            supplier_gstin=BUSINESS_GSTIN,
+            supplier_name="Us",
+            buyer_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+            buyer_name="Them",
+            invoice_number="INV-FALLBACK-1",
+            taxable_value=Decimal("1000.00"),
+            total_value=Decimal("1180.00"),
+        )
+
+    def test_the_tenant_gstin_is_read_off_the_row_when_none_is_passed(
+        self, db_session, business
+    ):
+        from app.models.invoice import InvoiceSource, InvoiceType
+        from app.services.invoice_service import apply_parsed
+
+        invoice = Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.PURCHASE,
+            source=InvoiceSource.UPLOAD,
+            status=InvoiceStatus.UPLOADED,
+            source_filename="bill.txt",
+        )
+        db_session.add(invoice)
+        db_session.commit()
+
+        apply_parsed(db_session, invoice, self._parsed())
+
+        # Flipped, which is only possible if the walk found our own GSTIN.
+        assert invoice.counterparty_gstin == SUPPLIER_GSTIN_OTHER_STATE
+        assert invoice.counterparty_name == "Them"
+
+    def test_the_walk_and_the_parameter_reach_the_same_answer(self, db_session, business):
+        """The two callers must not file the same invoice two different ways.
+
+        The parameter exists for the batch loop's sake alone. If it ever came
+        to mean something the walk does not — a different value, a different
+        precedence — the path an upload happened to take (inline batch, or a
+        Celery task when the broker is up) would decide who the vendor was.
+        """
+        from app.models.invoice import InvoiceSource, InvoiceType
+        from app.services.invoice_service import apply_parsed
+
+        passed = Invoice(
+            business_id=business.id,
+            invoice_type=InvoiceType.PURCHASE,
+            source=InvoiceSource.UPLOAD,
+            status=InvoiceStatus.UPLOADED,
+            source_filename="passed.txt",
+        )
+        db_session.add(passed)
+        db_session.commit()
+
+        apply_parsed(db_session, passed, self._parsed(), business_gstin=BUSINESS_GSTIN)
+
+        assert passed.counterparty_gstin == SUPPLIER_GSTIN_OTHER_STATE
+        assert passed.counterparty_name == "Them"

@@ -915,3 +915,51 @@ class TestEveryStringInARequestBodyIsBounded:
         )
         assert response.status_code == 200, response.text
         assert response.json()["counterparty_gstin"] == "27AAPFU0939F1ZV"
+
+
+class TestTheWalkDescendsMoreThanOneLevel:
+    """A router included into a router must not fall out of the sweep.
+
+    Today every router in this app is included straight onto ``app``, so the
+    walk in :mod:`app.core.routes` never recurses and the four sweeps that read
+    it would pass just as well without the recursion. That is precisely the
+    condition under which it breaks silently: grouping the routers under a
+    single ``/api/v1`` router — the obvious next refactor, and the one FastAPI's
+    own documentation shows — would move every route in the product one level
+    down, and each of these sweeps would go on passing over an empty table.
+
+    ``EXPECTED_PATHS`` catches that for the app as it is built today. These
+    catch it for the shape the app has not been given yet.
+    """
+
+    def _nested_app(self):
+        from fastapi import APIRouter, FastAPI
+
+        leaf = APIRouter()
+
+        @leaf.get("/leaf")
+        def _leaf() -> dict:
+            return {}
+
+        middle = APIRouter(prefix="/middle")
+        middle.include_router(leaf)
+        outer = APIRouter(prefix="/outer")
+        outer.include_router(middle)
+
+        application = FastAPI()
+        application.include_router(outer, prefix="/api")
+        return application
+
+    def test_a_route_three_routers_deep_is_still_collected(self):
+        assert [route.path for route in collect_api_routes(self._nested_app())] == [
+            "/api/outer/middle/leaf"
+        ]
+
+    def test_it_is_collected_once_and_not_once_per_level(self):
+        """The lazy nodes carry their descendants' low-priority routes as well
+        as their own, which is why the walk reads that list at the top and not
+        inside the recursion. Getting it wrong duplicates every nested route
+        per level of nesting, and a sweep asserting "no route does X" would
+        then report the same offender three times."""
+        paths = [route.path for route in collect_api_routes(self._nested_app())]
+        assert len(paths) == len(set(paths))

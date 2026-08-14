@@ -188,3 +188,56 @@ class TestTheSchemaIsBuiltOnce:
             "429" not in fresh.openapi()["paths"]["/api/v1/health/live"]["get"]["responses"]
         )
         assert first["paths"].keys() == fresh.openapi_schema["paths"].keys()
+
+
+class TestARouteTheSpecDoesNotPublish:
+    """A route hidden from the schema must not have a response written for it.
+
+    ``describe_conditional_responses`` walks the *route table* and writes into
+    the *schema*, and the two do not have the same members: a route carrying
+    ``include_in_schema=False`` is served but never documented. The walk looks
+    the operation up by path, so a hidden route that shares a path with a
+    documented one — which is how the errors-module probe router and any future
+    internal verb on a public path both arrive — finds its sibling's entry and
+    would describe *that* operation with its own dependencies.
+
+    A 401 on a GET that takes no token is exactly the wrong-spec failure this
+    file exists to catch, arriving through the back door.
+    """
+
+    def _app_with_a_hidden_sibling(self):
+        from fastapi import Depends, FastAPI
+
+        from app.core.deps import get_current_user
+
+        application = FastAPI()
+
+        @application.get("/thing")
+        def _public() -> dict:
+            return {}
+
+        @application.post(
+            "/thing", include_in_schema=False, dependencies=[Depends(get_current_user)]
+        )
+        def _hidden() -> dict:
+            return {}
+
+        return application
+
+    def test_a_hidden_verb_does_not_write_401_onto_its_documented_sibling(self):
+        application = self._app_with_a_hidden_sibling()
+        schema = application.openapi()
+        from app.core.openapi import describe_conditional_responses
+
+        describe_conditional_responses(application, schema)
+        assert "401" not in schema["paths"]["/thing"]["get"]["responses"]
+
+    def test_the_hidden_verb_is_still_absent_from_the_document(self):
+        """The point of the skip is that there is nothing to describe — not
+        that the description went somewhere else."""
+        application = self._app_with_a_hidden_sibling()
+        schema = application.openapi()
+        from app.core.openapi import describe_conditional_responses
+
+        describe_conditional_responses(application, schema)
+        assert set(schema["paths"]["/thing"]) == {"get"}

@@ -49,10 +49,6 @@ class ActiveTenant:
     business: Business
     role: UserRole
 
-    @property
-    def is_writer(self) -> bool:
-        return _RANK[self.role] >= _RANK[UserRole.ACCOUNTANT]
-
 
 def get_current_user(
     token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
