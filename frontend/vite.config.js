@@ -34,11 +34,17 @@ export default defineConfig({
       // none — not a target to code towards. Raise it in the commit that
       // earns it, the same way backend/pyproject.toml does.
       //
-      // `functions` sits well below the rest on purpose. v8 counts every
-      // inline JSX arrow as its own function, so a component whose lines are
-      // fully covered still scores ~70% when it renders a row of handlers
-      // that no single test clicks. Statements and lines are the honest
-      // signal here; functions is kept only as a floor.
+      // `functions` still sits below the rest, for the reason it always has:
+      // v8 counts every inline JSX arrow as its own function, so a component
+      // whose lines are fully covered still scores well under 100 when it
+      // renders a row of handlers that no single test clicks. Statements and
+      // lines remain the honest signal.
+      //
+      // It moved 87 → 95 when the flow tests landed. Driving the app across
+      // pages clicks the handlers a page mounted on its own never gets asked
+      // to — the measured figure went from the high eighties to 97 — and the
+      // gate follows what the suite now actually reaches, with the same kind
+      // of headroom the other three keep.
       //
       // `branches` is at 99.5 rather than at the 99.87 actually measured, and
       // the gap is deliberate. Two branches are unreachable by construction
@@ -52,7 +58,7 @@ export default defineConfig({
       //
       // A gate at the measured figure would make removing either of those
       // guards the way to keep CI green.
-      thresholds: { statements: 99, branches: 99.5, functions: 87, lines: 99 },
+      thresholds: { statements: 99, branches: 99.5, functions: 95, lines: 99 },
     },
   },
 });
