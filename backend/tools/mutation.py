@@ -369,6 +369,10 @@ TARGETS: tuple[Target, ...] = (
             # The overflow rails on the parsed amounts: the only tests that
             # feed the parser a figure too large to be money.
             "tests/test_money_bounds.py",
+            # The edges the four above read through rather than at: the row the
+            # header search gives up at, the rupee the refusal begins on, and
+            # the cell a footer's label lands in.
+            "tests/test_gstr2b_boundaries.py",
         ),
     ),
     Target(
