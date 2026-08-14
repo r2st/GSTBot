@@ -124,7 +124,7 @@ def get_active_tenant(
         role = UserRole(member.role.value)
 
     business = db.get(Business, business_id)
-    if business is None or business.deleted_at is not None or not business.is_active:
+    if business is None or not business.is_reachable:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Business is inactive"
         )

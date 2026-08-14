@@ -117,6 +117,45 @@ class TestListingMyBusinesses:
         # delete that cleaned up after itself.
         assert db_session.query(BusinessMembership).count() == 1
 
+    def test_a_linked_business_that_was_suspended_drops_out_of_the_list(
+        self, auth_client, client, business, db_session
+    ):
+        """Suspension hides it from the switcher exactly as deletion does.
+
+        This is the half that used to be missed. Listing filtered
+        ``deleted_at`` and stopped there, so a *suspended* registration stayed
+        in the switcher while ``get_active_tenant`` — which checks both — 403'd
+        every request made after picking it. The user clicked their own company
+        and was told they had no access to it, with nothing on screen to
+        explain why, and no way to tell it from a bug.
+        """
+        second = register_second_business(client)
+        link(auth_client)
+        assert len(auth_client.get("/api/v1/businesses/mine").json()["items"]) == 2
+
+        suspended = db_session.get(Business, second["business"]["id"])
+        suspended.is_active = False
+        db_session.commit()
+
+        body = auth_client.get("/api/v1/businesses/mine").json()
+        assert [item["id"] for item in body["items"]] == [business.id]
+
+    def test_a_suspended_home_business_drops_out_of_the_list_too(
+        self, auth_client, business, db_session
+    ):
+        """The home half is filtered on the same predicate as the linked half.
+
+        Not a symmetry for its own sake: ``get_active_tenant`` resolves the
+        caller's own tenant through the same check, so a suspended home
+        business is one every request 403s on. Listing it would offer the one
+        entry in the switcher guaranteed to fail.
+        """
+        business.is_active = False
+        db_session.commit()
+
+        body = auth_client.get("/api/v1/businesses/mine").json()
+        assert body["items"] == []
+
     def test_listing_costs_the_same_number_of_queries_at_one_link_and_at_many(
         self, auth_client, db_session, business
     ):
@@ -248,6 +287,64 @@ class TestLinkingABusiness:
             json={"email": SECOND_EMAIL, "password": SECOND_PASSWORD},
         )
         assert response.status_code == 401
+
+    def test_linking_a_deleted_business_is_refused(self, auth_client, client, db_session):
+        """A membership to a closed registration is access to nothing.
+
+        This used to answer 201. The caller was told the link succeeded, the
+        business then never appeared in ``GET /businesses/mine`` because that
+        filters soft deletes, and every request carrying its id came back
+        "Business is inactive" — three surfaces disagreeing about one row.
+        """
+        second = register_second_business(client)
+        closed = db_session.get(Business, second["business"]["id"])
+        closed.soft_delete()
+        db_session.commit()
+
+        response = link(auth_client)
+        assert response.status_code == 409, response.text
+        assert "closed or suspended" in response.json()["detail"].lower()
+        # Refused means refused: no row left behind to be honoured later if the
+        # business is ever reactivated.
+        assert db_session.query(BusinessMembership).count() == 0
+
+    def test_linking_a_suspended_business_is_refused(self, auth_client, client, db_session):
+        """Suspension refuses the link for the same reason deletion does.
+
+        The account's password is still correct — this is not an authentication
+        answer and deliberately does not pretend to be one. What is missing is
+        anything to link *to*.
+        """
+        second = register_second_business(client)
+        suspended = db_session.get(Business, second["business"]["id"])
+        suspended.is_active = False
+        db_session.commit()
+
+        response = link(auth_client)
+        assert response.status_code == 409, response.text
+        assert "closed or suspended" in response.json()["detail"].lower()
+        assert db_session.query(BusinessMembership).count() == 0
+
+    def test_a_refused_link_does_not_reveal_whether_the_password_was_right(
+        self, auth_client, client, db_session
+    ):
+        """The 409 is only ever reached with a correct password.
+
+        Worth pinning because the refusal above is more specific than the login
+        answer beside it, and a reader could reasonably wonder whether it turns
+        this endpoint into an oracle. It does not: a wrong password on a
+        suspended business answers the same 401 as a wrong password on a live
+        one, so the 409 tells an attacker nothing they had not already proven
+        they knew.
+        """
+        second = register_second_business(client)
+        suspended = db_session.get(Business, second["business"]["id"])
+        suspended.is_active = False
+        db_session.commit()
+
+        wrong = link(auth_client, password="not-the-right-password")
+        assert wrong.status_code == 401
+        assert "closed or suspended" not in wrong.json()["detail"].lower()
 
     def test_the_linked_accounts_role_is_carried_over(self, auth_client, client, db_session):
         register_second_business(client, email="viewer@example.com", password="viewersecret1")
@@ -383,3 +480,163 @@ class TestSwitchingBusinessWithTheHeader:
             "/api/v1/dashboard", headers={"X-Business-Id": str(linked_id)}
         )
         assert response.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# One predicate, three surfaces
+# ---------------------------------------------------------------------------
+
+class TestTheThreeSurfacesAgreeOnReachability:
+    """Listing, linking and acting must answer one question the same way.
+
+    Two columns end a business and they end it for different reasons:
+    ``deleted_at`` is the tenant closing the account, ``is_active`` is us
+    suspending it. Three places asked separately and gave three answers —
+    ``get_active_tenant`` checked both, ``/businesses/mine`` checked only
+    ``deleted_at``, and ``link_business`` checked neither. Every pairwise
+    disagreement was reachable, and each one showed up as the product
+    contradicting itself rather than as an error anyone could act on.
+
+    The per-surface tests above pin each answer. These pin that the answers
+    are the *same* answer, which is the property that actually broke — and
+    they are written against the state matrix rather than against the three
+    call sites, so a fourth caller asking the question a fourth way is what
+    this is waiting for.
+    """
+
+    # (deleted, suspended) -> reachable. Both columns, and both at once: a
+    # business can be closed by its owner and suspended by us, and the pair
+    # must not cancel out into a live row.
+    STATES = [
+        (False, False, True),
+        (True, False, False),
+        (False, True, False),
+        (True, True, False),
+    ]
+
+    def _put_second_business_in(self, client, db_session, deleted, suspended):
+        second = register_second_business(client)
+        target = db_session.get(Business, second["business"]["id"])
+        if deleted:
+            target.soft_delete()
+        if suspended:
+            target.is_active = False
+        db_session.commit()
+        return target.id
+
+    def test_the_python_predicate_and_the_sql_clause_agree(self, db_session):
+        """``is_reachable`` and ``reachable()`` are one rule in two shapes.
+
+        They have to be: the listing filters in SQL and the link check tests
+        the loaded object, so a drift between them would put the two surfaces
+        back into disagreement while every individual test still passed. Read
+        both out of the same four rows and compare.
+        """
+        for index, (deleted, suspended, _expected) in enumerate(self.STATES):
+            gstin = _valid_gstin(500 + index)
+            row = Business(gstin=gstin, legal_name=f"State {index}", state_code=gstin[:2])
+            if deleted:
+                row.soft_delete()
+            if suspended:
+                row.is_active = False
+            db_session.add(row)
+        db_session.commit()
+
+        in_python = {
+            row.id for row in db_session.query(Business) if row.is_reachable
+        }
+        in_sql = {
+            row.id
+            for row in db_session.query(Business).filter(Business.reachable()).all()
+        }
+        assert in_python == in_sql, (
+            "the property and the WHERE clause disagree about which businesses "
+            "are reachable, so listing and linking will drift apart"
+        )
+
+    def test_listing_and_acting_agree_across_every_state(
+        self, auth_client, client, db_session
+    ):
+        """Anything the switcher offers must be something a request can act for.
+
+        The direction that bit: a business in the list that 403s on use is a
+        menu entry whose only outcome is a refusal. Asserted both ways, because
+        the opposite drift — a usable business hidden from the switcher — is a
+        business the user simply cannot reach.
+        """
+        for deleted, suspended, expected in self.STATES:
+            db_session.query(BusinessMembership).delete()
+            db_session.query(Business).filter(
+                Business.gstin == SECOND_GSTIN
+            ).delete()
+            db_session.query(User).filter(User.email == SECOND_EMAIL).delete()
+            db_session.commit()
+
+            linked_id = self._put_second_business_in(
+                client, db_session, deleted, suspended
+            )
+            # The link is made directly: `link_business` now refuses these
+            # states, and this test is about the other two surfaces given a
+            # membership that already exists — which is what the link endpoint
+            # leaves behind for a business suspended *after* it was linked.
+            user = db_session.query(User).filter_by(email=TEST_EMAIL).one()
+            db_session.add(
+                BusinessMembership(
+                    user_id=user.id, business_id=linked_id, role=UserRole.OWNER
+                )
+            )
+            db_session.commit()
+
+            listed = [
+                item["id"]
+                for item in auth_client.get("/api/v1/businesses/mine").json()["items"]
+            ]
+            acting = auth_client.get(
+                "/api/v1/dashboard", headers={"X-Business-Id": str(linked_id)}
+            )
+
+            assert (linked_id in listed) is expected, (
+                f"deleted={deleted} suspended={suspended}: listing says "
+                f"{'reachable' if linked_id in listed else 'unreachable'}"
+            )
+            assert (acting.status_code == 200) is expected, (
+                f"deleted={deleted} suspended={suspended}: acting answered "
+                f"{acting.status_code}"
+            )
+
+    def test_linking_agrees_with_listing_across_every_state(
+        self, auth_client, client, db_session
+    ):
+        """A link that succeeds must produce a business the switcher then shows.
+
+        The 201-then-invisible case is what this forbids: linking answered
+        success for a business ``/businesses/mine`` would never list and no
+        request could act for, leaving the caller with a confirmation and
+        nothing behind it.
+        """
+        for deleted, suspended, expected in self.STATES:
+            db_session.query(BusinessMembership).delete()
+            db_session.query(Business).filter(
+                Business.gstin == SECOND_GSTIN
+            ).delete()
+            db_session.query(User).filter(User.email == SECOND_EMAIL).delete()
+            db_session.commit()
+
+            linked_id = self._put_second_business_in(
+                client, db_session, deleted, suspended
+            )
+            linked = link(auth_client)
+            assert (linked.status_code == 201) is expected, (
+                f"deleted={deleted} suspended={suspended}: link answered "
+                f"{linked.status_code}"
+            )
+
+            listed = [
+                item["id"]
+                for item in auth_client.get("/api/v1/businesses/mine").json()["items"]
+            ]
+            assert (linked_id in listed) is expected, (
+                f"deleted={deleted} suspended={suspended}: link answered "
+                f"{linked.status_code} but listing "
+                f"{'shows' if linked_id in listed else 'hides'} it"
+            )

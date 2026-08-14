@@ -5,8 +5,9 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy import String
+from sqlalchemy import String, and_
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.database import Base
 from app.models.mixins import SoftDeleteMixin, TimestampMixin
@@ -55,6 +56,31 @@ class Business(Base, TimestampMixin, SoftDeleteMixin):
     invoices: Mapped[list[Invoice]] = relationship(
         back_populates="business", cascade="all, delete-orphan"
     )
+
+    # Two columns say a business is over, and they say it for different
+    # reasons: ``deleted_at`` is the tenant closing their account,
+    # ``is_active`` is us suspending it. Neither is usable, and the product
+    # has to agree with itself about that — three places asked the question
+    # separately and gave three answers, which is how a login could be told
+    # it had linked a business that would never appear in its own list, and
+    # be offered one in the switcher that refused every request after the
+    # switch. Asked once here, in both the shapes callers need.
+
+    @property
+    def is_reachable(self) -> bool:
+        """Can a request act for this business at all?"""
+        return self.deleted_at is None and self.is_active
+
+    @classmethod
+    def reachable(cls) -> ColumnElement[bool]:
+        """The same question as a ``WHERE`` clause.
+
+        ``is_active.is_(True)`` rather than a bare ``is_active``: the column is
+        ``NOT NULL`` today, so the two are equivalent — but only the explicit
+        form stays correct if it ever isn't, and a truthiness test on a
+        three-valued column is the kind of thing that reads as fine forever.
+        """
+        return and_(cls.deleted_at.is_(None), cls.is_active.is_(True))
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
         return f"<Business {self.gstin} {self.legal_name!r}>"

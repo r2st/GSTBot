@@ -66,8 +66,17 @@ def my_businesses(
     """The caller's own tenant, plus every business they have linked."""
     items: list[MyBusinessOut] = []
 
+    # ``Business.reachable()`` on both halves, and it is the same predicate
+    # ``get_current_business`` refuses on. This list is what the switcher
+    # offers, so anything in it that a request cannot then act for is a menu
+    # entry whose only outcome is a 403 — and a *suspended* business used to
+    # be exactly that, because this filtered soft deletes and forgot
+    # ``is_active``. The user clicked their own company and was told they had
+    # no access to it. Filtering is the honest answer: what they have lost is
+    # the ability to act for that business, and the switcher is a list of the
+    # businesses they can.
     home = db.get(Business, current_user.business_id)
-    if home is not None and home.deleted_at is None:
+    if home is not None and home.is_reachable:
         items.append(_out(home, role=current_user.role.value, is_home=True))
 
     # Joined rather than walked. ``membership.business`` is a lazy
@@ -85,7 +94,7 @@ def my_businesses(
         .where(
             BusinessMembership.user_id == current_user.id,
             BusinessMembership.deleted_at.is_(None),
-            Business.deleted_at.is_(None),
+            Business.reachable(),
         )
     ).all()
     for membership, business in rows:
@@ -139,6 +148,23 @@ def link_business(
             status_code=status.HTTP_409_CONFLICT, detail="That is already your business."
         )
 
+    # A closed or suspended registration cannot be acted for, so a membership
+    # to one is access to nothing. Answering 201 for it was the worst of both:
+    # the caller was told the link succeeded, the business then never appeared
+    # in ``GET /businesses/mine`` because that filters the same way, and every
+    # request sending its id came back "Business is inactive" — with no way to
+    # tell that from a bug. The password was correct, so this leaks nothing
+    # they did not already prove they know.
+    target = db.get(Business, other.business_id)
+    if target is None or not target.is_reachable:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "That business is closed or suspended, so there is nothing to "
+                "link to. Contact support if you think it should be active."
+            ),
+        )
+
     existing = db.scalar(
         select(BusinessMembership).where(
             BusinessMembership.user_id == current_user.id,
@@ -161,8 +187,10 @@ def link_business(
     db.add(membership)
     db.commit()
 
-    business = db.get(Business, other.business_id)
-    return _out(business, role=role.value, is_home=False)
+    # ``target`` again rather than a second ``db.get``: the commit expired it,
+    # so reading it here reloads the row exactly once either way, and one name
+    # for one row is one fewer thing that can be checked and then not used.
+    return _out(target, role=role.value, is_home=False)
 
 
 @router.delete(
