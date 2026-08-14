@@ -373,14 +373,17 @@ class TestTheRefusalsARealSessionMeets:
         assert "viewer" in message
         assert "owner or an accountant" in message
 
-    def test_a_bug_apologises_and_gives_a_reference(self, monkeypatch):
+    def test_a_bug_apologises_and_gives_a_reference(self, raw_client, monkeypatch):
         """The one message a user meets that is about nothing they did.
 
-        Read off the function that builds it rather than out of a 500 response:
-        ``test_errors.py`` already drives the handler and owns what a 500 may
-        not contain, and repeating that fault-injection setup here to assert
-        something about a string would be a second copy of it. What is new is
-        the string.
+        Taken off a real 500 from the fault-injection route, which this file
+        could not do until recently. The fixture that turns debug off was
+        autouse inside ``test_errors.py``, so the same request from here was
+        answered by Starlette's debug page — `text/plain`, and an
+        ExceptionGroup traceback where the sentence should have been. This test
+        read the message off ``_opaque_message`` instead and said so. Debug is
+        now `raw_client`'s business, which is where a property of the client
+        belonged, and the message can be read where a user meets it.
 
         It must be a sentence with something to do about it, which here is the
         reference to quote. An opaque message with no next step is a dead end
@@ -393,12 +396,16 @@ class TestTheRefusalsARealSessionMeets:
         locally, and "check the logs" is advice only they can take.
         """
         from app.core.config import settings
-        from app.core.errors import _opaque_message
 
         monkeypatch.setattr(settings, "debug", False)
-        message = _opaque_message()
+        response = raw_client.get("/_test_errors/unhandled")
+
+        assert response.status_code == 500
+        (message,) = self._details(response)
         assert_reads_as_prose(message, "the 500 message")
         assert "reference" in message, message
+        # The reference is only worth quoting if it is the one the log carries.
+        assert response.json()["correlation_id"] in message
 
     def test_the_gstin_lookup_explains_a_rejection_the_form_can_show(self, client):
         """Always a 200, so the sentence is in the body rather than a detail.

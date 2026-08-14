@@ -62,27 +62,29 @@ async def _raise_keyerror() -> None:
 app.include_router(_boom)
 
 
-@pytest.fixture(autouse=True)
-def _production_error_handling():
-    """Run these tests against the app as it is deployed, with debug off.
+# Turning debug off — which is what makes the app's own handler the thing under
+# test rather than Starlette's traceback page — belongs to `raw_client` and
+# lives in conftest.py as `production_error_handling`. It was an autouse
+# fixture in this file, which made every test here work and the identical
+# request from any other file answer a traceback with the exception in it. See
+# the note on that fixture for why the file a test sits in was the wrong thing
+# for it to depend on.
 
-    ``create_app`` passes ``debug=settings.debug`` to FastAPI, and Starlette's
-    ServerErrorMiddleware answers an unhandled exception with a full traceback
-    page whenever that flag is set — the app's own handler never runs. That is
-    the point of debug mode and it is safe, because ``_production_invariants``
-    refuses to start with DEBUG=true when ENVIRONMENT is production *or*
-    staging. But it means the default test configuration (development, debug
-    on) exercises Starlette's page rather than the handler these tests are
-    about, so the flag is turned off here and the stack rebuilt.
+
+def test_the_client_under_test_is_the_app_and_not_the_debugger(raw_client):
+    """The trap that made this file's coverage of the 500 handler local to it.
+
+    Under debug, Starlette answers the same route with the same status and a
+    `text/plain` traceback — so the one assertion anybody writes first, that a
+    bug is a 500, passes either way. Everything that distinguishes the two is
+    in the body, which is why this looks at the envelope rather than the code:
+    the app's handler is the only one of the two that produces JSON.
     """
-    original = app.debug
-    app.debug = False
-    # Starlette caches the composed middleware stack; the flag is read when it
-    # is built, so changing it after the fact does nothing on its own.
-    app.middleware_stack = app.build_middleware_stack()
-    yield
-    app.debug = original
-    app.middleware_stack = app.build_middleware_stack()
+    response = raw_client.get("/_test_errors/unhandled")
+
+    assert response.status_code == 500
+    assert response.headers["content-type"].startswith("application/json")
+    assert set(response.json()) >= {"detail", "error", "correlation_id"}
 
 
 # ---- the envelope ----

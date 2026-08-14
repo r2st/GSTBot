@@ -144,7 +144,39 @@ def client(db_session):
 
 
 @pytest.fixture()
-def raw_client(db_session):
+def production_error_handling():
+    """Run against the app's own error handling, the way it is deployed.
+
+    ``create_app`` passes ``debug=settings.debug`` to FastAPI, and Starlette's
+    ServerErrorMiddleware answers an unhandled exception with a full traceback
+    page whenever that flag is set — the app's own handler never runs. That is
+    the point of debug mode, and it is safe, because ``_production_invariants``
+    refuses to start with DEBUG=true when ENVIRONMENT is production *or*
+    staging. But the test configuration is development with debug on, so left
+    alone the suite exercises Starlette's page rather than the handler.
+
+    It lives here rather than in ``test_errors.py``, where it started as an
+    autouse fixture. A fixture that is autouse in one module is not a fixture
+    anywhere else, and the difference is nearly undetectable: reaching
+    ``/_test_errors/unhandled`` from any other file answered 500 with
+    ``text/plain`` and an ExceptionGroup traceback in the body — passing an
+    assertion on the status code, failing every assertion about what a 500 may
+    not contain, and reading like a broken handler rather than like a handler
+    that never ran. Whether the app's error handling is under test is a
+    property of the client, not of which file the test sits in.
+    """
+    original = app.debug
+    app.debug = False
+    # Starlette caches the composed middleware stack; the flag is read when it
+    # is built, so changing it after the fact does nothing on its own.
+    app.middleware_stack = app.build_middleware_stack()
+    yield
+    app.debug = original
+    app.middleware_stack = app.build_middleware_stack()
+
+
+@pytest.fixture()
+def raw_client(db_session, production_error_handling):
     """A client that returns the 500 rather than re-raising the exception.
 
     TestClient defaults to ``raise_server_exceptions=True``, which re-raises an
@@ -152,6 +184,10 @@ def raw_client(db_session):
     into a response. That default is right for most tests — a stack trace beats
     an assertion failure — but it means the "a bug must not leak the exception"
     tests would never reach the code they are about.
+
+    Debug is off for the length of it, because that is the other half of the
+    same decision: this fixture exists to watch the app answer a failure, and
+    under debug the app does not answer it — Starlette does, with the traceback.
     """
 
     def _override_get_db():
