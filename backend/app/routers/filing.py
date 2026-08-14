@@ -257,15 +257,13 @@ def late_fee(
             + ", ".join(sorted(_FILABLE)),
         )
 
-    turnover = previous_year_turnover
-
     result = late_fee_service.estimate(
         db,
         business,
         _resolve_period(period),
         kind,
         is_nil=is_nil,
-        previous_year_turnover=turnover,
+        previous_year_turnover=previous_year_turnover,
     )
     return LateFeeOut(**result.as_dict())
 
