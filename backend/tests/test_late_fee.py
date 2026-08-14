@@ -242,6 +242,86 @@ class TestTheEndpoint:
         response = auth_client.get(late_fee_url(previous_year_turnover="not-a-number"))
         assert response.status_code == 422
 
+    @pytest.mark.parametrize("turnover", ["nan", "NaN", "sNaN", "inf", "-inf"])
+    def test_a_turnover_that_is_not_a_finite_number_is_refused(
+        self, auth_client, db_session, business, frozen_today, turnover
+    ):
+        """These parse. That is what made them a 500 rather than a 422.
+
+        ``Decimal("nan")`` constructs without complaint — only arithmetic on it
+        raises — so a try/except around the parse caught nothing and the
+        InvalidOperation surfaced two layers down, inside ``turnover_tier``'s
+        comparison. ``is_nil=false`` is what makes that comparison run: the nil
+        branch never consults the tier, so the route answered 200 without it
+        and the bug hid behind whichever period the test happened to pick.
+        """
+        sale(db_session, business.id)
+        response = auth_client.get(
+            late_fee_url(previous_year_turnover=turnover, is_nil="false")
+        )
+        assert response.status_code == 422, response.text
+
+    @pytest.mark.parametrize("turnover", ["-1", "-5000", "-1E+500"])
+    def test_a_negative_turnover_is_refused_rather_than_capped_at_the_lowest_tier(
+        self, auth_client, db_session, business, frozen_today, turnover
+    ):
+        """The expensive one: this used to answer 200 with the *smallest* cap.
+
+        A negative figure parsed cleanly and then matched the first tier, so
+        the caller was told ₹2,000 was their ceiling. ``turnover_tier`` picks
+        the highest tier when it knows nothing precisely because the errors are
+        not symmetric — understating a cap tells a business it is covered and
+        the shortfall notice arrives weeks later. Understating it from a
+        nonsense input is that same failure with a confident number attached.
+        """
+        sale(db_session, business.id)
+        response = auth_client.get(
+            late_fee_url(previous_year_turnover=turnover, is_nil="false")
+        )
+        assert response.status_code == 422, response.text
+
+    def test_a_turnover_larger_than_any_money_column_is_refused(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        """Landing on the highest tier was luck, not a decision.
+
+        An unbounded exponent reached the tier table and happened to fall off
+        the end of it — the right answer for the wrong reason. The ceiling is
+        the same one every stored money figure carries.
+        """
+        sale(db_session, business.id)
+        response = auth_client.get(
+            late_fee_url(previous_year_turnover="1E+999999999", is_nil="false")
+        )
+        assert response.status_code == 422, response.text
+
+    def test_the_largest_real_turnover_is_still_accepted(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        """The negative tests above are only meaningful if this one passes: a
+        genuine ₹5-crore-plus turnover must still select the top tier rather
+        than being caught by the new ceiling."""
+        sale(db_session, business.id)
+        response = auth_client.get(
+            late_fee_url(previous_year_turnover="500000000", is_nil="false")
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["late_fee_tier"] == "turnover above ₹5 crore"
+
+    def test_a_turnover_of_zero_is_a_real_answer_not_a_missing_one(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        """Zero is a business that traded nothing last year, and the floor is
+        ``ge=0`` rather than ``gt=0`` so it can say so. It selects the smallest
+        cap, which for zero turnover is correct — unlike the negative inputs
+        above, this caller meant it."""
+        sale(db_session, business.id)
+        response = auth_client.get(
+            late_fee_url(previous_year_turnover="0", is_nil="false")
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["late_fee_tier"] == "turnover up to ₹1.5 crore"
+
     def test_is_nil_query_param_overrides_the_guess(
         self, auth_client, db_session, business, frozen_today
     ):

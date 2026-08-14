@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from app.core.rate_limit import RateLimit
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnType
 from app.models.invoice import InvoiceType
+from app.models.mixins import MONEY_MAX
 from app.schemas.filing import (
     FiledReturnOut,
     FilingPreviewOut,
@@ -221,8 +222,27 @@ def late_fee(
     return_type: str,
     period: str | None = Query(default=None, pattern=gst_calendar.PERIOD_PATTERN),
     is_nil: bool | None = Query(default=None),
-    previous_year_turnover: str | None = Query(
-        default=None, description="Decimal rupees. Omitted uses the highest cap tier."
+    # Declared and bounded like every other money figure in a query string
+    # rather than taken as a string and parsed here, which is what it used to
+    # be. Three inputs got through that hand-rolled parse:
+    #
+    # ``Decimal("nan")`` constructs without raising — only *arithmetic* on it
+    # raises — so the try/except around the parse caught nothing and the
+    # InvalidOperation surfaced two layers down, inside ``turnover_tier``'s
+    # comparison, as a 500.
+    #
+    # A negative turnover parsed cleanly and then matched the *first* tier,
+    # handing back the lowest cap. That is the one direction ``turnover_tier``
+    # documents as unacceptable: understating a cap tells a business it is
+    # covered and the shortfall notice arrives weeks later.
+    #
+    # And an exponent like ``1E+999999999`` was only harmless by luck — it
+    # landed on the highest tier. ``le`` is what makes that a decision.
+    previous_year_turnover: Decimal | None = Query(
+        default=None,
+        ge=0,
+        le=MONEY_MAX,
+        description="Decimal rupees. Omitted uses the highest cap tier.",
     ),
     db: Session = Depends(get_db),
     business: Business = Depends(get_current_business),
@@ -236,15 +256,7 @@ def late_fee(
             + ", ".join(sorted(_FILABLE)),
         )
 
-    turnover: Decimal | None = None
-    if previous_year_turnover is not None:
-        try:
-            turnover = Decimal(previous_year_turnover)
-        except InvalidOperation as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"'{previous_year_turnover}' is not a number.",
-            ) from exc
+    turnover = previous_year_turnover
 
     result = late_fee_service.estimate(
         db,

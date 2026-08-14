@@ -22,7 +22,9 @@ Sweeping is itself the fragile part, and it has already broken once: see
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from io import BytesIO
+from typing import get_args
 
 import pytest
 from fastapi import Request
@@ -610,3 +612,122 @@ class TestEveryBareIntegerInAUrlIsBounded:
         assert auth_client.get(
             "/api/v1/invoices", params={"offset": 0, "limit": 10}
         ).status_code == 200
+
+
+class TestEveryDecimalInAQueryStringIsBounded:
+    """The same hole as the integers above, one type over.
+
+    ``Decimal`` accepts more strings than a number line has points, and the two
+    extras are the whole problem:
+
+    *   ``Decimal("nan")`` and ``Decimal("inf")`` construct without raising.
+        Only *arithmetic* on them raises, so a route that guards its parse with
+        ``except InvalidOperation`` catches nothing and the failure surfaces
+        wherever the value is first compared — a 500 several layers from the
+        query string that caused it.
+    *   ``Decimal("1E+999999999")`` constructs just as cheaply and is not a
+        figure any money column could hold.
+
+    A ``ge``/``le`` pair rejects all three at the boundary, before a service
+    sees them, and turns a 500 into the 422 the caller earned. That is what
+    ``/itc`` already did and what ``/filing/{return_type}/late-fee`` did not —
+    it took the same figure as a ``str`` and parsed it by hand, which put it
+    outside every declarative bound and outside this sweep's reach until it
+    was spelled as a ``Decimal``.
+
+    A negative bound matters as much as the huge one here. These parameters are
+    money, ``turnover_tier`` reads the smallest matching band, and a negative
+    turnover selected the *lowest* late-fee cap — a confidently wrong ceiling
+    on a compliance figure, which is worse than an error.
+    """
+
+    def _decimal_params(self, route):
+        """Every path or query parameter this route reads as a Decimal.
+
+        The union is unwrapped, unlike the integer sweep above, because every
+        one of these is optional: an omitted turnover is a real case with its
+        own answer, so they are spelled ``Decimal | None`` and an identity test
+        against ``Decimal`` matches none of them. That is not a hypothetical —
+        it is how the first draft of this sweep passed while the bug it was
+        written for was still live.
+        """
+        found = []
+        for param in (*route.dependant.query_params, *route.dependant.path_params):
+            annotation = param.field_info.annotation
+            options = [a for a in get_args(annotation) if a is not type(None)]
+            if len(options) == 1:
+                annotation = options[0]
+            if annotation is Decimal:
+                found.append((param.name, param.field_info))
+        return found
+
+    def _bound(self, field_info, *names):
+        for meta in getattr(field_info, "metadata", []) or []:
+            for name in names:
+                if getattr(meta, name, None) is not None:
+                    return getattr(meta, name)
+        return None
+
+    def test_the_sweep_finds_the_parameters_it_is_checking(self):
+        # A collector that finds nothing passes everything below. Named rather
+        # than counted: these three are the money figures a caller can pass in
+        # a query string today, and losing one silently would empty the sweep.
+        found = {
+            name
+            for route in collect_api_routes(app)
+            if hasattr(route, "dependant")
+            for name, _ in self._decimal_params(route)
+        }
+        assert {"exempt_turnover", "total_turnover", "previous_year_turnover"} <= found, found
+
+    def test_every_decimal_parameter_has_a_ceiling(self):
+        offenders = []
+        for route in collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for name, field_info in self._decimal_params(route):
+                if self._bound(field_info, "le", "lt") is None:
+                    offenders.append(f"{route.path}:{name}")
+        assert not offenders, (
+            "these take a Decimal of any magnitude, so 'inf' and '1E+999999999' "
+            f"reach a service — bound them with ``le=MONEY_MAX``: {offenders}"
+        )
+
+    def test_every_decimal_parameter_has_a_floor(self):
+        offenders = []
+        for route in collect_api_routes(app):
+            if not hasattr(route, "dependant"):
+                continue
+            for name, field_info in self._decimal_params(route):
+                if self._bound(field_info, "ge", "gt") is None:
+                    offenders.append(f"{route.path}:{name}")
+        assert not offenders, (
+            "these accept a negative amount of money, which no caller means and "
+            f"which selects the lowest cap tier rather than erroring: {offenders}"
+        )
+
+    # Every route/parameter pair the sweep above found, exercised over HTTP.
+    # The sweep proves the bound is declared; these prove the declaration is
+    # what a caller actually meets, which is the half a metadata walk cannot
+    # see — a bound on the wrong parameter still passes the sweep.
+    DECIMAL_QUERIES = [
+        ("/api/v1/itc", "exempt_turnover"),
+        ("/api/v1/itc", "total_turnover"),
+        ("/api/v1/filing/gstr3b/late-fee", "previous_year_turnover"),
+    ]
+
+    @pytest.mark.parametrize("path, name", DECIMAL_QUERIES)
+    @pytest.mark.parametrize("value", ["nan", "sNaN", "inf", "-inf", "1E+999999999", "-1"])
+    def test_a_value_no_money_column_could_hold_is_refused(
+        self, auth_client, path, name, value
+    ):
+        response = auth_client.get(path, params={name: value, "is_nil": "false"})
+        assert response.status_code == 422, (
+            f"{path}?{name}={value} answered {response.status_code}"
+        )
+
+    @pytest.mark.parametrize("path, name", DECIMAL_QUERIES)
+    def test_an_ordinary_amount_is_still_accepted(self, auth_client, path, name):
+        # The guard against over-correcting into refusing real money.
+        response = auth_client.get(path, params={name: "150000", "is_nil": "false"})
+        assert response.status_code == 200, response.text
