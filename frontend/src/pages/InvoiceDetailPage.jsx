@@ -404,6 +404,15 @@ export default function InvoiceDetailPage() {
     // only one of the three that can move the user, which makes landing it on
     // the wrong invoice the worst of the three rather than the mildest.
     const target = id;
+    // The one write on this page that never took the busy lock. Its button
+    // stayed live for as long as its own request, so a second click sent a
+    // second DELETE for an invoice already gone and banal double-clicking
+    // produced "Invoice not found" over an invoice that had just been removed
+    // successfully — a refusal describing nothing the user did wrong. It also
+    // left Save and Re-extract clickable against a row mid-deletion, which is
+    // the pair of requests that races to decide whether the invoice exists.
+    setBusy(true);
+    setError("");
     try {
       await api.deleteInvoice(target);
       // Not a redirect off whatever is on screen now. Leaving the detail page
@@ -425,6 +434,12 @@ export default function InvoiceDetailPage() {
       // that invoice being the one that cannot be removed.
       if (shownId.current !== target) return;
       setError(err.message);
+    } finally {
+      // Unconditional, like the two writes above. On the path that navigates
+      // the page is gone and this lands on nothing; on every other path the
+      // buttons have to come back, including the one where the user moved to
+      // another invoice while the delete was in flight.
+      setBusy(false);
     }
   }
 
@@ -454,7 +469,16 @@ export default function InvoiceDetailPage() {
             <button type="button" className="btn btn-ghost" onClick={handleReparse} disabled={busy}>
               Re-extract
             </button>
-            <button type="button" className="btn btn-danger" onClick={handleDelete}>
+            <button
+              type="button"
+              className="btn btn-danger"
+              onClick={handleDelete}
+              disabled={busy}
+            >
+              {/* Keeps its label while busy, the way Re-extract beside it
+                  does. `busy` is one lock over all three writes, so a button
+                  that renamed itself to "Deleting…" would say so during a
+                  save the user started from the form below. */}
               Delete
             </button>
           </div>
@@ -556,8 +580,14 @@ export default function InvoiceDetailPage() {
               {/* Not disabled on invalid input. A disabled button gives no
                   reason it is disabled; letting the submit through is what
                   surfaces the per-field messages and the banner. */}
+              {/* "Working…", not "Saving…". `busy` is one lock over all three
+                  writes on this page, so the specific label was already a lie
+                  during a re-extract and would be a worse one during a delete
+                  — a button announcing a save over a row being removed. The
+                  three other pages that share a lock this way say the same
+                  thing for the same reason. */}
               <button type="submit" className="btn btn-primary" disabled={busy}>
-                {busy ? "Saving…" : "Save corrections"}
+                {busy ? "Working…" : "Save corrections"}
               </button>
             </div>
           )}

@@ -453,6 +453,150 @@ describe("InvoiceDetailPage", () => {
       );
       expect(screen.getByLabelText("Counterparty GSTIN")).toBeInTheDocument();
     });
+
+    describe("while the delete is still in flight", () => {
+      /**
+       * Leave the next request in flight for the rest of the test.
+       *
+       * Never answered on purpose. Every assertion below is about the state of
+       * the page *during* the request, and answering one at the end of the
+       * test lands its `setBusy(false)` — or its navigation — after the test
+       * body has returned, which is a React act() warning in every one of
+       * them. The unmount in `afterEach` is what ends these.
+       */
+      function holdNextRequest() {
+        global.fetch.mockImplementationOnce(() => new Promise(() => {}));
+      }
+
+      it("will not send a second delete for the same invoice", async () => {
+        // Delete used to be the one write here that never took the busy lock,
+        // so its own button stayed live for the length of its own request. A
+        // second click sent a second DELETE for a row already gone, and the
+        // 404 that earns banners "Invoice not found" over a deletion that had
+        // in fact just succeeded — a refusal describing nothing the user did.
+        const user = userEvent.setup();
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        await renderPage();
+        holdNextRequest();
+        const before = global.fetch.mock.calls.length;
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        await waitFor(() => expect(global.fetch.mock.calls).toHaveLength(before + 1));
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        expect(global.fetch.mock.calls).toHaveLength(before + 1);
+
+      });
+
+      it("locks the button rather than only ignoring the second click", async () => {
+        // Disabled, not merely inert: a live button that does nothing is how
+        // someone concludes the first click missed and keeps clicking.
+        const user = userEvent.setup();
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        await renderPage();
+        holdNextRequest();
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled(),
+        );
+      });
+
+      it("keeps its label while it is locked", async () => {
+        // `busy` is one lock across all three writes, so renaming this button
+        // to "Deleting…" would make it say so during a save started from the
+        // form below. Re-extract beside it keeps its label for the same
+        // reason; the disabled state is what carries the in-flight news.
+        const user = userEvent.setup();
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        await renderPage();
+        holdNextRequest();
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled(),
+        );
+        expect(screen.queryByRole("button", { name: /Deleting/ })).toBeNull();
+      });
+
+      it("locks the other two writes against the row being removed", async () => {
+        // Save and Re-extract were left clickable through a delete, which is
+        // the pair of requests that races to decide whether the invoice still
+        // exists: whether a PATCH is accepted after the DELETE, or refused by
+        // it, came down to which one the server happened to finish first.
+        const user = userEvent.setup();
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        await renderPage();
+        holdNextRequest();
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Re-extract" })).toBeDisabled(),
+        );
+        expect(screen.getByRole("button", { name: "Working…" })).toBeDisabled();
+      });
+
+      it("does not let the submit button claim a save is under way", async () => {
+        // It said "Saving…" off the shared lock, which was already untrue
+        // during a re-extract and is worse over a row being deleted. The other
+        // three pages that share a busy lock this way all say "Working…".
+        const user = userEvent.setup();
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        await renderPage();
+        holdNextRequest();
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+
+        await waitFor(() =>
+          expect(screen.getByRole("button", { name: "Working…" })).toBeInTheDocument(),
+        );
+        expect(screen.queryByRole("button", { name: /Saving/ })).toBeNull();
+      });
+
+      it("clears any earlier banner instead of leaving it over the attempt", async () => {
+        // The other two writes blank the error as they start. Without the same
+        // line here, a refusal from the previous attempt sits over a delete
+        // that is going through, and there is no way to tell the stale banner
+        // from a fresh one.
+        const user = userEvent.setup();
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        await renderPage();
+        global.fetch.mockResolvedValueOnce(
+          jsonResponse({ detail: "Invoice is part of a filed return" }, { status: 409 }),
+        );
+
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+        await waitFor(() => expect(screen.getByRole("alert")).toBeInTheDocument());
+
+        holdNextRequest();
+        await user.click(screen.getByRole("button", { name: "Delete" }));
+
+        await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+      });
+    });
+
+    it("gives the buttons back when the delete is refused", async () => {
+      // The lock has to be released in `finally`, or a refusal that a retry
+      // could clear — a period unlocked, a filing withdrawn — leaves a page
+      // whose only way forward is a reload.
+      const user = userEvent.setup();
+      vi.spyOn(window, "confirm").mockReturnValue(true);
+      await renderPage();
+      global.fetch.mockResolvedValueOnce(
+        jsonResponse({ detail: "Invoice is part of a filed return" }, { status: 409 }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Delete" }));
+
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Delete" })).toBeEnabled(),
+      );
+      expect(screen.getByRole("button", { name: "Re-extract" })).toBeEnabled();
+      expect(screen.getByRole("button", { name: "Save corrections" })).toBeEnabled();
+    });
   });
 
   describe("moving from one invoice to another", () => {
