@@ -70,16 +70,25 @@ def my_businesses(
     if home is not None and home.deleted_at is None:
         items.append(_out(home, role=current_user.role.value, is_home=True))
 
-    memberships = db.scalars(
-        select(BusinessMembership).where(
+    # Joined rather than walked. ``membership.business`` is a lazy
+    # relationship, so reading it inside the loop cost one SELECT per
+    # membership — invisible at the two or three registrations a practice
+    # starts with, and paid on every page load by the consultant with thirty
+    # client GSTINs, because the business switcher calls this endpoint.
+    #
+    # The join also moves the liveness filter into the database. A row cannot
+    # come back without its business, so the loop no longer needs a `is None`
+    # branch that only a broken foreign key could ever reach.
+    rows = db.execute(
+        select(BusinessMembership, Business)
+        .join(Business, Business.id == BusinessMembership.business_id)
+        .where(
             BusinessMembership.user_id == current_user.id,
             BusinessMembership.deleted_at.is_(None),
+            Business.deleted_at.is_(None),
         )
     ).all()
-    for membership in memberships:
-        business = membership.business
-        if business is None or business.deleted_at is not None:
-            continue
+    for membership, business in rows:
         items.append(_out(business, role=membership.role.value, is_home=False))
 
     return MyBusinessesOut(items=items)

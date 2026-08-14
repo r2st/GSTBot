@@ -10,14 +10,31 @@ as.
 """
 from __future__ import annotations
 
+from sqlalchemy import event
+
 from app.models.business import Business
 from app.models.business_membership import BusinessMembership
 from app.models.user import User, UserRole
+from app.services.gstin import compute_check_digit
 from tests.conftest import BUSINESS_GSTIN, TEST_EMAIL, TEST_PASSWORD
 
 SECOND_EMAIL = "owner-2@example.com"
 SECOND_PASSWORD = "anothersecret123"
 SECOND_GSTIN = "27AAGCB7383J2Z7"
+
+
+def _valid_gstin(index: int) -> str:
+    """A distinct checksum-valid GSTIN, for tests that need more than a couple.
+
+    Registration is not the subject of these tests but the check digit is
+    still enforced underneath them, so a made-up 15th character would fail on
+    the GSTIN rather than on what is being asserted. Built rather than listed
+    because a table of constants is one more thing to extend every time a test
+    wants one more business.
+    """
+    # 2 state + 10 PAN (5 letters, 4 digits, 1 letter) + 1 entity + "Z" = 14.
+    first14 = f"27AAGCB{7000 + index:04d}J1Z"
+    return first14 + compute_check_digit(first14)
 
 
 def register_second_business(client, *, email=SECOND_EMAIL, password=SECOND_PASSWORD,
@@ -99,6 +116,78 @@ class TestListingMyBusinesses:
         # The membership is untouched — it is the listing that filters, not the
         # delete that cleaned up after itself.
         assert db_session.query(BusinessMembership).count() == 1
+
+    def test_listing_costs_the_same_number_of_queries_at_one_link_and_at_many(
+        self, auth_client, db_session, business
+    ):
+        """The listing must not read the businesses table once per membership.
+
+        ``membership.business`` is a plain lazy relationship, so walking the
+        memberships in a loop emits one SELECT per row. Nobody sees it at the
+        two or three registrations a practice starts with, and the endpoint is
+        on the critical path of every page load — the business switcher calls
+        it — so the cost lands on a consultant with thirty client GSTINs and
+        on nobody who would report it.
+
+        Counting the reads at two sizes is what makes this a claim about the
+        shape of the query rather than about a number that a schema change
+        could shift for an unrelated reason. Same count at 1 as at 12, or the
+        loop is back.
+        """
+
+        def _reads_of_businesses_for(link_count: int, first_gstin: int) -> int:
+            user = db_session.query(User).filter_by(email=TEST_EMAIL).one()
+            # Only the memberships go: the businesses stay behind, so each
+            # sizing needs GSTINs of its own or the second insert collides
+            # with the first's rows on the unique index.
+            db_session.query(BusinessMembership).delete()
+            db_session.commit()
+            for index in range(first_gstin, first_gstin + link_count):
+                gstin = _valid_gstin(index)
+                linked = Business(
+                    gstin=gstin,
+                    legal_name=f"Linked {index} Pvt Ltd",
+                    state_code=gstin[:2],
+                )
+                db_session.add(linked)
+                db_session.flush()
+                db_session.add(
+                    BusinessMembership(
+                        user_id=user.id, business_id=linked.id, role=UserRole.OWNER
+                    )
+                )
+            db_session.commit()
+
+            # A real request opens its own session and shares nothing with the
+            # rows just written. Without this the lazy loads are answered out
+            # of the identity map, no SQL is emitted, and the N+1 the test
+            # exists to catch is invisible to it.
+            db_session.expunge_all()
+
+            reads: list[str] = []
+
+            def _record(conn, cursor, statement, parameters, context, executemany):
+                squashed = " ".join(statement.split()).lower()
+                if squashed.startswith("select") and "from businesses" in squashed:
+                    reads.append(squashed)
+
+            engine = db_session.get_bind()
+            event.listen(engine, "before_cursor_execute", _record)
+            try:
+                response = auth_client.get("/api/v1/businesses/mine")
+            finally:
+                event.remove(engine, "before_cursor_execute", _record)
+
+            assert response.status_code == 200, response.text
+            assert len(response.json()["items"]) == link_count + 1
+            return len(reads)
+
+        at_one = _reads_of_businesses_for(1, first_gstin=0)
+        at_twelve = _reads_of_businesses_for(12, first_gstin=100)
+        assert at_one == at_twelve, (
+            f"{at_one} reads of businesses for one link, {at_twelve} for twelve: "
+            "the listing is loading each membership's business on its own."
+        )
 
 
 # ---------------------------------------------------------------------------
