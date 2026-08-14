@@ -581,8 +581,21 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
 
         supplier_gstin = gstin_service.normalize(values.get("supplier_gstin", "")) or None
         invoice_number = (values.get("invoice_number") or "").strip() or None
-        if not supplier_gstin and not invoice_number:
-            continue  # A total row, or trailing notes under the table.
+        # A total row, or trailing notes under the table. The blank-cell test
+        # this used to be missed the commoner shape of one: a footer that puts
+        # its *label* in the first column, which is the supplier GSTIN column.
+        # "Total" normalised to "TOTAL", passed as a supplier, and the row's
+        # figures — which are the section's own figures again — were added to
+        # the statement a second time. A two-invoice export came out with three
+        # documents and twice the credit, and reconciliation reported the extra
+        # one as a portal document missing from the books.
+        #
+        # So a row earns its place by carrying a document number, or by naming
+        # a supplier that is actually a GSTIN. A real 2B row always does one:
+        # every supplier in a statement is a live registration, and the check
+        # digit is what a footer label cannot fake.
+        if not invoice_number and not gstin_service.is_valid(supplier_gstin or ""):
+            continue
 
         # Only the class of document goes in the key, not the spelling: "C",
         # "Credit note" and "CRED" are one class, and splitting on the wording
