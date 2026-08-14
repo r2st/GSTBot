@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from app.core.config import settings
 from app.core.errors import error_body, error_code
 from app.main import app
+from tests.conftest import SUPPLIER_GSTIN_SAME_STATE
 
 # A router of routes that fail in each of the ways the handlers care about.
 # Mounted once at import; the paths are namespaced so they cannot collide with
@@ -419,3 +420,113 @@ def test_a_dict_detail_without_a_message_key_falls_back_to_the_whole_dict():
     body = error_body(409, detail={"conflict": "arn already recorded"})
 
     assert "arn already recorded" in body["error"]["message"]
+
+
+class TestEveryGuardedRouteRefusesInTheSameShape:
+    """The envelope, swept over the route table rather than sampled.
+
+    Every test above proves one *handler* produces the shape. None of them
+    proves every *route* leaves through those handlers, and that is the half
+    that rots: a route can answer 401 from somewhere other than the shared
+    dependency — a middleware, a hand-rolled check, a `return JSONResponse(...)`
+    — and be perfectly correct about the status while carrying none of
+    ``error.code``, ``error.status`` or ``correlation_id``. A client that
+    branches on ``error.code`` rather than on the prose then has one endpoint
+    it cannot read, and nothing fails until someone hits that endpoint signed
+    out.
+
+    401 is the condition used because it is the only failure every guarded
+    route can be put into without knowing anything about its body, its
+    tenant's data, or what a valid request to it looks like.
+
+    ``tests/test_request_guards.py`` sweeps the same table for whether each
+    route *depends* on the guard. This one sweeps what the wire actually says,
+    which is what a client sees.
+    """
+
+    # Enough to fill any path in the table. Ids are 1 rather than a real row's:
+    # the refusal has to land before anything is looked up, so a value that
+    # names no row is the stronger input — if one of these ever 404s, the auth
+    # check ran after the lookup and the sweep has found that too.
+    PATH_VALUES = {
+        "alert_id": "1",
+        "business_id": "1",
+        "invoice_id": "1",
+        "run_id": "1",
+        "supplier_id": "1",
+        "period": "2026-04",
+        "return_type": "gstr3b",
+        "extension": "json",
+        "gstin": SUPPLIER_GSTIN_SAME_STATE,
+    }
+
+    def _guarded_routes(self):
+        from app.core.deps import get_current_business, get_current_user
+        from tests.test_route_contracts import API_ROUTES
+
+        def calls(dependant):
+            yield dependant.call
+            for sub in dependant.dependencies:
+                yield from calls(sub)
+
+        for route in API_ROUTES:
+            if route.path.startswith("/_"):
+                continue
+            if not {get_current_business, get_current_user} & set(calls(route.dependant)):
+                continue
+            path = route.path
+            for name, value in self.PATH_VALUES.items():
+                path = path.replace("{" + name + "}", value)
+            for method in sorted(route.methods):
+                yield method, path
+
+    def test_the_sweep_finds_routes_to_check(self):
+        # A generator that yields nothing passes everything below.
+        found = list(self._guarded_routes())
+        assert len(found) > 20, found
+        assert "{" not in "".join(path for _, path in found), (
+            "a path parameter had no stand-in value, so the URL is not real: "
+            + str([p for _, p in found if "{" in p])
+        )
+
+    def test_every_guarded_route_refuses_with_the_full_envelope(self, raw_client):
+        wrong = []
+        for method, path in self._guarded_routes():
+            response = raw_client.request(method, path, json={})
+            if response.status_code != 401:
+                wrong.append(f"{method} {path} -> {response.status_code}")
+                continue
+            body = response.json()
+            if not {"detail", "error", "correlation_id"} <= set(body):
+                wrong.append(f"{method} {path} -> keys {sorted(body)}")
+            elif body["error"].get("code") != "unauthorized":
+                wrong.append(f"{method} {path} -> code {body['error'].get('code')}")
+            elif body["error"].get("status") != 401:
+                wrong.append(f"{method} {path} -> status {body['error'].get('status')}")
+            elif not body["correlation_id"]:
+                wrong.append(f"{method} {path} -> empty correlation_id")
+        assert not wrong, "these did not refuse in the shared shape: " + "; ".join(wrong)
+
+    def test_every_refusal_carries_the_correlation_id_as_a_header_too(self, raw_client):
+        """Support quotes the header when the body is what is in doubt."""
+        missing = [
+            f"{method} {path}"
+            for method, path in self._guarded_routes()
+            if not raw_client.request(method, path, json={}).headers.get("X-Request-ID")
+        ]
+        assert not missing, missing
+
+    def test_no_refusal_names_what_it_was_protecting(self, raw_client):
+        """A 401 must not distinguish "no such row" from "not yours".
+
+        The tenancy rule is that a cross-tenant read is a 404 and never a 403,
+        because ids are sequential and a confirmed id is a countable one. The
+        same reasoning applies before sign-in: every one of these is asked for
+        a row id that does not exist, and none of them may say so.
+        """
+        leaks = []
+        for method, path in self._guarded_routes():
+            detail = str(raw_client.request(method, path, json={}).json().get("detail", ""))
+            if any(word in detail.lower() for word in ("not found", "no such", "does not exist")):
+                leaks.append(f"{method} {path} -> {detail}")
+        assert not leaks, leaks
