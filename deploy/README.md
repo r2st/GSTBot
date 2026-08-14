@@ -202,19 +202,17 @@ fails and Caddy retries with a backoff.
 
 ## Releasing
 
-A release is two commands: push the tree, then run the script.
+A release is one command, run on the server:
 
 ```sh
-# from a workstation, in the repository root — the step-4 rsync
-rsync -az --delete --no-owner --no-group \
-    --exclude .venv --exclude node_modules --exclude dist \
-    --exclude __pycache__ --exclude .pytest_cache \
-    -e "ssh -i path/to/hetzner_deploy_ed25519" \
-    ./ root@89.167.8.178:/opt/GSTBot/
-
-# on the server
-/opt/GSTBot/deploy/deploy.sh
+/opt/GSTBot/deploy/deploy.sh              # origin/main
+/opt/GSTBot/deploy/deploy.sh v1.2.0       # a tag or a sha
 ```
+
+Push to `main` first — that is what the no-argument form releases. A read-only
+deploy key for `r2st/GSTBot` lives on the box and is pinned in the checkout's
+`core.sshCommand`, so `deploy.sh` fetches and checks out `origin/main` itself.
+Nothing has to be copied from a workstation.
 
 The script installs the locked dependencies, builds the frontend, takes a
 database dump, migrates, restarts the services and then checks readiness on the
@@ -233,35 +231,36 @@ GSTBOT_SKIP_BACKUP=1 /opt/GSTBot/deploy/deploy.sh
 
 which migrates with no restore point and says so.
 
-**It does not fetch, because this box cannot.** The repository is private and
-the box holds no credential, so `git fetch origin` answers 401. What ships is
-therefore the tree in `/opt/GSTBot` exactly as rsync left it, and the script
-says so on the way past:
+**Watch the source line, because the fallback is quiet.** If the fetch fails,
+`deploy.sh` does not stop — it releases the tree already in `/opt/GSTBot`, which
+is the supported path on a box holding no credential and the wrong one here:
 
 ```
 ==> Selecting the release source
+warning: cannot fetch origin, so /opt/GSTBot will be released as it stands:
+warning:   git@github.com: Permission denied (publickey).
 No reachable remote — releasing the tree already in /opt/GSTBot
 Deploying ff2412c
 ```
 
-The revision is still a real one: the rsync copies `.git` along with
-everything else, so `HEAD` on the box is the workstation's `HEAD`. If the tree
-had uncommitted changes when it was pushed, the line reads `ff2412c-dirty` and
-a warning goes with it — which is the whole reason to release from a clean
-checkout of `main`.
+That is a stale release reporting success, and it has happened: `43c4976` fixed
+a `GIT_SSH_COMMAND` export that replaced the pinned `core.sshCommand` instead of
+extending it, throwing the deploy key away on every fetch. The box sat twelve
+commits behind across five green releases. The two warning lines are there
+because a box whose key broke and a box that never had one look identical from
+the outside, and only the first ships code nobody chose.
 
-Installing a read-only deploy key for `r2st/GSTBot` in
-`/root/.ssh` is still the better end state, and nothing has to change here to
-take it: the script tries the fetch first and only falls back when it fails.
-With a key, `deploy.sh` releases `origin/main` on its own and
+So the check after a release is `Deploying <sha>` against what you pushed. A
+`-dirty` suffix means the checkout has uncommitted changes and they are going
+out too. If the fetch is what broke, `git -C /opt/GSTBot fetch origin` by hand
+says why, and `git -C /opt/GSTBot config --get core.sshCommand` should name the
+deploy key.
 
-```sh
-/opt/GSTBot/deploy/deploy.sh v1.2.0       # a tag or sha
-```
-
-starts working — an explicit ref is the one thing rsync cannot substitute for,
-and the script refuses it with a message rather than releasing the wrong tree.
-The rollback below assumes it too.
+Pushing the tree by hand — the step-4 `rsync` — is still how a box with no
+remote is released, and still how this one is bootstrapped before the key is in
+place. An explicit ref is the one thing it cannot substitute for: `deploy.sh
+v1.2.0` needs a remote and refuses with a message rather than releasing the
+wrong tree. The rollback below assumes one too.
 
 It builds in place rather than blue/green. On a 4 GB box shared with three
 other products, keeping N releases of `node_modules` and a second copy of the

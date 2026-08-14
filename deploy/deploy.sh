@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Release GSTBot on the Hetzner box. Run as root:
 #
-#   /opt/GSTBot/deploy/deploy.sh              # release the tree that is in /opt
+#   /opt/GSTBot/deploy/deploy.sh              # release origin/main
 #   /opt/GSTBot/deploy/deploy.sh v1.2.0       # deploy a tag or sha, needs a remote
 #
 # First-time server setup is in deploy/README.md; this script assumes it has
@@ -130,8 +130,8 @@ elif have_checkout && fetch_origin; then
     git -C "$ROOT" checkout --detach origin/main
     echo "Checked out origin/main"
 else
-    # The ordinary path on this box today. Nothing is fetched and nothing is
-    # checked out; the tree is released exactly as rsync left it.
+    # The fallback, not the expected path — see the header. Nothing is fetched
+    # and nothing is checked out; the tree is released exactly as rsync left it.
     echo "No reachable remote — releasing the tree already in $ROOT"
 fi
 
