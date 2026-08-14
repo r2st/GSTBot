@@ -53,6 +53,35 @@ def sale(db, business_id, *, taxable="100000.00", igst="18000.00", number=None) 
     return invoice
 
 
+def buy(db, business_id, *, taxable="50000.00", igst="9000.00", cgst="0.00", sgst="0.00",
+        number=None) -> Invoice:
+    """A creditable purchase, so the period has a credit side to net against."""
+    invoice = Invoice(
+        business_id=business_id,
+        invoice_type=InvoiceType.PURCHASE,
+        status=InvoiceStatus.PARSED,
+        counterparty_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+        counterparty_name="Northwind Supplies",
+        invoice_number=number or f"P-{db.query(Invoice).count() + 1}",
+        invoice_date=date(2026, 4, 12),
+        period=PERIOD,
+        place_of_supply="29",
+        hsn_code="84713010",
+        tax_rate=Decimal("18"),
+        taxable_value=Decimal(taxable),
+        cgst=Decimal(cgst),
+        sgst=Decimal(sgst),
+        igst=Decimal(igst),
+        cess=Decimal("0.00"),
+        total_value=Decimal(taxable) + Decimal(igst) + Decimal(cgst) + Decimal(sgst),
+        itc_eligible=True,
+        reverse_charge=False,
+    )
+    db.add(invoice)
+    db.commit()
+    return invoice
+
+
 def late_fee_url(return_type="gstr3b", **params):
     query = "&".join(f"{k}={v}" for k, v in params.items())
     url = f"/api/v1/filing/{return_type}/late-fee?period={PERIOD}"
@@ -79,6 +108,16 @@ class TestInterest:
         # ₹1,00,000 at 18% p.a. for 30 days: 100000 * 0.18 * 30 / 365.
         expected = (Decimal("100000") * Decimal("0.18") * 30 / 365).quantize(Decimal("0.01"))
         assert late_fee_service.interest(Decimal("100000.00"), days_late=30) == expected
+
+    def test_the_first_day_late_is_charged_rather_than_written_off(self):
+        # The other side of "no interest before the due date". Asserting only
+        # the zero side leaves the guard free to swallow a day — `days_late
+        # <= 1` passes every test above it — and day one is the day the
+        # overwhelming majority of late payments land on, so the day written
+        # off would be the one that is nearly always the whole charge.
+        expected = (Decimal("100000") * Decimal("0.18") / 365).quantize(Decimal("0.01"))
+        assert late_fee_service.interest(Decimal("100000.00"), days_late=1) == expected
+        assert expected > Decimal("0.00")
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +170,38 @@ class TestLateFee:
         fee = late_fee_service.late_fee(days_late=1, is_nil=False)
         assert fee.cgst + fee.sgst == fee.total
 
+    def test_the_first_day_late_is_charged_rather_than_forgiven(self):
+        # The sum-to-total check above is satisfied by two zeroes, so on its
+        # own it does not say a one-day-late return is charged at all. Day one
+        # is the common case — a return filed the morning after the 20th — and
+        # a guard that let it through would waive the fee nearly every time it
+        # was owed.
+        fee = late_fee_service.late_fee(1, is_nil=False)
+        assert fee.total == Decimal("50.00")
+        assert (fee.cgst, fee.sgst) == (Decimal("25.00"), Decimal("25.00"))
+
+    def test_a_turnover_exactly_on_a_tier_boundary_stays_in_the_lower_tier(self):
+        # The bands are written as "up to ₹1.5 crore", which includes a
+        # business sitting exactly on ₹1.5 crore. A strict comparison would
+        # move precisely the filers who report a round number — the ones most
+        # likely to land on the line — one tier up, and charge them a cap two
+        # and a half times what they owe.
+        for turnover, cap in (
+            (Decimal("15000000"), Decimal("2000.00")),
+            (Decimal("50000000"), Decimal("5000.00")),
+        ):
+            fee = late_fee_service.late_fee(
+                days_late=1000, is_nil=False, previous_year_turnover=turnover
+            )
+            assert fee.total == cap, turnover
+
+        # A paisa over the line is the next tier up, which is what makes the
+        # equality above a boundary rather than a coincidence.
+        over = late_fee_service.late_fee(
+            days_late=1000, is_nil=False, previous_year_turnover=Decimal("15000000.01")
+        )
+        assert over.total == Decimal("5000.00")
+
 
 # ---------------------------------------------------------------------------
 # The combined estimate
@@ -159,6 +230,49 @@ class TestEstimate:
         assert result.days_late == 26
         assert result.fee.total == Decimal("1300.00")  # 26 * 50, under every cap
         assert result.interest_amount > Decimal("0.00")
+
+    def test_interest_runs_on_the_cash_shortfall_not_on_the_output_tax(
+        self, db_session, business, frozen_today
+    ):
+        # s.50(1) charges interest on the tax actually paid late, and what is
+        # paid in cash is output tax less the credit claimed against it. Every
+        # test above this one has a sales side and no purchases, so the two
+        # bases coincide and nothing distinguishes them: the credit could be
+        # added to the base instead of subtracted and the suite would agree.
+        # A business with ₹18,000 of output tax and ₹9,000 of credit pays
+        # ₹9,000 in cash, and it is that figure interest runs on.
+        sale(db_session, business.id)  # IGST 18,000 out
+        buy(db_session, business.id)  # IGST  9,000 creditable
+
+        result = late_fee_service.estimate(
+            db_session, business, PERIOD, ReturnType.GSTR3B
+        )
+        assert result.net_tax_liability == Decimal("9000.00")
+        assert result.interest_amount == late_fee_service.interest(
+            Decimal("9000.00"), result.days_late
+        )
+
+    def test_credit_on_one_head_does_not_wipe_out_the_liability_on_another(
+        self, db_session, business, frozen_today
+    ):
+        # Netting is per head and floored there, not over the total: a head
+        # where credit exceeds liability carries the excess forward rather
+        # than offsetting a different head. Summing first and flooring once
+        # would read this period as owing ₹8,000 in cash when the IGST due is
+        # ₹18,000 and the CGST/SGST credit is not available against it here.
+        sale(db_session, business.id)  # IGST 18,000 out, nothing on CGST/SGST
+        buy(
+            db_session,
+            business.id,
+            igst="0.00",
+            cgst="5000.00",
+            sgst="5000.00",
+        )
+
+        result = late_fee_service.estimate(
+            db_session, business, PERIOD, ReturnType.GSTR3B
+        )
+        assert result.net_tax_liability == Decimal("18000.00")
 
     def test_gstr1_carries_no_interest(self, db_session, business, frozen_today):
         sale(db_session, business.id)
