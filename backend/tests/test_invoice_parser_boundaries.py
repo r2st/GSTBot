@@ -604,9 +604,12 @@ class TestTheEdgesThatCannotMove:
     the mutant equivalent, so that the day it stops being true, this goes red
     rather than a mutation score quietly improving.
 
-    With the two below, this class now accounts for every one of the nine
-    survivors the module has left: `invoice_parser` is at its ceiling at 95.8%,
-    and the figure will not move again without the code moving first.
+    Membership here is a claim that has to be earned rather than assumed. One
+    of the entries below was written claiming both mutants of the line-break
+    offset were equivalent; only one of them is, and the other is killed by
+    TestAMarkerIsOnlyAMarkerOnItsOwnLine. A mutant is listed here only after
+    the input that would distinguish it has been looked for and shown not to
+    exist — not after it failed to come to mind.
     """
 
     def test_the_fraction_window_is_bounded_by_two_rates_that_are_real(self):
@@ -636,22 +639,20 @@ class TestTheEdgesThatCannotMove:
             round(found / 5 * 0.6, 2) for found in range(6)
         ]
 
-    def test_the_line_a_label_sits_on_cannot_start_before_the_document(self):
-        # ``text.rfind("\n", 0, start) + 1`` bounds the window the reference
-        # and e-way markers are looked for in. Both mutants of it — searching
-        # from 1 instead of 0, and stepping back over the newline instead of
-        # past it — only ever widen that window by the newline itself and the
-        # character before it, and every marker pattern is a word ending at the
-        # label. There is no marker a newline can be the first character of, so
-        # neither mutant can change what is skipped.
+    def test_the_search_for_the_line_break_may_start_at_the_first_character(self):
+        # ``text.rfind("\n", 0, start)`` searching from 1 instead of 0 can only
+        # miss a newline at index 0 — that is, one belonging to a document that
+        # opens with a blank line. Missing it leaves the window starting at the
+        # newline rather than after it, which widens it by that one character,
+        # and no marker pattern can begin with a newline. So this half of the
+        # offset is unobservable; the other half is not, and is asserted in
+        # TestAMarkerIsOnlyAMarkerOnItsOwnLine below.
         assert invoice_parser._REFERENCE_PREFIX.search("\n") is None
         assert invoice_parser._EWAY_PREFIX.search("\n") is None
         assert invoice_parser._OTHER_DATE_PREFIX.search("\n") is None
-        # And the widening is not reachable from the other end either. A label
-        # on the first line has no newline before it, so the offset falls to
-        # the start of the document either way and the marker on that line is
-        # still read; a document that opens with a blank line puts the newline
-        # at index 0, where searching from 1 instead skips only itself.
+        # A label on the first line has no newline before it at all, so the
+        # window falls to the start of the document by either route and the
+        # marker printed on that line is still read.
         assert _invoice_number_in("Ref Invoice No: OLD-1\nInvoice No: REAL-1") == "REAL-1"
         assert _invoice_number_in("\nRef Invoice No: OLD-1\nInvoice No: REAL-1") == "REAL-1"
 
@@ -668,3 +669,56 @@ class TestTheEdgesThatCannotMove:
             )
         )
         assert not [w for w in parsed.warnings if "supply taxed as" in w]
+
+
+class TestAMarkerIsOnlyAMarkerOnItsOwnLine:
+    """A line break between a marker's letters does not make one.
+
+    `_invoice_number_in` and `_invoice_date_in` both look for the "this number
+    belongs to another document" markers in the window
+    ``text.rfind("\\n", 0, start) + 1`` to the label — that is, the part of the
+    label's *own* line that precedes it. The ``+ 1`` is what stops the window
+    at the line break, and it is load-bearing rather than cosmetic.
+
+    Two of the markers are spelled with optional whitespace between their
+    letters, because they are printed both ways: `w.r.t.` is written "w r t"
+    and `P.O.` is written "P O". That whitespace is ``\\s*``, which matches a
+    newline as readily as a space. So a window that reached back past the line
+    break could assemble a marker out of two lines — the last letter of one and
+    the first of the next — and the value under a perfectly ordinary label
+    would be discarded as another document's.
+
+    That is not a hypothetical shape. Text extracted from a PDF is broken into
+    lines by geometry rather than by grammar, so which characters end up
+    adjacent across a break is decided by column widths, and a two-column
+    layout puts the end of the left column immediately before the start of the
+    right one. The two documents below are what that produces, and each is read
+    correctly only because the window stops where it does.
+    """
+
+    def test_a_letter_ending_the_line_above_does_not_become_a_w_r_t_marker(self):
+        # "Grade W" ends the line; "rt" opens the next. Reach one character
+        # back over the break and `\bw\.?\s*r\.?\s*t\.?` matches "W\nrt",
+        # marking the invoice's own number as a reference to another document —
+        # and `_invoice_number_in` returns None for an invoice that plainly
+        # carries one.
+        text = "Grade W\nrt Invoice No: REAL-1"
+        assert _invoice_number_in(text) == "REAL-1"
+
+    def test_a_letter_ending_the_line_above_does_not_become_a_p_o_marker(self):
+        # The same break, against the date side and the `P.O.` spelling: "P"
+        # ends the line and "o" opens the next, and `\bp\.?\s*o\.?` spans them.
+        # A marked date is not dropped but deferred behind every unmarked one,
+        # so the cost here is not an empty field — it is the wrong date read
+        # confidently, which is worse. The document's own date is the 15th; the
+        # second one below is what it would be answered with instead.
+        text = "Godown P\no Invoice Date: 15/04/2026\nInvoice Date: 20/05/2026"
+        assert _invoice_date_in(text) == date(2026, 4, 15)
+
+    def test_the_marker_spellings_this_rests_on_are_still_split_by_whitespace(self):
+        # The two tests above are only meaningful while the markers are written
+        # letter-by-letter with `\s*` between. Were either respelled to a fixed
+        # string, they would keep passing while asserting nothing — so the
+        # property they depend on is pinned here rather than left implicit.
+        assert invoice_parser._REFERENCE_PREFIX.search("w r t ") is not None
+        assert invoice_parser._OTHER_DATE_PREFIX.search("p o ") is not None
