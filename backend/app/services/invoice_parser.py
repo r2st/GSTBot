@@ -915,6 +915,31 @@ _TAX_LABELS = {
 }
 _PERCENT_PATTERN = re.compile(r"(\d{1,2}(?:\.\d{1,2})?)\s*%")
 
+# Both money labels below are spaced with :data:`_SAME_LINE_SPACE` rather than
+# ``\s``, for the reason the tax labels above are read a line at a time: a label
+# and its amount sit on one line, and ``\s`` does not stop at the line break.
+#
+# What that cost was a summary block printed as two columns — headings on one
+# line, their figures on the next, which is how a great many tax invoices print
+# it:
+#
+#     Taxable Value:      Grand Total:
+#     1,00,000.00         1,18,000.00
+#
+# "Grand Total:" matched, ``\s*`` walked over the line break, and the first
+# amount it reached was the one under the *other* heading. The grand total was
+# stored as the taxable value — understated by exactly the tax. "Taxable
+# Value:" meanwhile matched nothing, because the words "Grand Total:" stood
+# between it and any figure, so it stayed at zero.
+#
+# Nothing said so. The footing check in :func:`validate` is the one thing that
+# would have caught a total that is not taxable plus tax, and it only runs when
+# both figures are non-zero — so the zero this left behind is exactly what
+# switched off the check that would have found it. The invoice stored ₹0
+# taxable against ₹18,000 of tax and filed at the wrong invoice value, with no
+# warning on the review screen to say a figure had been read from the wrong
+# column.
+#
 # "Assessable Value" is customs' own name for the figure duty is charged on —
 # rule 3 of the Customs Valuation Rules uses it, so an import invoice, or one
 # from a supplier whose template also handles imports, prints this rather than
@@ -925,8 +950,12 @@ _PERCENT_PATTERN = re.compile(r"(\d{1,2}(?:\.\d{1,2})?)\s*%")
 # check exists to catch and cannot here — that check only runs when *both*
 # figures are non-zero.
 _TAXABLE_PATTERN = re.compile(
-    rf"(?:taxable\s*(?:value|amount)|assessable\s*value|sub\s*-?\s*total|net\s*amount)"
-    rf"\s*[:.\-]?\s*(?:INR|Rs\.?|₹)?\s*{_AMOUNT}",
+    rf"(?:taxable{_SAME_LINE_SPACE}*(?:value|amount)"
+    rf"|assessable{_SAME_LINE_SPACE}*value"
+    rf"|sub{_SAME_LINE_SPACE}*-?{_SAME_LINE_SPACE}*total"
+    rf"|net{_SAME_LINE_SPACE}*amount)"
+    rf"{_SAME_LINE_SPACE}*[:.\-]?{_SAME_LINE_SPACE}*"
+    rf"(?:INR|Rs\.?|₹)?{_SAME_LINE_SPACE}*{_AMOUNT}",
     re.IGNORECASE,
 )
 
@@ -956,9 +985,13 @@ _TAXABLE_PATTERN = re.compile(
 # label, and none of those three has one: the word that follows is not a
 # number, so the match fails right there regardless of position on the line.
 _TOTAL_PATTERN = re.compile(
-    rf"(?:grand\s*total|total\s*(?:invoice\s*)?(?:value|amount)|amount\s*payable|invoice\s*total"
-    rf"|net\s*payable|^[ \t]*total)"
-    rf"\s*[:.\-]?\s*(?:INR|Rs\.?|₹)?\s*{_AMOUNT}",
+    rf"(?:grand{_SAME_LINE_SPACE}*total"
+    rf"|total{_SAME_LINE_SPACE}*(?:invoice{_SAME_LINE_SPACE}*)?(?:value|amount)"
+    rf"|amount{_SAME_LINE_SPACE}*payable"
+    rf"|invoice{_SAME_LINE_SPACE}*total"
+    rf"|net{_SAME_LINE_SPACE}*payable|^[ \t]*total)"
+    rf"{_SAME_LINE_SPACE}*[:.\-]?{_SAME_LINE_SPACE}*"
+    rf"(?:INR|Rs\.?|₹)?{_SAME_LINE_SPACE}*{_AMOUNT}",
     re.IGNORECASE | re.MULTILINE,
 )
 _HSN_PATTERN = re.compile(r"\b(?:HSN|SAC)(?:\s*/\s*SAC)?\s*(?:code)?\s*[:.\-]?\s*(\d{4,8})\b",

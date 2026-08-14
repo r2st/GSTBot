@@ -1123,3 +1123,76 @@ class TestTheHsnColumnReader:
 
     def test_a_column_heading_with_no_table_under_it_reads_nothing(self):
         assert parse_heuristic(self._table("")).hsn_code is None
+
+
+class TestASummaryPrintedAsTwoColumns:
+    """Headings on one line, their figures on the next.
+
+    This is not an exotic layout — it is how a great many tax invoices print
+    the summary block, for the same reason the item table prints its headings
+    once at the top. It is kept out of `CORPUS` above because the corpus
+    requires every layout to state a total it reads, and the point of this one
+    is the opposite: what a *wrong* reading of it costs.
+
+    Reading the block properly needs the column geometry
+    :class:`TestTheHsnColumnReader` has and the money labels do not, so both
+    figures go unread here. That is the outcome this class fixes in place, and
+    the reason to fix it is that the alternative is not "unread" — it is the
+    figure from the neighbouring column, stored as if it had been printed under
+    the label that did not carry it.
+    """
+
+    HEAD = f"""\
+UMANG TRADERS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+TAX INVOICE
+Invoice No: UT/26-27/0001
+Invoice Date: 15/04/2026
+Bill To: NORTHWIND SUPPLIES
+GSTIN: {BUSINESS_GSTIN}
+CGST 9%: 9,000.00
+SGST 9%: 9,000.00
+"""
+
+    TWO_COLUMN = HEAD + """
+Taxable Value:      Grand Total:
+1,00,000.00         1,18,000.00
+"""
+
+    ONE_PER_LINE = HEAD + """
+Taxable Value: 1,00,000.00
+Grand Total: 1,18,000.00
+"""
+
+    def test_the_grand_total_is_not_read_from_the_column_beside_it(self):
+        # The figure under "Taxable Value" is ₹1,00,000 and the grand total is
+        # ₹1,18,000. Matching "Grand Total:" and then stepping over the line
+        # break takes the first amount on the next line, which is the wrong
+        # column's — understating the invoice by exactly the tax on it.
+        parsed = parse_heuristic(self.TWO_COLUMN)
+        assert parsed.total_value != money("100000.00")
+
+    def test_neither_money_figure_is_taken_from_the_wrong_column(self):
+        parsed = parse_heuristic(self.TWO_COLUMN)
+        assert parsed.taxable_value == ZERO
+        assert parsed.total_value == ZERO
+
+    def test_the_rest_of_the_document_is_still_read(self):
+        # The refusal is confined to the two figures whose column cannot be
+        # told apart. A layout that lost its date or its GSTINs as well would
+        # be a worse answer than the one this replaced.
+        parsed = parse_heuristic(self.TWO_COLUMN)
+        assert parsed.invoice_number == "UT/26-27/0001"
+        assert parsed.invoice_date == date(2026, 4, 15)
+        assert parsed.supplier_gstin == SUPPLIER_GSTIN_SAME_STATE
+        assert parsed.buyer_gstin == BUSINESS_GSTIN
+        assert parsed.cgst == money("9000.00")
+        assert parsed.sgst == money("9000.00")
+
+    def test_the_same_figures_one_to_a_line_are_both_read(self):
+        # Same wording, same amounts, same order — only the geometry differs.
+        # So what the two tests above assert is the line break and not some
+        # spelling of the labels this file failed to include.
+        parsed = parse_heuristic(self.ONE_PER_LINE)
+        assert parsed.taxable_value == money("100000.00")
+        assert parsed.total_value == money("118000.00")
