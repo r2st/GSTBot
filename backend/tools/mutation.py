@@ -381,6 +381,10 @@ TARGETS: tuple[Target, ...] = (
             # because the other two files ride on one sample invoice each.
             "tests/test_invoice_formats.py",
             "tests/test_money_bounds.py",
+            # The boundaries the three files above read *through* rather than
+            # at: the character a column reaches to, the length a field is cut
+            # at, the rupee a footing check lets pass.
+            "tests/test_invoice_parser_boundaries.py",
         ),
     ),
     Target(
