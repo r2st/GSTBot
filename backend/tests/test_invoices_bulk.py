@@ -398,14 +398,21 @@ class TestTheBatchAndTheSingleUploadAgree:
 
 
 class TestTheBatchDoesNotRereadTheTenantPerFile:
-    """The tenant's own GSTIN is the same on all fifty files in a batch.
+    """Nothing about the tenant changes between the files of one batch.
 
-    ``apply_parsed`` needs it to tell which side of the invoice is the
-    counterparty, and used to walk ``invoice.business`` for it. That
-    relationship is lazy and ``process_invoice`` commits immediately before
-    reaching it — a commit expires every instance in the session, so the walk
-    was a fresh ``SELECT`` on ``businesses`` for *every* file rather than just
-    the first. It is read once per request now and threaded down.
+    Two separate reads used to happen per file, for the same reason and by
+    different routes. ``apply_parsed`` walked ``invoice.business`` for the
+    tenant's own GSTIN; ``check_plan_limit`` read ``business.plan``. Both are
+    lazy loads off an instance that every file's commit expires, so both were a
+    fresh ``SELECT`` on ``businesses`` for *every* file rather than just the
+    first — fifty round trips each, through a fifty-file batch, for two values
+    that cannot change between them.
+
+    The fix that holds is not fetching either one earlier but not touching the
+    row at all: expiry is per instance, so the first attribute read after a
+    commit reloads the whole thing and removing one of the two would simply
+    have moved the read onto the other. ``TenantSnapshot`` is taken once,
+    before the loop, and the loop sees plain data.
 
     Only the inline path does this at all: with a live broker each file goes
     to its own Celery task, one invoice per task. The suite runs with Redis
@@ -435,26 +442,32 @@ class TestTheBatchDoesNotRereadTheTenantPerFile:
             event.remove(engine, "before_cursor_execute", _record)
         return len(reads)
 
-    def test_the_extraction_no_longer_reads_the_business_for_each_file(
+    def test_a_batch_costs_the_same_reads_of_the_tenant_however_many_files(
         self, auth_client, db_session
     ):
-        """One read per file, where there used to be two.
+        """Flat, not merely flatter.
 
-        A ratchet rather than a flat line, because one per-file read is still
-        there and this test would be a lie if it claimed otherwise:
-        ``check_plan_limit`` reads ``business.plan``, and ``business`` is
-        expired by each file's commit exactly as it was before. That one is
-        worth removing the same way and is not removed here.
-
-        Stated as the *slope* so it still fails for the bug it is about: if
-        extraction goes back to walking ``invoice.business``, six more files
-        cost twelve more reads instead of six.
+        Stated as the *slope* rather than as a total, because the total is a
+        fact about how many times a request resolves its tenant — which the
+        role gate and the dependency cache both bear on — and this test is
+        about none of that. Six more files must cost no more reads at all.
         """
         at_two = self._business_reads(auth_client, db_session, 2, "TWO")
         at_eight = self._business_reads(auth_client, db_session, 8, "EIGHT")
 
-        assert at_eight - at_two == 6, (
+        assert at_eight == at_two, (
             f"{at_two} reads of businesses for two files and {at_eight} for eight — "
-            f"{(at_eight - at_two) / 6:g} per extra file rather than 1. Extraction is "
-            "reading the tenant per file again."
+            f"{(at_eight - at_two) / 6:g} per extra file rather than 0. Something in "
+            "the loop is touching the expired Business row again."
         )
+
+    def test_the_tenant_is_read_once_for_the_whole_batch(self, auth_client, db_session):
+        """And that the flat line above is flat at one, not at a stale zero.
+
+        A cached ``Business`` that the session never expired would also make
+        the slope zero while meaning the opposite — that the loop is reading a
+        row nothing has refreshed since the request began. One read per
+        request is the tenant being resolved by ``get_active_tenant``, which is
+        exactly where it should happen and nowhere else.
+        """
+        assert self._business_reads(auth_client, db_session, 6, "SIX") == 1

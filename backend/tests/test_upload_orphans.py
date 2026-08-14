@@ -56,7 +56,7 @@ def business(db_session) -> Business:
 def _create(db, business, *, content: bytes = b"a bill"):
     return invoice_service.create_pending_invoice(
         db,
-        business,
+        invoice_service.TenantSnapshot.of(business),
         content=content,
         filename="bill.txt",
         content_type="text/plain",

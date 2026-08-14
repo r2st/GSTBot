@@ -10,6 +10,7 @@ import hashlib
 import logging
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -121,12 +122,53 @@ def plan_limit(business: Business) -> int:
     return settings.plan_limits.get(str(business.plan.value), 0)
 
 
-def check_plan_limit(db: Session, business: Business) -> None:
-    """Raise :class:`PlanLimitExceeded` if the tenant is at their cap."""
-    limit = plan_limit(business)
-    if limit and monthly_usage(db, business.id) >= limit:
+@dataclass(frozen=True)
+class TenantSnapshot:
+    """The tenant facts an upload needs, lifted out of the session.
+
+    Storing an invoice commits, and a commit expires every instance in the
+    session — so a ``Business`` attribute read inside a batch loop is a fresh
+    ``SELECT`` on ``businesses`` for a value that cannot change between files.
+
+    The trap is that it does not matter *which* attribute. Expiry is per
+    instance, not per column: the first access after a commit reloads the whole
+    row, so removing the plan lookup on its own would have moved the read onto
+    ``business.id`` two lines below and changed nothing a query counter could
+    see. The only fix that holds is not touching the instance in the loop at
+    all, which is what this exists to make possible — read once, before the
+    first file, as plain data no commit can expire.
+
+    Frozen for the same reason: a snapshot that could be written to would
+    invite code that "updates" it and silently diverges from the row.
+    """
+
+    id: int
+    gstin: str
+    plan: str
+    monthly_limit: int
+
+    @classmethod
+    def of(cls, business: Business) -> TenantSnapshot:
+        """Take the snapshot. Call once per request, outside any loop."""
+        return cls(
+            id=business.id,
+            gstin=business.gstin,
+            plan=business.plan.value,
+            monthly_limit=plan_limit(business),
+        )
+
+
+def check_plan_limit(db: Session, tenant: TenantSnapshot) -> None:
+    """Raise :class:`PlanLimitExceeded` if the tenant is at their cap.
+
+    The cap comes off the snapshot and the usage is counted fresh, which is
+    what makes a batch stop at the right file rather than at the first or not
+    at all: the plan cannot change mid-request, and the count rises with every
+    file the batch has already stored.
+    """
+    if tenant.monthly_limit and monthly_usage(db, tenant.id) >= tenant.monthly_limit:
         raise PlanLimitExceeded(
-            f"Plan '{business.plan.value}' allows {limit} invoices per month. "
+            f"Plan '{tenant.plan}' allows {tenant.monthly_limit} invoices per month. "
             "Upgrade to continue uploading."
         )
 
@@ -313,7 +355,7 @@ def get_or_create_supplier(
 
 def create_pending_invoice(
     db: Session,
-    business: Business,
+    tenant: TenantSnapshot,
     *,
     content: bytes,
     filename: str,
@@ -326,19 +368,23 @@ def create_pending_invoice(
     Committed before any parsing happens, so the file is durably ours the
     moment the request returns. Extraction can then run on a worker, fail, and
     be retried without the user needing the paper again.
+
+    Takes a :class:`TenantSnapshot` rather than the ``Business`` row: this
+    function commits, and a caller looping over a batch would pay a reload of
+    that row on every file after the first. See the snapshot's own docstring.
     """
-    check_plan_limit(db, business)
+    check_plan_limit(db, tenant)
 
     digest = file_hash(content)
-    duplicate = find_duplicate(db, business.id, digest=digest)
+    duplicate = find_duplicate(db, tenant.id, digest=digest)
     if duplicate is not None:
         raise DuplicateInvoice(
             f"This file was already uploaded as invoice {duplicate.id}", duplicate.id
         )
 
-    stored = store_upload(content, filename, business.id)
+    stored = store_upload(content, filename, tenant.id)
     invoice = Invoice(
-        business_id=business.id,
+        business_id=tenant.id,
         invoice_type=invoice_type,
         status=InvoiceStatus.UPLOADED,
         source=source,
