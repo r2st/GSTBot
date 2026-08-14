@@ -28,7 +28,11 @@ import json
 from decimal import Decimal
 
 import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from app.main import app
+from app.models.business_membership import BusinessMembership, MembershipRole
 from tests.conftest import (
     BUSINESS_GSTIN,
     SUPPLIER_GSTIN_OTHER_STATE,
@@ -945,3 +949,235 @@ class TestOneRequestIsTraceableEndToEnd:
         # Support gets a screenshot; this is what turns it into a log query.
         assert body["correlation_id"] == response.headers["X-Request-ID"]
         assert body["error"]["code"] == "not_found"
+
+
+# ---------------------------------------------------------------------------
+# The other person who touches these books
+# ---------------------------------------------------------------------------
+
+class TestAClientGivesTheirAccountantReadOnlyAccess:
+    """A whole session held by someone who may look and may not touch.
+
+    ``test_rbac.py`` sweeps the route table twice over: every mutating route
+    carries the gate, and every gated route refuses a real viewer. Both are
+    per-route questions asked of an empty request, and neither can answer the
+    one a business actually asks — *if I give my CA read-only access, do they
+    see my books, and are my books the same afterwards?*
+
+    So this is the sequence rather than the surface: a month is prepared by
+    its owner, a second login is granted access to it, every screen that login
+    would open is read through the ``X-Business-Id`` header, every write it
+    could reach is refused, and the whole read surface is compared against the
+    snapshot taken before. A gate that refuses the request and a write that
+    happens anyway are different failures, and only the comparison sees the
+    second.
+    """
+
+    # The reads a session makes going round the app once, keyed by the name
+    # the failure message needs. Every one is compared before and after.
+    READS = {
+        "dashboard": "/api/v1/dashboard?period=" + PERIOD,
+        "invoices": "/api/v1/invoices?period=" + PERIOD,
+        "reconciliation history": "/api/v1/reconciliation?period=" + PERIOD,
+        "latest run": "/api/v1/reconciliation/latest?period=" + PERIOD,
+        "itc": "/api/v1/itc?period=" + PERIOD,
+        "lapsing credit": "/api/v1/itc/lapsing",
+        "gstr1": "/api/v1/filing/gstr1?period=" + PERIOD,
+        "gstr3b": "/api/v1/filing/gstr3b?period=" + PERIOD,
+        "filing status": "/api/v1/filing/status",
+        "suppliers": "/api/v1/suppliers",
+        "alerts": "/api/v1/alerts",
+    }
+
+    @pytest.fixture()
+    def clients_books(self, client, stub_openrouter) -> dict:
+        """A month, prepared by the owner of the business it belongs to."""
+        token = register(client)
+        client.headers.update({"Authorization": f"Bearer {token}"})
+
+        purchase = upload(
+            client, stub_openrouter,
+            text=PURCHASE_TEXT, extraction=PURCHASE_EXTRACTION,
+            invoice_type="purchase", name="northwind-0042.txt",
+        )
+        upload(
+            client, stub_openrouter,
+            text=SALES_TEXT, extraction=SALES_EXTRACTION,
+            invoice_type="sales", name="ut-0101.txt",
+        )
+        import_2b(client, portal_2b())
+        run = reconcile(client, PERIOD)
+
+        business_id = client.get("/api/v1/auth/me").json()["business"]["id"]
+        return {"business_id": business_id, "invoice_id": purchase["id"], "run_id": run["id"]}
+
+    @pytest.fixture()
+    def accountant(self, clients_books, db_session):
+        """A second login holding read-only access to the books above.
+
+        The link is made over HTTP the only way this product offers — the
+        other account's own email and password, which is what ``POST
+        /businesses/mine/link`` exists for — and the membership it creates
+        carries that account's role, which is owner. Demoting it here is not
+        working around an API: there is no invitation endpoint, and a business
+        that wants to *show* its books rather than hand them over is what the
+        viewer role is for. What the demotion stands in for is the operator
+        action a support request produces today.
+        """
+        from tests.test_businesses import register_second_business
+
+        # A second client over the same app, rather than swapping headers on
+        # the owner's: the point of the fixture is two live sessions, and a
+        # single client that has to be re-pointed between them is one `del`
+        # away from asserting the owner's authority against the viewer's name.
+        # The `client` fixture already ran the lifespan and installed the
+        # database override on the app, and both are app-wide.
+        session = TestClient(app)
+        second = register_second_business(session)
+        session.headers.update({"Authorization": f"Bearer {second['access_token']}"})
+
+        linked = session.post(
+            "/api/v1/businesses/mine/link",
+            json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
+        )
+        assert linked.status_code == 201, linked.text
+        assert linked.json()["id"] == clients_books["business_id"]
+        # Carried over as owner, which is the role the linked account holds on
+        # its own books. Read-only is the narrower grant, and it is the one
+        # under test.
+        assert linked.json()["role"] == "owner"
+
+        membership = db_session.scalar(
+            select(BusinessMembership).where(
+                BusinessMembership.business_id == clients_books["business_id"],
+                BusinessMembership.deleted_at.is_(None),
+            )
+        )
+        membership.role = MembershipRole.VIEWER
+        db_session.commit()
+
+        session.headers.update({"X-Business-Id": str(clients_books["business_id"])})
+        return session
+
+    def test_the_session_reports_the_role_it_will_actually_be_held_to(
+        self, accountant, clients_books
+    ):
+        """What the frontend gates its buttons on.
+
+        Both roles are in one response and they differ: ``role`` is owner,
+        because this login owns its own registration, and ``active_role`` is
+        viewer, because that is the membership on the business the header
+        names. A client gating on the first offers a full set of controls for
+        the one business where every one of them is refused.
+        """
+        me = accountant.get("/api/v1/auth/me")
+        assert me.status_code == 200, me.text
+        body = me.json()
+
+        assert body["business"]["id"] == clients_books["business_id"]
+        assert body["business"]["gstin"] == BUSINESS_GSTIN
+        assert body["role"] == "owner"
+        assert body["active_role"] == "viewer"
+
+    def test_every_screen_they_open_shows_the_clients_books(
+        self, accountant, clients_books
+    ):
+        """Read-only is access, not a wall.
+
+        A grant that refused the reads too would pass every 403 assertion in
+        this file while being useless — and it is the failure a tenancy check
+        applied to the header would produce, because the accountant is not a
+        member of these books by registration, only by membership.
+        """
+        for name, path in self.READS.items():
+            response = accountant.get(path)
+            assert response.status_code == 200, (
+                f"{name}: {response.status_code} {response.text[:200]}"
+            )
+
+        # And the figures are the client's, not an empty tenant's: this is what
+        # a membership resolved to the wrong business would get wrong.
+        dashboard = accountant.get(self.READS["dashboard"]).json()
+        assert dashboard["business_gstin"] == BUSINESS_GSTIN
+        assert dashboard["counts"]["total"] == 2
+        assert dashboard["last_reconciliation"]["id"] == clients_books["run_id"]
+
+        invoice = accountant.get(f"/api/v1/invoices/{clients_books['invoice_id']}")
+        assert invoice.status_code == 200
+        assert invoice.json()["counterparty_gstin"] == SUPPLIER_GSTIN_OTHER_STATE
+
+    def test_every_write_the_screens_offer_is_refused(self, accountant, clients_books):
+        """One refusal per area, each with the wording a person can act on.
+
+        The exhaustive sweep is ``test_rbac.py``'s. What this asserts is that
+        the refusal is the *role's* — a 403 naming the role held — rather than
+        the tenancy 404 a login with no membership would get, because the two
+        send the reader to entirely different places.
+        """
+        invoice_id = clients_books["invoice_id"]
+        writes = [
+            ("POST", "/api/v1/invoices/upload"),
+            ("PATCH", f"/api/v1/invoices/{invoice_id}"),
+            ("POST", f"/api/v1/invoices/{invoice_id}/reparse"),
+            ("DELETE", f"/api/v1/invoices/{invoice_id}"),
+            ("POST", "/api/v1/reconciliation/gstr2b/import"),
+            ("POST", "/api/v1/reconciliation/run"),
+            ("POST", "/api/v1/suppliers/rescore"),
+            ("POST", "/api/v1/filing/gstr1/filed"),
+            ("POST", "/api/v1/alerts/1/dismiss"),
+        ]
+        for method, path in writes:
+            response = accountant.request(method, path)
+            assert response.status_code == 403, (
+                f"{method} {path} answered {response.status_code}: {response.text[:200]}"
+            )
+            body = response.json()
+            assert "viewer" in body["detail"], f"{method} {path}: {body['detail']}"
+            assert body["error"]["status"] == 403
+
+    def test_the_books_are_byte_for_byte_what_they_were(
+        self, client, accountant, clients_books
+    ):
+        """The assertion the per-route sweeps cannot make.
+
+        A gate that answers 403 *after* the handler has already written is a
+        passing test everywhere else in this suite and a data loss here. So the
+        owner's own view of every screen is captured before the viewer's
+        session and compared after it, through the owner's session rather than
+        the viewer's — a write that also broke the viewer's reads would
+        otherwise hide inside two matching wrong answers.
+        """
+        before = {name: client.get(path).json() for name, path in self.READS.items()}
+
+        for method, path in [
+            ("PATCH", f"/api/v1/invoices/{clients_books['invoice_id']}"),
+            ("DELETE", f"/api/v1/invoices/{clients_books['invoice_id']}"),
+            ("POST", "/api/v1/reconciliation/run"),
+            ("POST", "/api/v1/filing/gstr1/filed"),
+        ]:
+            assert accountant.request(method, path).status_code == 403
+
+        after = {name: client.get(path).json() for name, path in self.READS.items()}
+        for name in self.READS:
+            assert after[name] == before[name], f"{name} changed under a refused write"
+
+    def test_their_own_books_are_still_theirs_in_the_same_session(self, accountant):
+        """The other half, and the one a login-level role check gets wrong.
+
+        Dropping the header is the whole difference: the same token, the same
+        request, and an authority that comes back because the business it acts
+        for has changed. A check that read the login's role would refuse this
+        too, and a practice would find that taking on one read-only client had
+        made their own registration read-only.
+        """
+        del accountant.headers["X-Business-Id"]
+
+        me = accountant.get("/api/v1/auth/me").json()
+        assert me["active_role"] == "owner"
+        assert me["business"]["gstin"] != BUSINESS_GSTIN
+
+        # A write that was 403 one line ago, on the books this login owns.
+        response = accountant.post(
+            "/api/v1/reconciliation/run", json={"period": PERIOD}
+        )
+        assert response.status_code != 403, response.text
