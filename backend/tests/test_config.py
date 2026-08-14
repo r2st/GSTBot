@@ -20,6 +20,12 @@ PROD = {
     "jwt_secret": "a-genuinely-long-random-production-secret-value-here",
     "backend_cors_origins": "https://app.example.com",
     "database_url": "postgresql+psycopg://u:p@db:5432/gstbot",
+    # Stated rather than left to the default, because conftest exports
+    # BCRYPT_ROUNDS=4 for the whole suite and Settings reads the environment
+    # for anything not passed here. Without this line every one of these
+    # production configs trips the bcrypt floor first, and the tests below
+    # would pass or fail on that instead of on the setting each one names.
+    "bcrypt_rounds": 12,
 }
 
 
@@ -55,9 +61,46 @@ class TestProductionRefusesToStart:
         with pytest.raises(ValidationError, match="at least one origin"):
             Settings(**prod(backend_cors_origins=""))
 
+    def test_the_bcrypt_factor_the_tests_run_at_is_fatal_in_production(self):
+        """The suite runs at 4. This is what stops 4 reaching a real deployment.
+
+        The route it would take is not a typo — it is a .env or a container
+        image built for tests being promoted, the same way the sample JWT
+        secret above would ship. A stolen table hashed at 4 is a wordlist away
+        from plaintext, and nothing else in the system would look wrong.
+        """
+        with pytest.raises(ValidationError, match="BCRYPT_ROUNDS must be at least"):
+            Settings(**prod(bcrypt_rounds=4))
+
+    def test_a_bcrypt_factor_one_step_under_the_floor_is_still_fatal(self):
+        # The boundary, so the floor is a decision rather than whichever
+        # comparison operator was typed.
+        with pytest.raises(ValidationError, match="BCRYPT_ROUNDS must be at least"):
+            Settings(**prod(bcrypt_rounds=9))
+
+    def test_the_floor_itself_is_allowed_in_production(self):
+        # Slow hardware may take the bounded step down; that is why the floor
+        # sits below the default rather than on it.
+        assert Settings(**prod(bcrypt_rounds=10)).bcrypt_rounds == 10
+
+    def test_a_low_bcrypt_factor_outside_production_is_fine(self):
+        # Development and the suite are the whole reason the setting exists.
+        assert Settings(environment="development", bcrypt_rounds=4).bcrypt_rounds == 4
+
     def test_a_valid_production_config_builds(self):
         # The negative tests above are only meaningful if this one passes.
         assert Settings(**prod()).is_production
+
+    def test_the_shipped_default_bcrypt_factor_is_the_strong_one(self):
+        """A deployment that sets nothing must land on the strong value.
+
+        Asserted against the field's declared default rather than by building
+        a Settings, because conftest exports BCRYPT_ROUNDS=4 for the suite and
+        a constructed instance would report the environment's value — this
+        test would then be asserting the test harness, and would keep passing
+        if the shipped default were lowered to 4 tomorrow.
+        """
+        assert Settings.model_fields["bcrypt_rounds"].default == 12
 
 
 class TestValidation:

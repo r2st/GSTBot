@@ -48,6 +48,17 @@ os.environ.setdefault(
 # Off by default. The suite registers a business per test, and a 10/hour
 # sign-up limit would fail the twentieth test rather than the code under it.
 os.environ.setdefault("RATE_LIMIT_ENABLED", "false")
+# The minimum bcrypt accepts, against a production default of 12. Every step is
+# a doubling, so this is ~256x cheaper per hash, and the suite hashes at least
+# once per registered business across most of its files — at the production
+# factor that is a minute of pure key stretching spent asserting things that
+# are not about hashing.
+#
+# What the factor buys is asserted directly rather than by paying for it here:
+# `test_config.py` holds production to a floor this value cannot satisfy, and
+# `test_security.py` pins the setting to the cost recorded in the hash. A suite
+# slow enough that it stops being run is the worse security outcome.
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

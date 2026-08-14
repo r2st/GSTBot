@@ -68,6 +68,73 @@ class TestPasswordHashing:
         assert verify_password(base + "different", hash_password(base + "tail"))
 
 
+def cost_factor(digest: str) -> int:
+    """The rounds bcrypt recorded in *digest* — ``"$2b$12$...."`` -> ``12``."""
+    return int(digest.split("$")[2])
+
+
+class TestTheConfiguredCostFactor:
+    """``BCRYPT_ROUNDS`` exists so the suite is not mostly key stretching.
+
+    That makes it the one security parameter deliberately weakened under test,
+    so the tests that keep it honest have to be the ones that do not care what
+    it is currently set to. Two things must hold: the setting is really what
+    reaches bcrypt (a hash pinned to a hard-coded factor would sail through
+    every other test in this file), and lowering it for the suite has not
+    quietly changed what a *stored* hash is worth.
+
+    The floor that keeps the test value out of production is asserted in
+    ``test_config.py``; here it is only the wiring.
+    """
+
+    def test_the_hash_records_the_factor_the_settings_ask_for(self):
+        assert cost_factor(hash_password("supersecret123")) == settings.bcrypt_rounds
+
+    def test_raising_the_setting_makes_a_more_expensive_hash(self, monkeypatch):
+        """Read per call, not captured at import.
+
+        A factor read once at module import would be right in every process
+        that never changes it — including this suite — and would silently
+        ignore an operator raising it, which is the only reason the setting is
+        tunable at all.
+        """
+        monkeypatch.setattr(settings, "bcrypt_rounds", 6)
+        cheap = hash_password("supersecret123")
+        monkeypatch.setattr(settings, "bcrypt_rounds", 7)
+        dearer = hash_password("supersecret123")
+
+        assert cost_factor(cheap) == 6
+        assert cost_factor(dearer) == 7
+
+    def test_a_hash_written_at_another_factor_still_verifies(self, monkeypatch):
+        """Raising the factor must not lock existing accounts out.
+
+        bcrypt encodes the cost in the hash, so verification needs no setting
+        at all — which is what makes raising it a config change rather than a
+        migration. If this ever fails, every account that has not changed its
+        password since the last change is locked out, and the failure arrives
+        at login rather than at deploy.
+        """
+        monkeypatch.setattr(settings, "bcrypt_rounds", 5)
+        stored = hash_password("supersecret123")
+
+        monkeypatch.setattr(settings, "bcrypt_rounds", 8)
+        assert verify_password("supersecret123", stored)
+        assert not verify_password("supersecret124", stored)
+
+    def test_the_suite_is_not_running_at_the_production_factor(self):
+        """Guards the speed-up itself.
+
+        The point of the setting is that the suite stops paying for real key
+        stretching, and nothing else notices if a conftest edit or a stray
+        BCRYPT_ROUNDS in the environment puts it back — the suite would only
+        get slower, which reads as a bad day on CI rather than as a
+        regression. `pyproject.toml`'s coverage gate is a ratchet for the same
+        reason.
+        """
+        assert settings.bcrypt_rounds == 4
+
+
 class TestVerifyingAgainstNoAccount:
     """``verify_password(plain, None)`` — the "no such user" path.
 

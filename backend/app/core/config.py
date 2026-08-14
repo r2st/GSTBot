@@ -26,6 +26,14 @@ _DEFAULT_JWT_SECRET = "change-me-to-a-long-random-string"
 # not worth much. 32 bytes is the output width of the HS256 HMAC itself.
 _MIN_JWT_SECRET_LENGTH = 32
 
+# The weakest bcrypt cost factor a real deployment may run. Set below the
+# default rather than equal to it so an operator on slow hardware can make a
+# deliberate, bounded step down without editing code — but far enough above the
+# 4 the tests use that the test value can never reach production, which is the
+# failure this floor exists to prevent. A leaked table hashed at 4 is a
+# wordlist away from plaintext.
+_MIN_PRODUCTION_BCRYPT_ROUNDS = 10
+
 # The environments treated as "not a developer's laptop". Everything stricter
 # in this module keys off membership here.
 _PRODUCTION_LIKE = frozenset({"production", "prod", "staging", "stage"})
@@ -65,6 +73,18 @@ class Settings(BaseSettings):
     jwt_secret: str = _DEFAULT_JWT_SECRET
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440
+    # bcrypt's cost exponent: the hash runs 2**rounds iterations, so each step
+    # up doubles what both a login and an offline cracker pay. The default is
+    # bcrypt's own, and it is a deliberate few hundred milliseconds — that cost
+    # *is* the security property, which is why the floor below exists.
+    #
+    # Configurable only so the test suite can drop it. The suite hashes a
+    # password per registered business and does so in most of its files; at the
+    # production factor that is tens of seconds of pure key stretching, spent
+    # asserting things that have nothing to do with hashing. Tests run at 4,
+    # the minimum bcrypt accepts, and the paths that care about the factor
+    # being *real* assert on it directly rather than on the clock.
+    bcrypt_rounds: int = Field(default=12, ge=4, le=31)
 
     # ---- Database ----
     database_url: str = "postgresql+psycopg://gstbot:gstbot@localhost:5432/gstbot"
@@ -274,6 +294,17 @@ class Settings(BaseSettings):
             raise ValueError(
                 f"JWT_SECRET must be at least {_MIN_JWT_SECRET_LENGTH} characters "
                 f"in production (got {len(self.jwt_secret)})."
+            )
+
+        # Same reasoning as the secret above, and the same reason it is here
+        # rather than on the field: the value that makes the suite quick is
+        # catastrophic in production, and the way it gets there is a .env or a
+        # container image carrying a test setting into a real deployment.
+        if self.bcrypt_rounds < _MIN_PRODUCTION_BCRYPT_ROUNDS:
+            raise ValueError(
+                f"BCRYPT_ROUNDS must be at least {_MIN_PRODUCTION_BCRYPT_ROUNDS} when "
+                f"ENVIRONMENT={self.environment} (got {self.bcrypt_rounds}). Below that "
+                "a stolen password table is worth cracking."
             )
 
         if self.debug:

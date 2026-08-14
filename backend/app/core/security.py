@@ -28,8 +28,20 @@ def _prepare(password: str) -> bytes:
 
 
 def hash_password(password: str) -> str:
-    """Return a bcrypt hash for a plaintext password."""
-    return bcrypt.hashpw(_prepare(password), bcrypt.gensalt()).decode("utf-8")
+    """Return a bcrypt hash for a plaintext password.
+
+    The cost factor is read per call rather than captured at import, so a
+    process that changes it does not have to reload this module for the change
+    to take.
+
+    Verification does not need the setting at all: the factor a hash was made
+    with is encoded in the hash itself. Rows written before a change keep
+    verifying, and raising the setting does not require re-hashing the table —
+    existing accounts simply stay at the factor they were last hashed with
+    until their password is next set.
+    """
+    salt = bcrypt.gensalt(rounds=settings.bcrypt_rounds)
+    return bcrypt.hashpw(_prepare(password), salt).decode("utf-8")
 
 
 def _absent_account_hash() -> str:
