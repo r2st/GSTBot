@@ -9,8 +9,11 @@ never about one file in it.
 """
 from __future__ import annotations
 
-from app.models.invoice import Invoice
+from decimal import Decimal
+
+from app.models.invoice import Invoice, InvoiceStatus
 from app.routers.invoices import MAX_BULK_FILES
+from tests.conftest import BUSINESS_GSTIN, SUPPLIER_GSTIN_OTHER_STATE
 
 
 def bulk_upload(client, files: list[tuple[str, str]], *, invoice_type: str = "purchase"):
@@ -157,3 +160,236 @@ class TestAuthAndTenancy:
         bulk_upload(auth_client, [("t.txt", _invoice_text("TENANT-1"))])
         invoice = db_session.query(Invoice).filter_by(invoice_number="TENANT-1").one()
         assert invoice.business_id == business.id
+
+
+# ---------------------------------------------------------------------------
+# The batch against the pipeline it claims to share
+# ---------------------------------------------------------------------------
+#
+# Everything above this line is about the batch's own arithmetic, and every
+# file in it is the two-line ``_invoice_text``. That leaves the endpoint's
+# actual claim — "the same checks and the same extraction path as POST
+# /invoices/upload, run once per file" — resting on the two routes calling the
+# same helper today. These push a real document through the batch and assert
+# the result, so a change that reaches only the single-upload path is a
+# failure here rather than a field that quietly stops being extracted for
+# anyone who dragged a folder in.
+
+
+class TestTheBatchExtractsWhatASingleUploadWould:
+    def test_a_real_invoice_is_extracted_through_the_batch(
+        self, auth_client, sample_invoice_text
+    ):
+        response = bulk_upload(auth_client, [("inv.txt", sample_invoice_text)])
+        assert response.status_code == 200, response.text
+        item = response.json()["items"][0]
+        assert item["accepted"] is True
+        # Celery is off in tests, so extraction has already run inline — the
+        # same assertion test_invoices.py makes about the single upload.
+        assert item["queued"] is False
+
+        invoice = item["invoice"]
+        assert invoice["status"] == InvoiceStatus.PARSED.value
+        assert invoice["invoice_number"] == "INV-2026-0042"
+        assert invoice["invoice_date"] == "2026-04-15"
+        assert invoice["period"] == "2026-04"
+        assert Decimal(invoice["total_value"]) == Decimal("531000.00")
+
+    def test_the_tax_split_is_decided_in_a_batch_too(
+        self, auth_client, sample_invoice_text
+    ):
+        """A Karnataka supplier billing Maharashtra is IGST, not CGST+SGST.
+
+        The split is derived from the two state codes rather than read off the
+        page, and it is the one extracted field a wrong answer files rather
+        than merely displays: the heads are separate columns in the return.
+        """
+        item = bulk_upload(auth_client, [("inv.txt", sample_invoice_text)]).json()["items"][0]
+        invoice = item["invoice"]
+        assert Decimal(invoice["igst"]) == Decimal("81000.00")
+        assert Decimal(invoice["cgst"]) == Decimal("0")
+        assert Decimal(invoice["sgst"]) == Decimal("0")
+
+    def test_the_counterparty_is_the_supplier_and_not_the_tenant(
+        self, auth_client, sample_invoice_text
+    ):
+        # The document carries both GSTINs. Booking ours as the vendor is the
+        # failure test_invoices.py pins for the single upload; the batch reads
+        # the same two sides.
+        invoice = bulk_upload(auth_client, [("inv.txt", sample_invoice_text)]).json()[
+            "items"
+        ][0]["invoice"]
+        assert invoice["counterparty_gstin"] == SUPPLIER_GSTIN_OTHER_STATE
+        assert invoice["counterparty_gstin"] != BUSINESS_GSTIN
+
+
+class TestTheOrderOfTheAnswers:
+    def test_items_come_back_in_the_order_the_files_were_sent(self, auth_client):
+        """The list is positional, and the upload screen relies on it being so.
+
+        ``UploadPage`` reverses each response before prepending it, because the
+        results list reads newest-first and the server answers oldest-first.
+        Nothing in the payload carries the send position otherwise — the
+        filenames are the user's and can repeat — so a reordering here would
+        show every row against the wrong document with nothing to notice it by.
+        """
+        names = [f"z{i}.txt" for i in range(5)]
+        response = bulk_upload(
+            auth_client, [(name, _invoice_text(f"ORDER-{i}")) for i, name in enumerate(names)]
+        )
+        body = response.json()
+        assert [item["filename"] for item in body["items"]] == names
+        assert [item["invoice"]["invoice_number"] for item in body["items"]] == [
+            f"ORDER-{i}" for i in range(5)
+        ]
+
+    def test_a_rejected_file_holds_its_place_rather_than_being_moved_to_the_end(
+        self, auth_client
+    ):
+        # The rejected item is appended from the same loop as an accepted one,
+        # and the screen pairs rows to files by position. Collecting failures
+        # separately would be the natural refactor and would silently break
+        # that pairing, so the interleaving is asserted rather than assumed.
+        response = bulk_upload(
+            auth_client,
+            [
+                ("first.txt", _invoice_text("ORDER-A")),
+                ("bad.txt", ""),
+                ("third.txt", _invoice_text("ORDER-B")),
+            ],
+        )
+        body = response.json()
+        assert [item["filename"] for item in body["items"]] == [
+            "first.txt",
+            "bad.txt",
+            "third.txt",
+        ]
+        assert [item["accepted"] for item in body["items"]] == [True, False, True]
+
+
+class TestARejectionMidBatchLeavesTheRestAlone:
+    def test_the_files_before_it_are_committed(self, auth_client, db_session, business):
+        """A rejection is raised as an HTTPException the loop swallows.
+
+        Everything already stored is in the same session, so a rollback taking
+        the batch back with it would be invisible in the response — every
+        earlier item still reads ``accepted`` — and would surface as invoices
+        that were reported as stored and are not there.
+        """
+        bulk_upload(
+            auth_client,
+            [
+                ("good-1.txt", _invoice_text("MID-1")),
+                ("empty.txt", ""),
+                ("good-2.txt", _invoice_text("MID-2")),
+            ],
+        )
+        stored = {
+            invoice.invoice_number
+            for invoice in db_session.query(Invoice).filter_by(business_id=business.id)
+        }
+        assert {"MID-1", "MID-2"} <= stored
+
+    def test_every_file_is_attempted_however_many_fail(self, auth_client):
+        # Nothing short-circuits the loop: a batch of mostly-bad files still
+        # answers for each one. The plan limit is the single exception, and it
+        # rejects rather than stops — see TestThePlanLimit.
+        response = bulk_upload(
+            auth_client,
+            [("e1.txt", ""), ("e2.txt", ""), ("ok.txt", _invoice_text("MID-3")), ("e3.txt", "")],
+        )
+        body = response.json()
+        assert body["total"] == 4
+        assert body["accepted"] == 1
+        assert body["rejected"] == 3
+        assert len(body["items"]) == 4
+
+
+class TestTheNameTheAnswerCarries:
+    def test_a_path_in_the_filename_is_reduced_to_its_leaf(self, auth_client):
+        """The name is echoed back to the screen, so it is sanitised first.
+
+        A browser does not send a path, but the endpoint is reachable by
+        anything that speaks multipart, and this name is rendered as a row
+        label. ``safe_filename`` is what the single upload runs too; asserting
+        it here is asserting that the batch did not skip it.
+        """
+        response = auth_client.post(
+            "/api/v1/invoices/bulk",
+            files=[
+                (
+                    "files",
+                    ("../../etc/passwd", _invoice_text("LEAF-1").encode(), "text/plain"),
+                )
+            ],
+            data={"invoice_type": "purchase"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["items"][0]["filename"] == "passwd"
+
+    def test_a_name_that_sanitises_away_falls_back_rather_than_coming_back_empty(
+        self, auth_client
+    ):
+        """A name of three dots is all separators, and reduces to nothing.
+
+        Reported rather than refused: the stored file is named after a UUID, so
+        an unusable name costs a label and nothing else. The fallback is what
+        keeps the item titled — an empty ``filename`` would be a row the screen
+        has nothing to render, and the batch is the one route where a row is
+        all the user has to tell one file's outcome from another's.
+
+        A part sent with no filename at all cannot get this far: multipart
+        without a filename is an ordinary form field, so it never reaches the
+        route as a file and the request is refused for having none.
+        """
+        response = auth_client.post(
+            "/api/v1/invoices/bulk",
+            files=[("files", ("...", _invoice_text("NONAME-1").encode(), "text/plain"))],
+            data={"invoice_type": "purchase"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["items"][0]["filename"] == "invoice"
+
+
+class TestTheBatchAndTheSingleUploadAgree:
+    def test_the_same_document_is_stored_the_same_way_either_way(
+        self, auth_client, sample_invoice_text
+    ):
+        """One document, two routes, one result.
+
+        The duplicate check makes this awkward to assert directly — the second
+        copy of a document is refused whichever route it arrives by — so the
+        two are compared on the fields the extractor filled rather than by
+        uploading the same text twice. What is being pinned is that the batch
+        is not a second, drifting implementation of the same parse.
+        """
+        single = auth_client.post(
+            "/api/v1/invoices/upload",
+            files={"file": ("one.txt", sample_invoice_text.encode(), "text/plain")},
+            data={"invoice_type": "purchase"},
+        )
+        assert single.status_code == 201, single.text
+
+        # The same document with a different number, so it is not a duplicate.
+        batched_text = sample_invoice_text.replace("INV-2026-0042", "INV-2026-0043")
+        batched = bulk_upload(auth_client, [("two.txt", batched_text)])
+        assert batched.status_code == 200, batched.text
+
+        compared = (
+            "invoice_date",
+            "period",
+            "counterparty_gstin",
+            "place_of_supply",
+            "taxable_value",
+            "igst",
+            "cgst",
+            "sgst",
+            "total_value",
+            "status",
+            "invoice_type",
+        )
+        one = single.json()["invoice"]
+        two = batched.json()["items"][0]["invoice"]
+        assert {field: one[field] for field in compared} == {
+            field: two[field] for field in compared
+        }
