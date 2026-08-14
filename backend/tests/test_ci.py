@@ -20,6 +20,7 @@ what some other file in the repository already claims runs.
 """
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -272,3 +273,129 @@ class TestTheRuntimeVersionsAgree:
         dockerfile = (REPO_ROOT / "frontend" / "Dockerfile").read_text()
         majors = set(re.findall(r"^FROM node:(\d+)", dockerfile, flags=re.M))
         assert sole(majors, "frontend/Dockerfile node stages") == with_node
+
+
+# ---------------------------------------------------------------------------
+# The front door
+# ---------------------------------------------------------------------------
+
+
+class TestTheREADMEDescribesThisRepository:
+    """The README is the one file a newcomer reads before anything else.
+
+    Which makes a stale line in it more expensive than a stale line anywhere
+    else: a wrong command is met with an error message at the exact moment the
+    reader has no way to tell a mistake in the document from a broken
+    checkout. And nothing about a README fails — it is not imported, not
+    linted, and not run.
+
+    This is the same trade the version tests above make: read the prose as data
+    and assert that what it claims is what some other file in the repository
+    already says. Only the claims a reader would act on, and only the ones with
+    something in the tree to check them against — every assertion here is a
+    line someone could have followed and been wrong.
+    """
+
+    @pytest.fixture(scope="class")
+    def readme(self) -> str:
+        return (REPO_ROOT / "README.md").read_text()
+
+    @pytest.fixture(scope="class")
+    def prose(self, readme) -> str:
+        """*readme* with its line breaks flattened.
+
+        A claim this file asserts on is a sentence, and a sentence in a hard-
+        wrapped document is split at whatever column it reached — so a
+        substring check against the raw text passes or fails on where the
+        wrapping happened to fall, which is not something a reader would
+        notice or an author should have to preserve.
+        """
+        return " ".join(readme.split())
+
+    def test_every_file_it_links_to_is_here(self, readme):
+        # Relative markdown links, which is every link in it that is not a URL.
+        # A moved runbook is how a reader's first click 404s.
+        for target in re.findall(r"\]\((?!https?:)([^)#]+)\)", readme):
+            assert (REPO_ROOT / target).exists(), f"README links to missing {target}"
+
+    def test_the_python_it_tells_you_to_build_a_venv_with_is_the_one_ci_runs(
+        self, readme, jobs
+    ):
+        # deploy/README.md is already held to this. The front door was not, and
+        # it is the copy someone actually runs on a laptop — a venv on a
+        # different minor resolves different wheels and the first failure looks
+        # like a broken checkout rather than a wrong number in a document.
+        step = next(
+            s
+            for s in jobs["backend"]["steps"]
+            if s.get("uses", "").startswith("actions/setup-python")
+        )
+        named = set(re.findall(r"python(3\.\d+)", readme))
+        assert sole(named, "README.md python versions") == str(step["with"]["python-version"])
+
+    def test_every_npm_script_it_names_exists(self, readme):
+        package = json.loads((REPO_ROOT / "frontend" / "package.json").read_text())
+        for script in set(re.findall(r"npm (?:run )?([a-z:]+)", readme)):
+            if script in {"install", "ci"}:  # npm's own, not ours
+                continue
+            assert script in package["scripts"], f"README runs missing npm script {script}"
+
+    def test_every_python_module_it_tells_you_to_run_is_importable(self, readme):
+        # `-m tools.mutation`, `-A app.celery_app`, `app.main:app`. A module
+        # that was renamed leaves a command that fails with an import error,
+        # which reads as a broken environment.
+        modules = set(re.findall(r"-m (app\.[\w.]+|tools\.[\w.]+)", readme))
+        modules |= set(re.findall(r"-A ([\w.]+) (?:worker|beat)", readme))
+        modules |= {m.split(":")[0] for m in re.findall(r"\b(app\.\w+:\w+)", readme)}
+        assert modules, "the README stopped naming any runnable module"
+        for module in modules:
+            assert (
+                BACKEND / Path(module.replace(".", "/") + ".py")
+            ).exists(), f"README runs missing module {module}"
+
+    def test_the_coverage_gates_it_quotes_are_the_gates(self, readme, prose):
+        # This is the claim with a history of drifting: the frontend branch
+        # threshold was raised and CLAUDE.md went on quoting the old number for
+        # long enough that it was the number people believed.
+        pyproject = (BACKEND / "pyproject.toml").read_text()
+        backend_gate = re.search(r"^fail_under = (\d+)", pyproject, flags=re.M)
+        assert backend_gate is not None
+        assert f"{backend_gate.group(1)}% backend" in readme
+
+        vite = (REPO_ROOT / "frontend" / "vite.config.js").read_text()
+        thresholds = dict(
+            (name, value)
+            for name, value in re.findall(r"(\w+): (\d+)", _thresholds_block(vite))
+        )
+        assert thresholds, "could not read the frontend thresholds"
+        # Quoted as one figure for the three that share it, so the test asserts
+        # the sharing as well as the number — a threshold raised on its own has
+        # to be written out separately, and this fails until it is.
+        shared = {thresholds[name] for name in ("statements", "lines", "branches")}
+        assert (
+            f"branches at {sole(shared, 'frontend statements/lines/branches')}" in prose
+        )
+
+    def test_it_names_the_route_count_the_api_actually_publishes(self, readme, client):
+        # The one number in it that no other file states, and the one a reader
+        # cannot check for themselves without starting the API.
+        claimed = re.search(r"(\d+) routes under `/api/v1`", readme)
+        assert claimed is not None, "the README stopped stating a route count"
+        # `/openapi.json`, not under the versioned prefix — the spec describes
+        # the API rather than being part of it.
+        paths = client.get("/openapi.json").json()
+        if "paths" not in paths:  # pragma: no cover - the spec route moved
+            pytest.fail("could not read the published spec")
+        published = sum(
+            1
+            for operations in paths["paths"].values()
+            for method in operations
+            if method.upper() in {"GET", "POST", "PUT", "PATCH", "DELETE"}
+        )
+        assert int(claimed.group(1)) == published
+
+
+def _thresholds_block(vite: str) -> str:
+    match = re.search(r"thresholds: \{([^}]*)\}", vite)
+    assert match is not None, "vite.config.js has no coverage thresholds block"
+    return match.group(1)

@@ -61,9 +61,11 @@ paths are what the suite actually exercises. Anything exported outside silently
 wins and changes what is under test.
 
 **Coverage gates are ratchets, not targets.** 98% backend (`pyproject.toml`),
-statements/lines 99 and branches 90 frontend (`vite.config.js`). They exist so
-that deleting tests or landing a module with none fails CI. Raise a gate in the
-commit that earns it; never write a test purely to move the number.
+statements/lines/branches 99 and functions 87 frontend (`vite.config.js`).
+Functions is the loosest of the four because v8 undercounts it on JSX — see the
+comment there. They exist so that deleting tests or landing a module with none
+fails CI. Raise a gate in the commit that earns it; never write a test purely to
+move the number.
 
 **Comments explain why, not what.** This codebase's comments carry the reasoning
 that would otherwise be lost — why a 200 and not a 503, why this window and not
