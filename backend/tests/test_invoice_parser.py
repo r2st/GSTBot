@@ -1903,3 +1903,96 @@ class TestRCMIsTheSameQuestionAsReverseCharge:
         )
 
         assert parse_invoice(text=text).reverse_charge is True
+
+
+class TestOneHeadingOverBothTheNumberAndTheDate:
+    """"Invoice No. & Date : INV-42 dt. 15/04/2026" — one label, two fields.
+
+    Most tabular Indian templates head that band once rather than twice, and
+    until this was read the document came back with neither field. The number
+    is the worse-looking half — a return needs an ``inum`` for every B2B line —
+    but the date is the expensive one: it decides the period, so an invoice
+    that loses it is one nothing files in any month, and it is missing from the
+    register, the dashboard and the GSTR-1 together.
+
+    The joined heading is ranked with the explicit ``Invoice Date`` label
+    rather than below the loose one, because it names the invoice's own date
+    just as plainly. What that buys is the due-date case: a due date is
+    normally printed above the invoice's own and would otherwise win on being
+    leftmost.
+    """
+
+    HEAD = "NORTHWIND SUPPLIES\nGSTIN: 29AABCU9603R1ZM\nTAX INVOICE\n"
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "Invoice No. & Date : INV-2026-0042 dt. 15/04/2026",
+            "Invoice No & Date: INV-2026-0042 / 15-04-2026",
+            "Invoice No. and Date : INV-2026-0042 dated 15/04/2026",
+            "Tax Invoice No & Dt.: INV-2026-0042 dt. 15/04/2026",
+            "Bill No & Date - INV-2026-0042 dt 15.04.2026",
+        ],
+    )
+    def test_both_fields_are_read_however_the_pair_is_punctuated(self, line):
+        parsed = parse_heuristic(f"{self.HEAD}{line}\n")
+
+        assert parsed.invoice_number == "INV-2026-0042"
+        assert parsed.invoice_date == date(2026, 4, 15)
+
+    def test_a_separate_label_for_each_field_is_unchanged(self):
+        parsed = parse_heuristic(
+            f"{self.HEAD}Invoice No: INV-2026-0042\nInvoice Date: 15/04/2026\n"
+        )
+
+        assert parsed.invoice_number == "INV-2026-0042"
+        assert parsed.invoice_date == date(2026, 4, 15)
+
+    def test_a_due_date_above_the_heading_does_not_become_the_invoice_date(self):
+        parsed = parse_heuristic(
+            f"{self.HEAD}Due Date: 30/06/2026\n"
+            "Invoice No. & Date : INV-2026-0042 dt. 15/04/2026\n"
+        )
+
+        assert parsed.invoice_date == date(2026, 4, 15)
+
+    def test_a_cited_original_in_the_same_shape_is_still_passed_over(self):
+        """Rule 53 makes a note carry the original's number and date."""
+        parsed = parse_heuristic(
+            f"{self.HEAD}Original Invoice No. & Date : OLD-9 dt. 02/01/2026\n"
+            "Invoice No. & Date : INV-2026-0042 dt. 15/04/2026\n"
+        )
+
+        assert parsed.invoice_number == "INV-2026-0042"
+        assert parsed.invoice_date == date(2026, 4, 15)
+
+    def test_an_e_way_bill_in_the_same_shape_is_still_passed_over(self):
+        parsed = parse_heuristic(
+            f"{self.HEAD}E-Way Bill No & Date: 123456789012 dt. 14/04/2026\n"
+            "Invoice No. & Date : INV-2026-0042 dt. 15/04/2026\n"
+        )
+
+        assert parsed.invoice_number == "INV-2026-0042"
+        assert parsed.invoice_date == date(2026, 4, 15)
+
+    def test_the_heading_alone_over_an_empty_band_reads_nothing(self):
+        """A column head with its values on the next line, as before.
+
+        The same answer the tabular layouts already get: the value has to be
+        beside the label, and an empty field a reviewer can see beats a
+        heading word stored as a number.
+        """
+        parsed = parse_heuristic(f"{self.HEAD}Invoice No. & Date\nINV-2026-0042   15/04/2026\n")
+
+        assert parsed.invoice_number is None
+        assert parsed.invoice_date is None
+
+    def test_the_conjunction_alone_does_not_let_the_value_be_skipped(self):
+        """Only a joined *heading* is absorbed, not any "&" before the value.
+
+        Otherwise the pattern would step over whatever an invoice prints
+        between the label and its value and read the next token as the number.
+        """
+        parsed = parse_heuristic(f"{self.HEAD}Invoice No. & OLD-9 INV-2026-0042\n")
+
+        assert parsed.invoice_number != "INV-2026-0042"

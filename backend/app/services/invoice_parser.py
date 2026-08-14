@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -544,7 +545,21 @@ _INVOICE_NO_PATTERN = re.compile(
     rf"(?:tax{_SAME_LINE_SPACE}+invoice|invoice|inv"
     rf"|bill(?:{_SAME_LINE_SPACE}+of{_SAME_LINE_SPACE}+supply)?)(?:{_SAME_LINE_SPACE}|\.)*"
     r"(?:"
-    rf"(?:no|number|num|#)(?:{_SAME_LINE_SPACE}|[:.\-#])*([A-Za-z0-9][A-Za-z0-9\-/]{{0,29}})"
+    rf"(?:no|number|num|#)(?:{_SAME_LINE_SPACE}|[:.\-#])*"
+    # One label for two fields: "Invoice No. & Date : INV-42 dt. 15/04/2026"
+    # prints the number and the date of issue under a single heading, which is
+    # how most tabular Indian templates head the band. Without this the "&" is
+    # not a separator character, the value group met it instead of the number,
+    # and the whole match failed — so the field was empty on every document
+    # printed that way. The date half of the same line is
+    # :data:`_JOINED_DATE_PATTERN`.
+    #
+    # The second label is required after the conjunction rather than optional,
+    # so this absorbs only a joined heading. A bare "&" left to be skipped
+    # would step over whatever an invoice prints between the label and its
+    # value, which on the layouts here is another document's number.
+    rf"(?:(?:&|and)(?:{_SAME_LINE_SPACE})*(?:date|dt)\b(?:{_SAME_LINE_SPACE}|[:.\-#])*)?"
+    r"([A-Za-z0-9][A-Za-z0-9\-/]{0,29})"
     r"|"
     rf"[:.#](?:{_SAME_LINE_SPACE}|[:.\-#])*([A-Za-z0-9][A-Za-z0-9\-/]{{1,29}})"
     r")",
@@ -722,6 +737,40 @@ _LOOSE_DATE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# The date half of a heading that names both fields at once — "Invoice No. &
+# Date : INV-42 dt. 15/04/2026". The number half is in
+# :data:`_INVOICE_NO_PATTERN`.
+#
+# Neither pattern above can reach this date. The explicit one wants "Invoice
+# Date" with nothing but space between the two words, and here the number's
+# label is in between. The loose one matches the "Date" of the heading itself
+# and then requires the value to follow the separators — but what follows is
+# the *number*, so the match fails there and the document was left with no
+# date at all. That is the expensive half of this layout: the date decides the
+# period, so an invoice that loses it is one nothing files in any month.
+#
+# Ranked with the explicit pattern rather than the loose one because the
+# heading names the invoice's own date as plainly as "Invoice Date" does. A
+# document printing this and a due date must not read the due date, which is
+# what being second to the loose pattern would eventually cost it.
+#
+# Only the heading is matched here. What follows it is the number and then the
+# date, punctuated "dt.", "dated", "/" or not at all, and the date is picked
+# out of the rest of the line by :func:`_date_candidates` rather than by more
+# pattern — because the number in between is itself full of date-shaped digit
+# groups. A series like "NW/26-27/0042" contains "26-27/0042", which matches
+# :data:`_DATE_VALUE` and is not a date, so a single expression that took the
+# first shape on the line would come back empty on exactly the
+# series/year/serial numbering these headings are usually printed with.
+_JOINED_HEADING_PATTERN = re.compile(
+    r"(?:tax\s*)?(?:invoice|inv|bill)\s*(?:no|number|num|#)[\s.]*"
+    r"(?:&|and)\s*(?:date|dt)\b",
+    re.IGNORECASE,
+)
+
+# The date shape on its own, for scanning a line the heading above has claimed.
+_DATE_VALUE_PATTERN = re.compile(_DATE_VALUE)
+
 
 # Wording that marks the date after it as something other than the date of
 # issue — another document's date, or another event in this one's life.
@@ -759,13 +808,47 @@ _OTHER_DATE_PREFIX = re.compile(
 )
 
 
+def _date_candidates(text: str) -> Iterator[tuple[int, str]]:
+    """Every labelled date in *text*, in the order the labels rank.
+
+    Yields ``(label_start, value)``: the offset the markers in
+    :func:`_invoice_date_in` are measured back from, and the string to parse.
+    The label rather than the value is what those markers sit before, and on a
+    joined heading the two are not in the same place — which is the whole
+    reason this hands back a position instead of a match.
+    """
+    for match in _DATE_PATTERN.finditer(text):
+        yield match.start(), match.group(1)
+    # A joined heading labels the number and the date together, so the date sits
+    # past the number rather than beside the label. Every date-shaped run on the
+    # rest of the line is offered, not just the first, because the number being
+    # stepped over is itself full of digit groups — see
+    # :data:`_JOINED_HEADING_PATTERN`. The unparseable ones fall away in the
+    # caller, which already passes over a shape that is not a date.
+    for heading in _JOINED_HEADING_PATTERN.finditer(text):
+        line_end = text.find("\n", heading.end())
+        line_end = len(text) if line_end == -1 else line_end
+        # Every offset, rather than ``finditer``, because the shapes here
+        # overlap and the ones that are not dates have to be able to fail
+        # without taking a real date with them. On "INV-2026-0042 dt
+        # 15.04.2026" the shape starting at "0042" runs "0042 dt 15" — it
+        # spans the serial, the marker and the day — so a non-overlapping scan
+        # resumes past the day and never offers "15.04.2026" at all. The line
+        # is one line, so this stays a scan of a hundred-odd offsets.
+        for start in range(heading.end(), line_end):
+            if (value := _DATE_VALUE_PATTERN.match(text, start, line_end)) is not None:
+                yield heading.start(), value.group(1)
+    for match in _LOOSE_DATE_PATTERN.finditer(text):
+        yield match.start(), match.group(1)
+
+
 def _invoice_date_in(text: str) -> date | None:
     """The date of issue the text labels, or ``None``.
 
-    Four things are tried in order, and the first that yields a date wins: an
-    explicit invoice-date label, a loose one, then — only if neither produced a
-    usable date — the same two again allowing labels that mark the date as
-    another document's.
+    Six things are tried in order, and the first that yields a date wins: an
+    explicit invoice-date label, a heading naming the number and the date
+    together, a loose label, then — only if none produced a usable date — the
+    same three again allowing labels that mark the date as another document's.
 
     That last tier is why a marked date is passed over rather than refused. A
     document whose *only* date is a due date still gets one, which is the
@@ -781,22 +864,21 @@ def _invoice_date_in(text: str) -> date | None:
     nothing; taking it and stopping would blank a field that a real date
     further down the page would have filled.
     """
-    marked: list[re.Match[str]] = []
-    for pattern in (_DATE_PATTERN, _LOOSE_DATE_PATTERN):
-        for match in pattern.finditer(text):
-            line_start = text.rfind("\n", 0, match.start()) + 1
-            before = (line_start, match.start())
-            if (
-                _OTHER_DATE_PREFIX.search(text, *before)
-                or _REFERENCE_PREFIX.search(text, *before)
-                or _EWAY_PREFIX.search(text, *before)
-            ):
-                marked.append(match)
-                continue
-            if (value := to_date(match.group(1))) is not None:
-                return value
-    for match in marked:
-        if (value := to_date(match.group(1))) is not None:
+    marked: list[str] = []
+    for start, raw in _date_candidates(text):
+        line_start = text.rfind("\n", 0, start) + 1
+        before = (line_start, start)
+        if (
+            _OTHER_DATE_PREFIX.search(text, *before)
+            or _REFERENCE_PREFIX.search(text, *before)
+            or _EWAY_PREFIX.search(text, *before)
+        ):
+            marked.append(raw)
+            continue
+        if (value := to_date(raw)) is not None:
+            return value
+    for raw in marked:
+        if (value := to_date(raw)) is not None:
             return value
     return None
 # The separator before an amount admits a hyphen, because "Total - 5,000.00" is

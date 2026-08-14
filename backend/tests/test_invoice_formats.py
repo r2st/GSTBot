@@ -899,6 +899,89 @@ Grand Total                         59,000.00
         absent=("hsn_code",),
         supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
     ),
+    # ------------------------------------- one heading over two of the fields
+    Layout(
+        name="'Invoice No. & Date' heading over both, 'dt.' before the date",
+        text=f"""\
+NORTHWIND SUPPLIES PRIVATE LIMITED
+GSTIN: {SUPPLIER_GSTIN_OTHER_STATE}
+TAX INVOICE
+Invoice No. & Date : NW/26-27/0042 dt. 15/04/2026
+Bill To: UMANG TRADERS
+GSTIN: {BUSINESS_GSTIN}
+HSN: 84713010
+Taxable Value: 4,50,000.00
+IGST @ 18%: 81,000.00
+Grand Total: 5,31,000.00
+""",
+        invoice_number="NW/26-27/0042",
+        invoice_date=date(2026, 4, 15),
+        taxable_value=money("450000.00"),
+        total_value=money("531000.00"),
+        igst=money("81000.00"),
+        tax_rate=Decimal("18"),
+        hsn_code="84713010",
+        supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+        buyer_gstin=BUSINESS_GSTIN,
+    ),
+    Layout(
+        name="'Invoice No & Date' heading, the two values split by a slash",
+        text=f"""\
+BENGALURU COMPONENTS LLP
+GSTIN: {SUPPLIER_GSTIN_OTHER_STATE}
+TAX INVOICE
+Invoice No & Date: BC-771 / 22-04-2026
+Bill To: UMANG TRADERS
+GSTIN: {BUSINESS_GSTIN}
+HSN: 85044090
+Taxable Value: 2,00,000.00
+IGST @ 18%: 36,000.00
+Grand Total: 2,36,000.00
+""",
+        # Nothing labels the date on this line at all — the heading is the only
+        # label either field gets, and the slash is doing the work "dt." does
+        # above. So this is the layout that proves the date is found by
+        # stepping over the number rather than by a marker before it.
+        invoice_number="BC-771",
+        invoice_date=date(2026, 4, 22),
+        taxable_value=money("200000.00"),
+        total_value=money("236000.00"),
+        igst=money("36000.00"),
+        tax_rate=Decimal("18"),
+        hsn_code="85044090",
+        supplier_gstin=SUPPLIER_GSTIN_OTHER_STATE,
+        buyer_gstin=BUSINESS_GSTIN,
+    ),
+    Layout(
+        name="'Tax Invoice No & Dt.' abbreviated, over a due date it must not read",
+        text=f"""\
+PUNE FASTENERS
+GSTIN: {SUPPLIER_GSTIN_SAME_STATE}
+Due Date: 30/06/2026
+Tax Invoice No & Dt.: PF/118 dt. 28/05/2026
+Bill To: UMANG TRADERS
+GSTIN: {BUSINESS_GSTIN}
+HSN: 73181500
+Taxable Value: 80,000.00
+CGST 9%: 7,200.00
+SGST 9%: 7,200.00
+Grand Total: 94,400.00
+""",
+        # The due date is printed first and is the leftmost thing a loose
+        # "date" label matches, so a joined heading that ranked below it would
+        # file this invoice in June — a period whose return is filed by the
+        # time anyone reconciles May.
+        invoice_number="PF/118",
+        invoice_date=date(2026, 5, 28),
+        taxable_value=money("80000.00"),
+        total_value=money("94400.00"),
+        cgst=money("7200.00"),
+        sgst=money("7200.00"),
+        tax_rate=Decimal("18"),
+        hsn_code="73181500",
+        supplier_gstin=SUPPLIER_GSTIN_SAME_STATE,
+        buyer_gstin=BUSINESS_GSTIN,
+    ),
 )
 
 
