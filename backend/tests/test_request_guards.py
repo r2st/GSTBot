@@ -316,6 +316,28 @@ class TestTheHealthProbesAndTheGlobalLimit:
         assert "/api/v1/health" not in _UNLIMITED_PATHS
         assert _UNLIMITED_PATHS < _QUIET_PATHS
 
+    def test_nothing_is_exempted_from_counting_that_is_not_a_route(self):
+        """An exemption for a path nothing serves is still a hole.
+
+        ``/metrics`` sat in this set for as long as it existed, and no exporter
+        has ever been mounted at it. The limiter matches the path before the
+        router gets a say, so every request to it was answered 404 without
+        being counted — an unmetered path, in the one set whose entire subject
+        is which paths may go uncounted and why. Nothing failed, which is the
+        point: an exemption is invisible until somebody uses it.
+
+        Asserted of ``_UNLIMITED_PATHS`` alone. The quiet set answers a
+        different question, and an entry there for a path that is not served
+        costs nothing — which is why ``/health`` unprefixed legitimately sits
+        in it, against a deployment that shortens ``API_V1_PREFIX``.
+        """
+        from app.core.middleware import _UNLIMITED_PATHS
+        from app.core.routes import collect_api_routes
+        from app.main import app
+
+        served = {route.path for route in collect_api_routes(app)}
+        assert served >= _UNLIMITED_PATHS, sorted(_UNLIMITED_PATHS - served)
+
 
 # --------------------------------------------------------------------------
 # Which routes carry a bucket of their own

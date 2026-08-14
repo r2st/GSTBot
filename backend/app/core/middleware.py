@@ -32,7 +32,11 @@ _INBOUND_HEADERS = ("x-request-id", "x-correlation-id")
 
 # Paths whose access lines are noise: a load balancer hits health every few
 # seconds and would otherwise be the bulk of the log volume.
-_QUIET_PATHS = frozenset({"/health", "/api/v1/health", "/api/v1/health/live", "/metrics"})
+#
+# ``/health`` unprefixed is deliberate — ``API_V1_PREFIX`` is configurable and
+# a deployment that shortens it still wants its probe quiet. ``/metrics`` was
+# here too, and nothing in this product has ever served it.
+_QUIET_PATHS = frozenset({"/health", "/api/v1/health", "/api/v1/health/live"})
 
 # Paths the *global rate limit* skips. A strict subset of the quiet set, and
 # the two are separate decisions that had been sharing one list.
@@ -53,7 +57,15 @@ _QUIET_PATHS = frozenset({"/health", "/api/v1/health", "/api/v1/health/live", "/
 # The global default is 300 a minute per address; a load balancer probing every
 # five seconds spends twelve of them, so the probes keep working and the flood
 # does not.
-_UNLIMITED_PATHS = frozenset({"/api/v1/health/live", "/metrics"})
+#
+# ``/metrics`` was the other entry, and there is no such route — no exporter
+# has ever been mounted, in this app or in front of it. An exemption naming a
+# path nothing serves is not harmless: the limiter checks the path before the
+# router does, so every request to it was answered 404 without being counted,
+# which is an unmetered path in a set whose whole subject is which paths may go
+# uncounted and why. Whichever way a metrics endpoint eventually arrives, the
+# decision to exempt it should be made then, against what it costs to serve.
+_UNLIMITED_PATHS = frozenset({"/api/v1/health/live"})
 
 
 class CorrelationIdMiddleware(BaseHTTPMiddleware):

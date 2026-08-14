@@ -146,10 +146,14 @@ thread up to a second).
 There are two layers, and a route can be exempt from one without the other. The
 per-route buckets above are dependencies; underneath them
 `RateLimitMiddleware` counts *every* path outside `_UNLIMITED_PATHS`, which
-today is `/health/live` and `/metrics` alone. Only `/health/live` is genuinely
-unbounded, and only because it touches no dependency — an unlimited flood of it
-costs one dict, while metering it would eventually have an orchestrator kill a
-pod for being healthy.
+today is `/health/live` alone. It is unbounded because it touches no dependency
+— an unlimited flood of it costs one dict, while metering it would eventually
+have an orchestrator kill a pod for being healthy. `/metrics` was in that set
+too and no route has ever answered it; the limiter matches before the router
+does, so it was an uncounted path with nothing behind it. Adding to this set is
+a decision about what a path costs to serve, and
+`tests/test_request_guards.py::test_nothing_is_exempted_from_counting_that_is_not_a_route`
+now requires that the path exists before the decision can be made about it.
 
 `/health/ready` carries no bucket of its own but is still counted globally, and
 that is deliberate rather than an oversight: it runs the same `SELECT 1` on the
