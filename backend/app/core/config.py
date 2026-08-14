@@ -183,6 +183,18 @@ class Settings(BaseSettings):
     smtp_use_tls: bool = True
     smtp_from_address: str = "alerts@gstbot.aiknol.com"
     smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
+    # Total tries, not retries: 1 disables retrying entirely. Only a transient
+    # refusal spends one — SMTP's 4xx, a dropped connection, a relay that is
+    # not answering yet. A 5xx names an address that does not exist and is
+    # final on the first try.
+    smtp_max_attempts: int = Field(default=3, ge=1, le=10)
+    # Ceiling on time spent *waiting between* attempts for a single message.
+    # Lower than OpenRouter's despite running in a worker rather than a
+    # request, because this cost is paid per recipient inside a loop over
+    # every tenant: the digest task's worst case is this budget multiplied by
+    # the whole address book, and a relay that is genuinely down should end
+    # the run in minutes, not hold a worker for the afternoon.
+    smtp_retry_max_wait_seconds: float = Field(default=15.0, ge=0, le=120)
 
     # ---- Uploads ----
     upload_dir: str = "./data/invoices"

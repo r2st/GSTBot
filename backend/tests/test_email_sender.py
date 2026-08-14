@@ -13,6 +13,7 @@ import smtplib
 import pytest
 
 from app.core.config import settings
+from app.services import email_sender
 from app.services.email_sender import EmailSendError, send_email
 
 
@@ -55,9 +56,26 @@ def _configured(monkeypatch):
     monkeypatch.setattr(settings, "smtp_use_tls", True)
     monkeypatch.setattr(settings, "smtp_from_address", "alerts@gstbot.aiknol.com")
     monkeypatch.setattr(settings, "smtp_timeout_seconds", 10.0)
+    # Pinned rather than left to the environment, so the retry assertions
+    # below count attempts this file chose and not whatever a deployment set.
+    monkeypatch.setattr(settings, "smtp_max_attempts", 3)
+    monkeypatch.setattr(settings, "smtp_retry_max_wait_seconds", 15.0)
     _FakeSMTP.instances = []
     monkeypatch.setattr(smtplib, "SMTP", _FakeSMTP)
     yield
+
+
+@pytest.fixture(autouse=True)
+def slept(monkeypatch) -> list[float]:
+    """Every backoff delay, in order, without waiting any of them.
+
+    Autouse because a transient failure now retries by default: without this
+    the two failure tests that predate retrying would each spend three real
+    seconds asleep proving something unrelated to timing.
+    """
+    delays: list[float] = []
+    monkeypatch.setattr(email_sender, "_sleep", delays.append)
+    return delays
 
 
 def test_a_message_is_sent_with_the_configured_from_address():
@@ -117,3 +135,207 @@ def test_a_connection_failure_becomes_an_email_send_error(monkeypatch):
 
     with pytest.raises(EmailSendError):
         send_email(to="owner@example.com", subject="s", body="b")
+
+
+# ---------------------------------------------------------------------------
+# Retrying the refusals that go away by themselves
+# ---------------------------------------------------------------------------
+
+class _FailsThenSends(_FakeSMTP):
+    """Raises ``failures`` worth of ``error`` on connect, then behaves."""
+
+    failures = 0
+    error: Exception = smtplib.SMTPServerDisconnected("relay hung up")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if len(_FakeSMTP.instances) <= type(self).failures:
+            raise type(self).error
+
+
+def _relay(monkeypatch, *, failures: int, error: Exception) -> None:
+    attempt = type("_Attempt", (_FailsThenSends,), {"failures": failures, "error": error})
+    monkeypatch.setattr(smtplib, "SMTP", attempt)
+
+
+class TestATransientRefusalIsRetried:
+    """The digest carries filing deadlines, and a failed send waits a day.
+
+    ``FAILED`` alerts stay sendable, so nothing is dropped — but the recovery
+    already in place is tomorrow's run, and tomorrow is not a degraded
+    delivery for an alert about a return due tomorrow.
+    """
+
+    def test_a_relay_that_hung_up_gets_asked_again(self, monkeypatch):
+        _relay(monkeypatch, failures=1, error=smtplib.SMTPServerDisconnected("bye"))
+        send_email(to="owner@example.com", subject="s", body="b")
+        assert _FakeSMTP.instances[-1].sent is not None
+
+    def test_a_4xx_is_smtps_transient_class_and_is_retried(self, monkeypatch):
+        # The rule that is easiest to get backwards: SMTP's 4xx means "try
+        # again later", the opposite way round to HTTP's.
+        _relay(
+            monkeypatch,
+            failures=1,
+            error=smtplib.SMTPResponseException(451, b"4.7.1 greylisted, retry"),
+        )
+        send_email(to="owner@example.com", subject="s", body="b")
+        assert _FakeSMTP.instances[-1].sent is not None
+
+    def test_a_relay_that_is_not_listening_yet_is_retried(self, monkeypatch):
+        _relay(monkeypatch, failures=2, error=ConnectionRefusedError("refused"))
+        send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 3
+
+    def test_it_gives_up_after_the_configured_attempts(self, monkeypatch):
+        monkeypatch.setattr(settings, "smtp_max_attempts", 3)
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPServerDisconnected("bye"))
+
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 3
+
+    def test_one_attempt_disables_retrying_entirely(self, monkeypatch):
+        monkeypatch.setattr(settings, "smtp_max_attempts", 1)
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPServerDisconnected("bye"))
+
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_the_error_raised_is_the_one_that_kept_happening(self, monkeypatch):
+        """Not a generic "gave up" — the relay's own words are the only clue."""
+        _relay(
+            monkeypatch,
+            failures=99,
+            error=smtplib.SMTPResponseException(421, b"service not available"),
+        )
+        with pytest.raises(EmailSendError, match="service not available"):
+            send_email(to="owner@example.com", subject="s", body="b")
+
+
+class TestAPermanentRefusalIsNotRetried:
+    """Asking twice turns a clear failure into a slow one."""
+
+    def test_a_mailbox_that_does_not_exist_is_refused_once(self, monkeypatch):
+        _relay(
+            monkeypatch,
+            failures=99,
+            error=smtplib.SMTPRecipientsRefused({"owner@example.com": (550, b"no such user")}),
+        )
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_a_rejected_password_is_not_offered_again(self, monkeypatch):
+        """Repeating a bad login is how a relay decides to lock the account.
+
+        It carries a code, so the 4xx/5xx rule already answers this without
+        the class having to be named — which is the point: a 535 is permanent
+        because it is a 5xx, not because somebody remembered to list it.
+        """
+        _relay(
+            monkeypatch,
+            failures=99,
+            error=smtplib.SMTPAuthenticationError(535, b"5.7.8 bad credentials"),
+        )
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_a_refusal_naming_no_reason_is_not_retried(self, monkeypatch):
+        """``all()`` over an empty mapping is true, which would read as transient."""
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPRecipientsRefused({}))
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_one_permanent_address_among_deferred_ones_ends_it(self, monkeypatch):
+        """The message cannot be delivered as addressed however often it is offered."""
+        _relay(
+            monkeypatch,
+            failures=99,
+            error=smtplib.SMTPRecipientsRefused(
+                {"a@example.com": (451, b"deferred"), "b@example.com": (550, b"no such user")}
+            ),
+        )
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_an_unparseable_code_is_not_kept_asking(self, monkeypatch):
+        _relay(
+            monkeypatch,
+            failures=99,
+            error=smtplib.SMTPResponseException("not-a-code", b"confused relay"),
+        )
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_an_smtp_error_with_no_code_at_all_is_final(self, monkeypatch):
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPNotSupportedError("no STARTTLS"))
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert len(_FakeSMTP.instances) == 1
+
+
+class TestTheBackoffSchedule:
+
+    def test_it_doubles_and_carries_jitter(self, monkeypatch, slept):
+        monkeypatch.setattr(settings, "smtp_max_attempts", 4)
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPServerDisconnected("bye"))
+
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+
+        # 1s, 2s, 4s, each with up to half a second of jitter on top.
+        assert len(slept) == 3
+        assert 1.0 <= slept[0] < 1.5
+        assert 2.0 <= slept[1] < 2.5
+        assert 4.0 <= slept[2] < 4.5
+
+    def test_jitter_keeps_concurrent_workers_from_re_colliding(self, monkeypatch):
+        """A relay that rate-limited a burst must not get the burst back at once."""
+        firsts = set()
+        for _ in range(20):
+            firsts.add(round(email_sender._BACKOFF_BASE_SECONDS + email_sender._jitter(), 6))
+        assert len(firsts) > 1
+
+    def test_a_wait_that_would_cross_the_budget_is_not_taken(self, monkeypatch, slept):
+        """This cost is paid per recipient across every tenant in the run."""
+        monkeypatch.setattr(settings, "smtp_max_attempts", 10)
+        monkeypatch.setattr(settings, "smtp_retry_max_wait_seconds", 4.0)
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPServerDisconnected("bye"))
+
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+
+        # 1s and 2s fit; the third would take the total past four.
+        assert len(slept) == 2
+        assert sum(slept) <= 4.0
+
+    def test_a_zero_budget_leaves_one_attempt_in_practice(self, monkeypatch, slept):
+        monkeypatch.setattr(settings, "smtp_retry_max_wait_seconds", 0.0)
+        _relay(monkeypatch, failures=99, error=smtplib.SMTPServerDisconnected("bye"))
+
+        with pytest.raises(EmailSendError):
+            send_email(to="owner@example.com", subject="s", body="b")
+        assert slept == []
+        assert len(_FakeSMTP.instances) == 1
+
+    def test_a_send_that_succeeds_first_time_waits_for_nothing(self, slept):
+        send_email(to="owner@example.com", subject="s", body="b")
+        assert slept == []
+
+
+def test_the_retried_send_is_the_same_message_not_a_rebuilt_one(monkeypatch):
+    """A retry must not resend a half-built or differently-addressed message."""
+    _relay(monkeypatch, failures=1, error=smtplib.SMTPServerDisconnected("bye"))
+    send_email(to="owner@example.com", subject="Deadlines", body="Body text")
+
+    delivered = _FakeSMTP.instances[-1].sent
+    assert delivered["To"] == "owner@example.com"
+    assert delivered["Subject"] == "Deadlines"
+    assert delivered["From"] == "alerts@gstbot.aiknol.com"
+    assert delivered.get_content().strip() == "Body text"
