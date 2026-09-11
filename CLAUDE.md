@@ -72,11 +72,21 @@ commit that earns it; never write a test purely to move the number.
 **A mutation target's test list is a claim, and it has been wrong.** Each entry
 in `tools/mutation.py` names the files that cover its module, and a line those
 files never *run* produces survivors that look exactly like missing assertions.
-Five of the fourteen were short — `filing` scored 68.8% against `test_filing.py`
+Five of the thirteen were short — `filing` scored 68.8% against `test_filing.py`
 alone while a seventh of the module is only reached by writing a return and
 reading it back in `test_filing_record.py`. Run `--verify-tests` before reading
 a score, and when you add a test file that reaches a target module by a path no
 listed file takes, add it to the target.
+
+**A survivor that is not a missing assertion is recorded where it lives.** Some
+mutants no test can kill — an edge the guard above it has already returned on, a
+rounding whose every value is exact, a cap the pattern feeding it cannot reach.
+Left unexplained, each one is re-investigated on every run. The convention is a
+comment at the line saying which mutant survives and what makes the two readings
+indistinguishable, so a *new* survivor is the thing that stands out. Prove the
+claim by running it, not by reading: `reconciliation` and `supplier_score` sit
+at 96.5% and 97.4% with every remaining survivor equivalent, and `invoice_parser`
+at 96.8% for the same reason — those are ceilings, not gaps.
 
 **Comments explain why, not what.** This codebase's comments carry the reasoning
 that would otherwise be lost — why a 200 and not a 503, why this window and not
