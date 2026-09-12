@@ -8,7 +8,9 @@ transient database blip turns into every pod being killed at once:
 * ``/health/ready`` — should traffic be routed here? Fails on a dead database,
   because an instance that cannot read invoices should leave the rotation.
 * ``/health`` — the operator's view: every dependency, with its latency, and a
-  ``health`` field that distinguishes "degraded" from "down".
+  ``health`` field that distinguishes "degraded" from "down". "Every" includes
+  the upload volume — a disk is a dependency that fails, and it used to be
+  probed once at boot and never again.
 
 ``/health`` returns 200 while degraded, on purpose. The product still ingests
 invoices without a model provider (heuristics take over) and without Redis
@@ -28,6 +30,7 @@ from app.core.config import settings
 from app.core.database import check_database, get_db, pool_status
 from app.core.rate_limit import RateLimit
 from app.core.redis_client import ping as redis_ping
+from app.core.storage import check_upload_dir
 from app.services import gstin as gstin_service
 from app.services import job_health
 from app.services.openrouter_client import is_configured
@@ -95,6 +98,7 @@ def health(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
     """Liveness plus every dependency that can fail independently."""
     database_ok, database_ms, database_error = _timed(lambda: check_database(db))
     redis_ok, redis_ms, _ = _timed(lambda: (redis_ping(), None))
+    storage_ok, storage_ms, storage_error = _timed(check_upload_dir)
     ai_configured = is_configured()
 
     checks: dict[str, Any] = {
@@ -116,12 +120,26 @@ def health(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
             "provider": "openrouter",
             "model": settings.openrouter_model,
         },
+        # A real write, not a permission check: a full disk and a read-only
+        # remount both pass ``os.access`` and both fail every upload. Rated
+        # ``degraded`` rather than ``unhealthy`` because the rest of the
+        # product — the dashboard, reconciliation, filing prep, every read —
+        # is served from the database and keeps working; a 503 here would
+        # take the instance out of rotation for a volume that is usually
+        # shared with the instance that replaces it.
+        "storage": {
+            "status": "ok" if storage_ok else "unavailable",
+            "latency_ms": storage_ms,
+            **({"error": storage_error} if storage_error else {}),
+            "path": settings.upload_dir,
+            "required_for": ["invoice uploads"],
+        },
     }
 
     if not database_ok:
         overall = "unhealthy"
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    elif not redis_ok or not ai_configured:
+    elif not redis_ok or not ai_configured or not storage_ok:
         overall = "degraded"
     else:
         overall = "ok"
@@ -136,6 +154,7 @@ def health(response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
         "database": "ok" if database_ok else "unavailable",
         "redis": "ok" if redis_ok else "unavailable",
         "ai": "configured" if ai_configured else "unconfigured",
+        "storage": "ok" if storage_ok else "unavailable",
         "health": overall,
         "checks": checks,
     }

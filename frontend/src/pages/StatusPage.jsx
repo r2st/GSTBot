@@ -39,6 +39,12 @@ const DEPENDENCIES = {
       "The AI extractor is not configured, so invoices are read with the " +
       "built-in patterns alone. Figures are more likely to need correcting.",
   },
+  storage: {
+    label: "Upload storage",
+    down:
+      "The disk uploads are written to is full or read-only. New uploads will " +
+      "fail until it is cleared; everything already uploaded is unaffected.",
+  },
 };
 
 // Same idea for the scheduled jobs. Keyed on the names in

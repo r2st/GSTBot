@@ -19,7 +19,8 @@ from pathlib import Path
 import pytest
 
 from app import main
-from app.main import _writable, app
+from app.core.storage import writable
+from app.main import app
 
 # Root ignores the permission bits, so a 0o500 directory is still writable and
 # the two read-only cases would assert the opposite of what they mean. Skipped
@@ -54,12 +55,12 @@ def boot(monkeypatch, tmp_path):
 
 
 class TestWritableProbe:
-    def test_a_normal_directory_is_writable(self, tmp_path):
-        assert _writable(tmp_path)
+    def test_a_normal_directory_iswritable(self, tmp_path):
+        assert writable(tmp_path)
 
     def test_it_leaves_nothing_behind(self, tmp_path):
         """The probe file must not show up in a listing of the upload dir."""
-        _writable(tmp_path)
+        writable(tmp_path)
 
         assert list(tmp_path.iterdir()) == []
 
@@ -68,12 +69,12 @@ class TestWritableProbe:
         locked = tmp_path / "locked"
         locked.mkdir(mode=0o500)
         try:
-            assert not _writable(locked)
+            assert not writable(locked)
         finally:
             locked.chmod(0o700)
 
-    def test_a_directory_that_is_not_there_is_not_writable(self, tmp_path):
-        assert not _writable(tmp_path / "absent")
+    def test_a_directory_that_is_not_there_is_notwritable(self, tmp_path):
+        assert not writable(tmp_path / "absent")
 
 
 @pytest.mark.asyncio

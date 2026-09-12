@@ -1,10 +1,19 @@
 """Health and the public metadata endpoints."""
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from app.routers import misc
 from tests.conftest import BUSINESS_GSTIN
+
+# Root ignores the permission bits, so a 0o500 directory is still writable and
+# the read-only case would assert the opposite of what it means.
+not_root = pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses directory permissions",
+)
 
 
 @pytest.fixture()
@@ -15,11 +24,13 @@ def dependencies(monkeypatch):
     have to be able to fail one at a time.
     """
 
-    def configure(*, database=True, redis=True, ai=True):
+    def configure(*, database=True, redis=True, ai=True, storage=True):
         result = (True, None) if database else (False, "OperationalError")
         monkeypatch.setattr(misc, "check_database", lambda _db: result)
         monkeypatch.setattr(misc, "redis_ping", lambda: redis)
         monkeypatch.setattr(misc, "is_configured", lambda: ai)
+        volume = (True, None) if storage else (False, "ReadOnly")
+        monkeypatch.setattr(misc, "check_upload_dir", lambda: volume)
 
     return configure
 
@@ -47,10 +58,15 @@ class TestHealthGrades:
         assert body["health"] == "ok"
         assert body["checks"]["redis"]["status"] == "ok"
         assert body["checks"]["ai"]["status"] == "configured"
+        assert body["checks"]["storage"]["status"] == "ok"
 
     @pytest.mark.parametrize(
         ("down", "kwargs"),
-        [("redis", {"redis": False}), ("the model provider", {"ai": False})],
+        [
+            ("redis", {"redis": False}),
+            ("the model provider", {"ai": False}),
+            ("the upload volume", {"storage": False}),
+        ],
     )
     def test_a_soft_dependency_degrades_without_failing(self, client, dependencies, down, kwargs):
         """200 while degraded, on purpose.
@@ -84,6 +100,59 @@ class TestHealthGrades:
 
         assert isinstance(database["latency_ms"], float)
         assert "type" in database["pool"]
+
+    def test_an_unwritable_upload_volume_is_named_and_degrades(self, client, dependencies):
+        """The disk is the fourth thing an upload needs, and the only one that
+        was probed at boot and never again. A monitor watching this used to see
+        ``ok`` for as long as the volume stayed full."""
+        dependencies(storage=False)
+        body = client.get("/api/v1/health").json()
+
+        assert body["storage"] == "unavailable"
+        assert body["health"] == "degraded"
+        storage = body["checks"]["storage"]
+        assert storage["status"] == "unavailable"
+        assert storage["error"] == "ReadOnly"
+        assert storage["required_for"] == ["invoice uploads"]
+        assert isinstance(storage["latency_ms"], float)
+
+    @not_root
+    def test_a_volume_that_went_read_only_after_boot_is_seen_without_a_restart(
+        self, client, monkeypatch, tmp_path
+    ):
+        """The point of checking on every call rather than once at startup."""
+        from app.core.config import settings
+
+        volume = tmp_path / "uploads"
+        volume.mkdir()
+        monkeypatch.setattr(settings, "upload_dir", str(volume))
+        assert client.get("/api/v1/health").json()["checks"]["storage"]["status"] == "ok"
+
+        volume.chmod(0o500)
+        try:
+            storage = client.get("/api/v1/health").json()["checks"]["storage"]
+        finally:
+            volume.chmod(0o700)
+
+        assert storage["status"] == "unavailable"
+        assert storage["error"] == "ReadOnly"
+        assert storage["path"] == str(volume)
+
+    def test_a_volume_that_cannot_be_created_names_the_reason(
+        self, client, monkeypatch, tmp_path
+    ):
+        from app.core.config import settings
+
+        blocker = tmp_path / "file-not-dir"
+        blocker.write_bytes(b"")
+        monkeypatch.setattr(settings, "upload_dir", str(blocker / "uploads"))
+
+        storage = client.get("/api/v1/health").json()["checks"]["storage"]
+
+        assert storage["status"] == "unavailable"
+        # The class of the OSError, so "a file is where the directory should
+        # be" reads differently from "permission denied on the parent".
+        assert storage["error"] in {"NotADirectoryError", "FileExistsError"}
 
     def test_a_check_that_raises_is_reported_rather_than_500ing(self, client, monkeypatch):
         """A health endpoint that can itself crash tells a monitor nothing."""

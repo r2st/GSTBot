@@ -4,7 +4,6 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +24,7 @@ from app.core.middleware import (
 from app.core.openapi import install_openapi
 from app.core.redis_client import close as redis_close
 from app.core.redis_client import ping as redis_ping
+from app.core.storage import check_upload_dir
 from app.routers import (
     alerts,
     auth,
@@ -166,16 +166,6 @@ TAGS_METADATA = [
 ]
 
 
-def _writable(directory: Path) -> bool:
-    probe = directory / ".write-probe"
-    try:
-        probe.write_bytes(b"")
-        probe.unlink()
-        return True
-    except OSError:
-        return False
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Boot checks. Anything fatal has already raised out of Settings by now.
@@ -192,14 +182,15 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         logger.warning("Configuration warning: %s", warning)
 
     # Created at startup rather than on first upload, so a bad path or a
-    # read-only volume fails at deploy time instead of on a user's file.
-    upload_dir = Path(settings.upload_dir)
-    try:
-        upload_dir.mkdir(parents=True, exist_ok=True)
-        if not _writable(upload_dir):
-            logger.error("UPLOAD_DIR %s is not writable — uploads will fail", upload_dir)
-    except OSError as exc:
-        logger.error("UPLOAD_DIR %s could not be created: %s", upload_dir, exc)
+    # read-only volume fails at deploy time instead of on a user's file. The
+    # same probe backs ``/health`` from then on: this line is the only place a
+    # volume that went bad *after* boot used to be noticed, and it was never
+    # written again.
+    storage_ok, storage_error = check_upload_dir()
+    if storage_error == "ReadOnly":
+        logger.error("UPLOAD_DIR %s is not writable — uploads will fail", settings.upload_dir)
+    elif not storage_ok:
+        logger.error("UPLOAD_DIR %s could not be created: %s", settings.upload_dir, storage_error)
 
     database_ok, database_error = check_database()
     if database_ok:

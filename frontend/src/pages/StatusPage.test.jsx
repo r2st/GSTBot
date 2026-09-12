@@ -13,6 +13,7 @@ function health(overrides = {}) {
     database: "ok",
     redis: "ok",
     ai: "configured",
+    storage: "ok",
     health: "ok",
     checks: {
       database: { status: "ok", latency_ms: 1.2, pool: {} },
@@ -22,6 +23,12 @@ function health(overrides = {}) {
         required_for: ["distributed rate limiting", "celery broker"],
       },
       ai: { status: "configured", provider: "openrouter", model: "openai/gpt-oss-20b:free" },
+      storage: {
+        status: "ok",
+        latency_ms: 0.2,
+        path: "/var/lib/gstbot/uploads",
+        required_for: ["invoice uploads"],
+      },
     },
     ...overrides,
   };
@@ -125,6 +132,34 @@ describe("StatusPage", () => {
       ).toBeInTheDocument();
     });
 
+    it("names the upload disk when it is the thing that is down", async () => {
+      // The one dependency that was probed once at boot and never again; the
+      // page has to render it or the check exists only for curl.
+      global.fetch = respond({
+        healthBody: health({
+          health: "degraded",
+          storage: "unavailable",
+          checks: {
+            ...health().checks,
+            storage: {
+              status: "unavailable",
+              latency_ms: 0.2,
+              error: "ReadOnly",
+              path: "/var/lib/gstbot/uploads",
+              required_for: ["invoice uploads"],
+            },
+          },
+        }),
+      });
+      renderPage();
+
+      expect(await screen.findByText(/Running, with something degraded/)).toBeInTheDocument();
+      expect(screen.getByText("Upload storage")).toBeInTheDocument();
+      expect(
+        screen.getByText(/The disk uploads are written to is full or read-only/),
+      ).toBeInTheDocument();
+    });
+
     it("treats an unconfigured extractor as healthy-but-degraded, not as down", async () => {
       // No OpenRouter key is a supported deployment, not a fault: the parser
       // falls back to its own patterns. Saying so is the point.
@@ -151,7 +186,8 @@ describe("StatusPage", () => {
       });
       renderPage();
 
-      expect(await screen.findAllByText("unknown")).toHaveLength(2);
+      // Every dependency the page knows about except the one that answered.
+      expect(await screen.findAllByText("unknown")).toHaveLength(3);
     });
 
     it("shows the database as the reason when the API answers 503", async () => {
