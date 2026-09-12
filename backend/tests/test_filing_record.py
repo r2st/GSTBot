@@ -215,6 +215,44 @@ class TestRecordingIsIdempotent:
         assert stored.arn == "AA270426123456Z"
         assert gst_calendar.ist_date(stored.filed_at) == date(2026, 5, 18)
 
+    def test_supplying_the_arn_later_does_not_move_the_filing_date(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        # The documented flow: mark it filed on the day, add the ARN once the
+        # acknowledgement arrives. The date was right the first time and the
+        # second call says nothing about it, so "not supplied" has to mean
+        # "unchanged" here exactly as it does for the ARN — otherwise the
+        # second call quietly re-dates an on-time filing to whatever today is.
+        # TODAY is past the GSTR-3B due date, so that re-dating would make the
+        # return late and put a late fee on it that was never owed.
+        record(auth_client, filed_on="2026-05-18")
+
+        later = record(auth_client, arn="AA270426123456Z")
+        assert later.json()["filed_at"].startswith("2026-05-18")
+        assert later.json()["filed_late"] is False
+
+        fee = auth_client.get(f"/api/v1/filing/gstr3b/late-fee?period={PERIOD}").json()
+        assert fee["days_late"] == 0
+        assert Decimal(fee["late_fee_total"]) == Decimal("0.00")
+
+    def test_a_correction_leaves_the_record_of_what_was_filed_alone(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        # The first recording — straight after the export — is the closest
+        # thing to what went to the portal. A sale booked afterwards belongs
+        # to a later period's amendment, not to this return; adding the ARN
+        # must not rewrite the record to say it was declared.
+        sale(db_session, business.id)
+        first = record(auth_client, filed_on="2026-05-18").json()
+        assert first["invoice_count"] == 1
+
+        sale(db_session, business.id)
+        db_session.commit()
+
+        corrected = record(auth_client, arn="AA270426123456Z").json()
+        assert corrected["invoice_count"] == 1
+        assert Decimal(corrected["total_taxable_value"]) == Decimal("100000.00")
+
     def test_the_two_returns_for_one_period_are_separate_records(
         self, auth_client, db_session, business, frozen_today
     ):

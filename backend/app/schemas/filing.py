@@ -68,7 +68,11 @@ class RecordFilingIn(BaseModel):
         ),
     )
     filed_on: date | None = Field(
-        default=None, description="Defaults to today in India, where the deadline falls."
+        default=None,
+        description=(
+            "Defaults to today in India, where the deadline falls. On a "
+            "re-record, omitting it keeps the date already recorded."
+        ),
     )
 
 

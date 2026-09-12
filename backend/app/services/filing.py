@@ -576,13 +576,25 @@ def record_filing(
     date rather than filing a second time, which matches the partial unique
     index on the table — and matches what the caller means, since there is only
     ever one live GSTR-1 for a period. An omitted ARN is "not to hand" and
-    leaves a stored one intact; only a supplied one replaces it.
+    leaves a stored one intact; only a supplied one replaces it. An omitted
+    date on a re-record is "unchanged" for the same reason: the documented
+    flow is to mark the return filed on the day and add the ARN when the
+    acknowledgement arrives, and defaulting that second call to today re-dated
+    every on-time filing whose ARN came after the due date — which put a late
+    fee on it, and had the alerting say it was late.
 
     ``data`` is the return as *this application builds it now*. Immediately
     after an export — which is the flow this exists for — that is exactly what
     went to the portal. Recorded months later, against books that have since
     been corrected, it is not, and it is stored as the best available record
     rather than as proof of what was submitted. The ARN is the proof.
+
+    A re-record leaves that snapshot alone. The first recording is the closest
+    thing to what the portal received, and the portal takes no revised return
+    for a period — a sale booked after filing is declared as an amendment in a
+    later month. Rebuilding the snapshot while adding the ARN rewrote the
+    record to say that sale was in the filed return, and the totals shown
+    beside the ARN stopped agreeing with the acknowledgement they sat next to.
     """
     if return_type not in gst_calendar.DUE_DAY:
         raise FilingNotRecordable(
@@ -591,8 +603,26 @@ def record_filing(
             + " can be recorded as filed."
         )
 
+    # Before anything is mutated: a rejected ARN should leave the record it was
+    # offered against exactly as it was, not half-updated in the session.
+    supplied_arn = normalise_arn(arn)
+
+    existing = db.scalar(
+        select(GSTRReturn).where(
+            GSTRReturn.business_id == business.id,
+            GSTRReturn.period == period,
+            GSTRReturn.return_type == return_type,
+            GSTRReturn.deleted_at.is_(None),
+        )
+    )
+
     today = gst_calendar.today_ist()
-    filed_on = filed_on or today
+    if filed_on is None:
+        # A live row here is always one this function wrote, so it carries a
+        # date. It was checked when it was recorded and is re-checked below,
+        # which can only pass again: "today" moves one way and the window
+        # only widens.
+        filed_on = today if existing is None else gst_calendar.ist_date(existing.filed_at)
     if filed_on > today:
         raise FilingNotRecordable(
             f"A filing date of {filed_on.isoformat()} is in the future."
@@ -610,18 +640,6 @@ def record_filing(
             f"had not ended. The return opens on {opens_on.isoformat()}."
         )
 
-    # Before anything is mutated: a rejected ARN should leave the record it was
-    # offered against exactly as it was, not half-updated in the session.
-    supplied_arn = normalise_arn(arn)
-
-    existing = db.scalar(
-        select(GSTRReturn).where(
-            GSTRReturn.business_id == business.id,
-            GSTRReturn.period == period,
-            GSTRReturn.return_type == return_type,
-            GSTRReturn.deleted_at.is_(None),
-        )
-    )
     record = existing or GSTRReturn(
         business_id=business.id, period=period, return_type=return_type
     )
@@ -639,24 +657,23 @@ def record_filing(
     record.due_date = datetime.combine(
         gst_calendar.due_date(period, return_type), time(), tzinfo=gst_calendar.IST
     )
-    record.data = (
-        build_gstr1(db, business, period)
-        if return_type is ReturnType.GSTR1
-        else build_gstr3b(db, business, period)
-    )
-
-    # Both returns summarise outward supplies, so both take their totals from
-    # sales. The purchase side reaches GSTR-3B as input credit, which is a
-    # different figure and is inside ``data``.
-    totals = invoice_service.tax_summary(db, business.id, period)["sales"]
-    record.invoice_count = int(totals["count"])
-    record.total_taxable_value = _q(Decimal(totals["taxable_value"]))
-    record.total_cgst = _q(Decimal(totals["cgst"]))
-    record.total_sgst = _q(Decimal(totals["sgst"]))
-    record.total_igst = _q(Decimal(totals["igst"]))
-    record.total_cess = _q(Decimal(totals["cess"]))
-
     if existing is None:
+        record.data = (
+            build_gstr1(db, business, period)
+            if return_type is ReturnType.GSTR1
+            else build_gstr3b(db, business, period)
+        )
+
+        # Both returns summarise outward supplies, so both take their totals
+        # from sales. The purchase side reaches GSTR-3B as input credit, which
+        # is a different figure and is inside ``data``.
+        totals = invoice_service.tax_summary(db, business.id, period)["sales"]
+        record.invoice_count = int(totals["count"])
+        record.total_taxable_value = _q(Decimal(totals["taxable_value"]))
+        record.total_cgst = _q(Decimal(totals["cgst"]))
+        record.total_sgst = _q(Decimal(totals["sgst"]))
+        record.total_igst = _q(Decimal(totals["igst"]))
+        record.total_cess = _q(Decimal(totals["cess"]))
         db.add(record)
     db.commit()
     db.refresh(record)
