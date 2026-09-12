@@ -796,6 +796,79 @@ class TestTheWaitingBudget:
 
 
 # --------------------------------------------------------------------------
+# what a call that worked leaves behind
+# --------------------------------------------------------------------------
+
+class TestASuccessfulCallIsMeasured:
+    """The only place the provider's latency is measured.
+
+    The row records ``parsed_with`` and a confidence, not how long the model
+    took or how many attempts it cost — and that is what tells "the free tier
+    is slow today" from "the model is down" once uploads start taking a
+    minute. Until GB003 a call that worked logged nothing at all.
+    """
+
+    @pytest.fixture()
+    def scripted(self, monkeypatch):
+        calls: list[dict] = []
+        queue: list = []
+
+        def fake_post(url, **kwargs):
+            calls.append({"url": url, **kwargs})
+            item = queue.pop(0) if queue else _FakeResponse(payload=_completion("ok"))
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+        monkeypatch.setattr(httpx, "post", fake_post)
+        return {"calls": calls, "queue": queue}
+
+    @staticmethod
+    def _line(caplog):
+        return next(
+            record for record in caplog.records
+            if record.name == "app.services.openrouter_client"
+            and record.getMessage() == "OpenRouter call succeeded"
+        )
+
+    def test_the_model_and_the_latency_are_on_the_line(self, configured, transport, caplog):
+        with caplog.at_level(logging.INFO):
+            chat_completion(MESSAGES, model="vendor/some-model")
+
+        line = self._line(caplog)
+        assert line.model == "vendor/some-model"
+        assert isinstance(line.latency_ms, float)
+        assert line.latency_ms >= 0
+
+    def test_the_default_model_is_named_rather_than_left_blank(
+        self, configured, transport, caplog
+    ):
+        with caplog.at_level(logging.INFO):
+            chat_completion(MESSAGES)
+        assert self._line(caplog).model == settings.openrouter_model
+
+    def test_a_call_that_needed_a_retry_says_so(self, configured, scripted, caplog):
+        # ``attempt`` is what turns a latency figure into a diagnosis: two
+        # attempts at 30s each is throttling, one attempt at 60s is a slow
+        # model.
+        scripted["queue"].append(_FakeResponse(status_code=429, payload={"error": "x"}))
+
+        with caplog.at_level(logging.INFO):
+            chat_completion(MESSAGES)
+
+        line = self._line(caplog)
+        assert line.attempt == 2
+        assert line.attempts == settings.openrouter_max_attempts
+
+    def test_a_call_that_failed_leaves_no_success_line(self, configured, transport, caplog):
+        transport["state"]["response"] = _FakeResponse(status_code=401, payload={"error": "x"})
+        with caplog.at_level(logging.INFO), pytest.raises(OpenRouterError):
+            chat_completion(MESSAGES)
+        with pytest.raises(StopIteration):
+            self._line(caplog)
+
+
+# --------------------------------------------------------------------------
 # chat_json
 # --------------------------------------------------------------------------
 

@@ -205,6 +205,7 @@ def chat_completion(
     attempts = max(1, settings.openrouter_max_attempts)
     budget = settings.openrouter_retry_max_wait_seconds
     waited = 0.0
+    started = time.perf_counter()
     # Only ever set from a *transient* failure, so raising it after the last
     # attempt reports the thing that actually kept failing rather than a
     # generic "gave up".
@@ -243,6 +244,23 @@ def chat_completion(
                     f"OpenRouter returned {response.status_code}: {response.text[:500]}"
                 )
             else:
+                # The one line a successful call leaves behind, and the only
+                # place the model's latency is measured. The row records
+                # ``parsed_with`` and a confidence, but not how long the
+                # provider took or how many attempts it cost — which is what
+                # distinguishes "the free tier is slow today" from "the model
+                # is down" when uploads start taking a minute. Wall-clock over
+                # the whole call, retries and their sleeps included, because
+                # that is what the user waited.
+                logger.info(
+                    "OpenRouter call succeeded",
+                    extra={
+                        "model": payload["model"],
+                        "attempt": attempt,
+                        "attempts": attempts,
+                        "latency_ms": round((time.perf_counter() - started) * 1000, 2),
+                    },
+                )
                 return _completion_text(response)
 
         if attempt == attempts:

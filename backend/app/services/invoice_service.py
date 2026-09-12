@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -519,6 +520,11 @@ def process_invoice(
     # worth reading.
     number: str | None = None
     counterparty: str | None = None
+    started = time.perf_counter()
+    # Read once, up front: a rollback below expires the instance, and the
+    # tenant is the one field every line out of here has to carry — a log
+    # searched by business is how "my April upload failed" gets answered.
+    business_id = invoice.business_id
 
     try:
         path = Path(invoice.storage_path) if invoice.storage_path else None
@@ -535,6 +541,17 @@ def process_invoice(
         apply_parsed(db, invoice, parsed, business_gstin=business_gstin)
         number, counterparty = invoice.invoice_number, invoice.counterparty_gstin
         db.commit()
+        # The success line. Until this existed a parse that worked left no
+        # trace at all — the task's return value goes to a result backend
+        # nobody reads — so the rate at which the model was falling back to
+        # the heuristics, the one number that says whether the provider is
+        # earning its keep, could only be had by querying ``parsed_with`` off
+        # the rows. ``parsed_with`` names the path taken; ``duration_ms`` is
+        # the whole parse, file read to commit.
+        logger.info(
+            "Invoice %s parsed", invoice.id,
+            extra=_parse_outcome(invoice, business_id, started),
+        )
     except IntegrityError:
         # The same invoice number from the same counterparty is already on
         # file. Only discoverable here: the number is not known until the
@@ -549,24 +566,62 @@ def process_invoice(
             counterparty_gstin=counterparty,
             invoice_number=number,
         )
-        logger.info(
-            "Invoice %s duplicates invoice %s", invoice.id, existing.id if existing else "?"
-        )
         invoice.status = InvoiceStatus.FAILED
         invoice.parse_error = _duplicate_message(number, existing)
         db.commit()
+        logger.info(
+            "Invoice %s duplicates invoice %s", invoice.id, existing.id if existing else "?",
+            extra=_parse_outcome(invoice, business_id, started, duplicate_of=existing),
+        )
     except Exception as exc:  # noqa: BLE001 - the row is the error channel
         # Rollback before writing the failure: a half-applied extraction is
         # worse than none, and after a failed flush the session refuses to
         # commit anything at all until it is cleared.
         db.rollback()
-        logger.exception("Invoice %s failed to parse", invoice.id)
         invoice.status = InvoiceStatus.FAILED
         invoice.parse_error = str(exc)[:2000]
         db.commit()
+        # Logged after the write-back, not before it: the outcome fields read
+        # the row, and before the commit the row still says ``processing``.
+        # ``exc_info`` is the exception that was in flight, so this is still
+        # the traceback a plain ``logger.exception`` would have carried.
+        logger.error(
+            "Invoice %s failed to parse", invoice.id,
+            exc_info=exc,
+            extra=_parse_outcome(invoice, business_id, started),
+        )
 
     db.refresh(invoice)
     return invoice
+
+
+def _parse_outcome(
+    invoice: Invoice,
+    business_id: int,
+    started: float,
+    *,
+    duplicate_of: Invoice | None = None,
+) -> dict[str, object]:
+    """The structured fields every line out of :func:`process_invoice` carries.
+
+    One builder for all three outcomes so a dashboard can group by ``status``
+    and ``parsed_with`` without caring which branch wrote the line. The
+    tenant is passed in rather than read off the row because the failure
+    branch has rolled back by the time it logs, and an expired instance
+    would issue a query to answer for a field this function had all along.
+    """
+    fields: dict[str, object] = {
+        "invoice_id": invoice.id,
+        "business_id": business_id,
+        "status": invoice.status.value,
+        "parsed_with": invoice.parsed_with,
+        "confidence": invoice.extraction_confidence,
+        "content_type": invoice.content_type,
+        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+    }
+    if duplicate_of is not None:
+        fields["duplicate_of"] = duplicate_of.id
+    return fields
 
 
 def _duplicate_message(number: str | None, existing: Invoice | None) -> str:
