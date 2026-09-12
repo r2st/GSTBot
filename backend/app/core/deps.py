@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -51,7 +51,7 @@ class ActiveTenant:
 
 
 def get_current_user(
-    token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+    request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
 ) -> User:
     """Resolve the authenticated user from the bearer token."""
     subject = decode_access_token(token)
@@ -64,10 +64,18 @@ def get_current_user(
     user = db.get(User, user_id)
     if user is None or not user.is_active:
         raise _credentials_exc
+    # Stamped for the access line, which is the only audit trail this product
+    # keeps: no table records who filed a return or acknowledged an alert, so
+    # a log line that says ``POST /filing/gstr3b/filed 201`` and nothing else
+    # is a record that *something* happened to *somebody's* books. Stamped
+    # here, before the tenant is resolved, so a refused ``X-Business-Id``
+    # still names the login that tried it.
+    request.state.user_id = user.id
     return user
 
 
 def get_active_tenant(
+    request: Request,
     x_business_id: int | None = Header(default=None, alias="X-Business-Id"),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -124,6 +132,12 @@ def get_active_tenant(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="Business is inactive"
         )
+    # The business *acted for* and the role acted *with*, not the login's own.
+    # A linked accountant recording a client's filing is the case the access
+    # line exists to distinguish from the owner doing it, and once the
+    # membership is unlinked nothing in the database can tell the two apart.
+    request.state.business_id = business.id
+    request.state.role = role.value
     return ActiveTenant(business=business, role=role)
 
 

@@ -447,3 +447,145 @@ class TestCorsReachesTheResponsesMiddlewareProduces:
         )
         assert preflight.status_code == 200
         assert self._allow_origin(preflight) == self.ORIGIN
+
+
+# ---------------------------------------------------------------------------
+# Who acted, and for which business
+# ---------------------------------------------------------------------------
+
+class TestAccessLineAttribution:
+    """The access line is the only audit trail this product keeps.
+
+    No table records who filed a return or marked an invoice paid, so the
+    line for ``POST /filing/gstr3b/filed`` has to say who did it — and, now
+    that one login can act for several businesses, *which* books it was done
+    to. Before this the line carried an IP and a user agent, and a client's
+    filing recorded by a linked accountant was indistinguishable from the
+    owner recording it.
+    """
+
+    @staticmethod
+    def _line(caplog, path):
+        return next(
+            record
+            for record in caplog.records
+            if record.name == "app.access" and getattr(record, "http_path", None) == path
+        )
+
+    def test_an_authenticated_request_names_the_login_and_its_business(
+        self, auth_client, business, db_session, caplog
+    ):
+        import logging
+
+        from app.models.user import User
+
+        user = db_session.query(User).filter_by(business_id=business.id).one()
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            assert auth_client.get("/api/v1/dashboard").status_code == 200
+
+        line = self._line(caplog, "/api/v1/dashboard")
+        assert line.user_id == user.id
+        assert line.business_id == business.id
+        assert line.role == "owner"
+
+    def test_a_switched_request_names_the_business_acted_for_not_the_home_one(
+        self, auth_client, client, business, caplog
+    ):
+        import logging
+
+        from tests.test_businesses import link, register_second_business
+
+        register_second_business(client)
+        linked_id = link(auth_client).json()["id"]
+        assert linked_id != business.id
+
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            response = auth_client.get(
+                "/api/v1/dashboard", headers={"X-Business-Id": str(linked_id)}
+            )
+        assert response.status_code == 200
+
+        line = self._line(caplog, "/api/v1/dashboard")
+        assert line.business_id == linked_id
+
+    def test_the_role_logged_is_the_one_acted_with_not_the_logins_own(
+        self, auth_client, client, business, db_session, caplog
+    ):
+        import logging
+
+        from app.models.user import User, UserRole
+        from tests.test_businesses import SECOND_EMAIL, link, register_second_business
+
+        register_second_business(client)
+        # The linked account is a viewer on its own books, so the membership
+        # carries viewer — while the login doing the switching is an owner.
+        other = db_session.query(User).filter_by(email=SECOND_EMAIL).one()
+        other.role = UserRole.VIEWER
+        db_session.commit()
+        linked_id = link(auth_client).json()["id"]
+
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            auth_client.get("/api/v1/dashboard", headers={"X-Business-Id": str(linked_id)})
+
+        assert self._line(caplog, "/api/v1/dashboard").role == "viewer"
+
+    def test_a_refused_switch_still_names_the_login_that_tried_it(
+        self, auth_client, business, db_session, caplog
+    ):
+        # The one line an operator most wants attributed is the 403 for a
+        # business the caller was never linked to. The user is stamped before
+        # the tenant is resolved so that line is not anonymous; the business
+        # is not, because none was acted for.
+        import logging
+
+        from app.models.user import User
+
+        user = db_session.query(User).filter_by(business_id=business.id).one()
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            response = auth_client.get(
+                "/api/v1/dashboard", headers={"X-Business-Id": str(business.id + 1000)}
+            )
+        assert response.status_code == 403
+
+        line = self._line(caplog, "/api/v1/dashboard")
+        assert line.user_id == user.id
+        assert not hasattr(line, "business_id")
+        assert not hasattr(line, "role")
+
+    def test_a_public_route_carries_no_actor_at_all(self, client, caplog):
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            client.get("/api/v1/meta/states")
+
+        line = self._line(caplog, "/api/v1/meta/states")
+        for field in ("user_id", "business_id", "role"):
+            assert not hasattr(line, field)
+
+    def test_a_rejected_token_carries_no_actor(self, client, caplog):
+        # A forged bearer must not be able to write a user id into the audit
+        # trail: nothing is stamped until the token has resolved to a live row.
+        import logging
+
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            response = client.get(
+                "/api/v1/dashboard", headers={"Authorization": "Bearer not-a-token"}
+            )
+        assert response.status_code == 401
+        assert not hasattr(self._line(caplog, "/api/v1/dashboard"), "user_id")
+
+    def test_the_fields_reach_the_json_line(self, auth_client, business, caplog):
+        # The structured formatter is what production reads; a record
+        # attribute that the formatter drops would be an audit trail only
+        # ``caplog`` can see.
+        import json
+        import logging
+
+        from app.core.logging import JsonFormatter
+
+        with caplog.at_level(logging.INFO, logger="app.access"):
+            auth_client.get("/api/v1/dashboard")
+        payload = json.loads(JsonFormatter().format(self._line(caplog, "/api/v1/dashboard")))
+        assert payload["business_id"] == business.id
+        assert payload["role"] == "owner"
+        assert isinstance(payload["user_id"], int)

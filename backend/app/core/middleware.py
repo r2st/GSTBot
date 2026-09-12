@@ -139,20 +139,33 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         elif response.status_code >= 400:
             level = logging.WARNING
 
+        extra = {
+            "http_method": request.method,
+            "http_path": request.url.path,
+            "status_code": response.status_code,
+            "duration_ms": duration_ms,
+            "client_ip": _client_ip(request),
+            "user_agent": request.headers.get("user-agent", "")[:200],
+        }
+        # Who acted, and for which business. This line is the only audit trail
+        # the product keeps — no table records who filed a return or marked an
+        # invoice paid — and a client's filing recorded by a linked accountant
+        # through ``X-Business-Id`` is otherwise indistinguishable from the
+        # owner recording it. Read off ``request.state`` because the identity
+        # is resolved by the auth dependencies, not here: the middleware sees
+        # a bearer token it has no business decoding twice, and reading the
+        # verdict those dependencies reached keeps one place responsible for
+        # what a token means. Absent on a public route or a refused token, and
+        # left out rather than nulled so a line says exactly what was known.
+        extra.update(_actor_fields(request))
+
         logger.log(
             level,
             "%s %s %s",
             request.method,
             request.url.path,
             response.status_code,
-            extra={
-                "http_method": request.method,
-                "http_path": request.url.path,
-                "status_code": response.status_code,
-                "duration_ms": duration_ms,
-                "client_ip": _client_ip(request),
-                "user_agent": request.headers.get("user-agent", "")[:200],
-            },
+            extra=extra,
         )
         return response
 
@@ -306,6 +319,21 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return response
 
         return await call_next(request)
+
+
+# ``request.state`` attributes the auth dependencies set, and the access-line
+# field each becomes. See ``get_current_user`` and ``get_active_tenant`` in
+# ``app.core.deps`` for when each is stamped.
+_ACTOR_STATE_FIELDS = ("user_id", "business_id", "role")
+
+
+def _actor_fields(request: Request) -> dict[str, object]:
+    """The identity fields the auth dependencies stamped on this request, if any."""
+    return {
+        name: getattr(request.state, name)
+        for name in _ACTOR_STATE_FIELDS
+        if hasattr(request.state, name)
+    }
 
 
 def _client_ip(request: Request) -> str:
