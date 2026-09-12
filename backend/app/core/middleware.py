@@ -109,15 +109,18 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         except Exception:
             # The exception handlers turn this into a 500 response; the access
             # line still has to exist, and has to say the request failed.
+            #
+            # The same fields as a line that answered, and for a stronger
+            # reason: a write that crashed half-way is the request an operator
+            # most needs attributed, and the auth dependencies had already
+            # stamped who it was before the handler raised. This branch used
+            # to carry method, path and duration alone — so a 500 on
+            # ``POST /filing/gstr3b/filed`` said nothing about who was
+            # recording what, and not even from where.
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             logger.exception(
                 "%s %s failed", request.method, request.url.path,
-                extra={
-                    "http_method": request.method,
-                    "http_path": request.url.path,
-                    "duration_ms": duration_ms,
-                    "status_code": 500,
-                },
+                extra=_line_fields(request, 500, duration_ms),
             )
             raise
 
@@ -139,33 +142,13 @@ class AccessLogMiddleware(BaseHTTPMiddleware):
         elif response.status_code >= 400:
             level = logging.WARNING
 
-        extra = {
-            "http_method": request.method,
-            "http_path": request.url.path,
-            "status_code": response.status_code,
-            "duration_ms": duration_ms,
-            "client_ip": _client_ip(request),
-            "user_agent": request.headers.get("user-agent", "")[:200],
-        }
-        # Who acted, and for which business. This line is the only audit trail
-        # the product keeps — no table records who filed a return or marked an
-        # invoice paid — and a client's filing recorded by a linked accountant
-        # through ``X-Business-Id`` is otherwise indistinguishable from the
-        # owner recording it. Read off ``request.state`` because the identity
-        # is resolved by the auth dependencies, not here: the middleware sees
-        # a bearer token it has no business decoding twice, and reading the
-        # verdict those dependencies reached keeps one place responsible for
-        # what a token means. Absent on a public route or a refused token, and
-        # left out rather than nulled so a line says exactly what was known.
-        extra.update(_actor_fields(request))
-
         logger.log(
             level,
             "%s %s %s",
             request.method,
             request.url.path,
             response.status_code,
-            extra=extra,
+            extra=_line_fields(request, response.status_code, duration_ms),
         )
         return response
 
@@ -325,6 +308,35 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 # field each becomes. See ``get_current_user`` and ``get_active_tenant`` in
 # ``app.core.deps`` for when each is stamped.
 _ACTOR_STATE_FIELDS = ("user_id", "business_id", "role")
+
+
+def _line_fields(request: Request, status_code: int, duration_ms: float) -> dict[str, object]:
+    """Everything an access line carries, whether the request answered or raised.
+
+    One builder for both outcomes so the two lines cannot drift apart again:
+    the fields a support engineer greps for have to be the same fields on the
+    line that says ``failed``.
+    """
+    fields: dict[str, object] = {
+        "http_method": request.method,
+        "http_path": request.url.path,
+        "status_code": status_code,
+        "duration_ms": duration_ms,
+        "client_ip": _client_ip(request),
+        "user_agent": request.headers.get("user-agent", "")[:200],
+    }
+    # Who acted, and for which business. This line is the only audit trail
+    # the product keeps — no table records who filed a return or marked an
+    # invoice paid — and a client's filing recorded by a linked accountant
+    # through ``X-Business-Id`` is otherwise indistinguishable from the
+    # owner recording it. Read off ``request.state`` because the identity
+    # is resolved by the auth dependencies, not here: the middleware sees
+    # a bearer token it has no business decoding twice, and reading the
+    # verdict those dependencies reached keeps one place responsible for
+    # what a token means. Absent on a public route or a refused token, and
+    # left out rather than nulled so a line says exactly what was known.
+    fields.update(_actor_fields(request))
+    return fields
 
 
 def _actor_fields(request: Request) -> dict[str, object]:

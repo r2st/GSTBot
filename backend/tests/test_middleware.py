@@ -589,3 +589,62 @@ class TestAccessLineAttribution:
         assert payload["business_id"] == business.id
         assert payload["role"] == "owner"
         assert isinstance(payload["user_id"], int)
+
+    def test_a_request_that_crashed_is_attributed_like_one_that_answered(
+        self, raw_client, db_session, caplog
+    ):
+        # The write that raised half-way through is the request an operator
+        # most needs to attribute, and the auth dependencies had already
+        # resolved who it was before the handler blew up. The ``failed`` line
+        # used to carry method, path and duration alone: no user, no business,
+        # not even the address it came from.
+        import logging
+
+        from fastapi import APIRouter, Depends
+
+        from app.core.deps import get_current_business
+        from app.models.business import Business
+        from app.models.user import User
+        from tests.conftest import BUSINESS_GSTIN, TEST_EMAIL, TEST_PASSWORD
+
+        probe = APIRouter(prefix="/_test_access", include_in_schema=False)
+
+        @probe.get("/crash")
+        def _crash(tenant: Business = Depends(get_current_business)) -> None:
+            raise RuntimeError("row assumed present was not")
+
+        app.include_router(probe)
+        try:
+            registered = raw_client.post(
+                "/api/v1/auth/register",
+                json={
+                    "email": TEST_EMAIL,
+                    "password": TEST_PASSWORD,
+                    "gstin": BUSINESS_GSTIN,
+                    "legal_name": "Umang Traders Private Limited",
+                    "trade_name": "Umang Traders",
+                    "full_name": "Umang Shah",
+                },
+            )
+            token = registered.json()["access_token"]
+            with caplog.at_level(logging.INFO, logger="app.access"):
+                response = raw_client.get(
+                    "/_test_access/crash", headers={"Authorization": f"Bearer {token}"}
+                )
+        finally:
+            app.router.routes[:] = [
+                route for route in app.router.routes
+                if not getattr(route, "path", "").startswith("/_test_access")
+            ]
+        assert response.status_code == 500
+
+        line = self._line(caplog, "/_test_access/crash")
+        user = db_session.query(User).filter_by(email=TEST_EMAIL).one()
+        business = db_session.query(Business).filter_by(gstin=BUSINESS_GSTIN).one()
+        assert line.levelname == "ERROR"
+        assert line.status_code == 500
+        assert line.user_id == user.id
+        assert line.business_id == business.id
+        assert line.role == "owner"
+        assert line.client_ip
+        assert hasattr(line, "user_agent")
