@@ -1172,6 +1172,93 @@ def test_a_payment_does_not_promote_a_failed_invoice_into_the_filing_pool(
     assert promoted["status"] == InvoiceStatus.PARSED.value
 
 
+def test_blocking_the_credit_does_not_promote_a_failed_invoice_into_the_filing_pool(
+    auth_client, db_session
+):
+    """Whether the credit is blocked under s.17(5) is a decision about the
+    purchase, not a reading off the document — nothing on a motor-car invoice
+    says its credit is barred. Marking it so on a row whose figures were never
+    extracted must not put those blanks into the credit pool, and marking it
+    on a row nobody has reviewed must not say somebody did."""
+    invoice_id = upload(auth_client, "nothing readable here", name="blank.txt").json()[
+        "invoice"
+    ]["id"]
+    invoice = db_session.get(Invoice, invoice_id)
+    invoice.status = InvoiceStatus.FAILED
+    invoice.invoice_date = date(2026, 4, 15)
+    db_session.commit()
+    before = auth_client.get(f"/api/v1/invoices/{invoice_id}").json()
+
+    body = auth_client.patch(
+        f"/api/v1/invoices/{invoice_id}", json={"itc_eligible": False}
+    ).json()
+
+    assert body["itc_eligible"] is False
+    assert body["status"] == InvoiceStatus.FAILED.value
+    assert body["parsed_with"] == before["parsed_with"]
+    assert body["extraction_confidence"] == before["extraction_confidence"]
+
+
+class TestCorrectingAReconciledInvoice:
+    """A reconciliation verdict is about the figures it compared.
+
+    ``matched`` says this row agrees with the supplier's filing. Correct the
+    tax on it and that is no longer known — the run that said so never saw
+    the new figure — yet the row went on wearing the badge, and the list
+    filtered by ``matched`` went on offering it as credit that was safe.
+    """
+
+    def reconciled(self, auth_client, db_session, sample_invoice_text):
+        invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+        invoice = db_session.get(Invoice, invoice_id)
+        invoice.status = InvoiceStatus.MATCHED
+        db_session.commit()
+        return invoice_id
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"igst": "1.00"},
+            {"taxable_value": "1.00"},
+            {"invoice_number": "OTHER-1"},
+            {"invoice_date": "2026-03-02"},
+        ],
+    )
+    def test_correcting_what_the_run_compared_withdraws_its_verdict(
+        self, auth_client, db_session, sample_invoice_text, change
+    ):
+        invoice_id = self.reconciled(auth_client, db_session, sample_invoice_text)
+
+        body = auth_client.patch(f"/api/v1/invoices/{invoice_id}", json=change).json()
+
+        assert body["status"] == InvoiceStatus.PARSED.value
+
+    def test_a_ledger_entry_leaves_the_verdict_standing(
+        self, auth_client, db_session, sample_invoice_text
+    ):
+        """Paying the supplier changes nothing the 2B was compared against."""
+        invoice_id = self.reconciled(auth_client, db_session, sample_invoice_text)
+
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}",
+            json={"paid_at": "2026-05-01", "is_capital_good": True, "itc_eligible": False},
+        ).json()
+
+        assert body["status"] == InvoiceStatus.MATCHED.value
+
+    def test_a_field_the_run_never_reads_leaves_the_verdict_standing(
+        self, auth_client, db_session, sample_invoice_text
+    ):
+        """An HSN code is a filing detail; the 2B carries none to compare."""
+        invoice_id = self.reconciled(auth_client, db_session, sample_invoice_text)
+
+        body = auth_client.patch(
+            f"/api/v1/invoices/{invoice_id}", json={"hsn_code": "8471"}
+        ).json()
+
+        assert body["status"] == InvoiceStatus.MATCHED.value
+
+
 class TestCorrectingARowAWorkerAbandoned:
     """A ``processing`` invoice is the one nothing else can rescue.
 

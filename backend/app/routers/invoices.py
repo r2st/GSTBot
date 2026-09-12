@@ -32,8 +32,19 @@ from app.schemas.invoice import (
     InvoiceUploadResponse,
 )
 from app.services import gst_calendar, invoice_service
+from app.services.reconciliation import COMPARED_FIELDS
 
 logger = logging.getLogger(__name__)
+
+# The statuses a reconciliation writes, and the fields it reached them from:
+# the two the row is found by, the one that fixes which period's run judges
+# it, and the money it compares.
+VERDICT_STATUSES = frozenset(
+    {InvoiceStatus.MATCHED, InvoiceStatus.MISMATCHED, InvoiceStatus.MISSING_IN_2B}
+)
+RECONCILED_FIELDS = frozenset(
+    {"counterparty_gstin", "invoice_number", "invoice_date", *COMPARED_FIELDS}
+)
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -638,7 +649,12 @@ def update_invoice(
     # looked at stopped being flagged for it; on a ``failed`` row it also
     # promoted the invoice into the filing pool, putting fields that were never
     # extracted into a return.
-    LEDGER_FIELDS = {"paid_at", "is_capital_good"}
+    # ``itc_eligible`` is the third: whether the credit is blocked under
+    # s.17(5) is a decision about the purchase — the motor car, the staff
+    # catering — and nothing on the document says so. Left out of this set,
+    # marking a ``failed`` row's credit blocked promoted it exactly as a
+    # payment used to.
+    LEDGER_FIELDS = {"paid_at", "is_capital_good", "itc_eligible"}
     corrections = set(changes) - LEDGER_FIELDS
 
     if corrections:
@@ -659,7 +675,19 @@ def update_invoice(
         # while ``/filing/validate`` went on advising the user to wait for an
         # extraction to finish. Under-declared output tax carries interest, and
         # the product had told them it was in hand.
-        if invoice.status in UNREADABLE_STATUSES:
+        #
+        # The other direction too. ``matched`` is a reconciliation's verdict on
+        # the figures it compared, and a correction to one of them — or to the
+        # number and GSTIN the row was found by, or the date that decides
+        # which period's run judges it — is a figure no run has seen. The row
+        # kept the badge, so a list filtered by ``matched`` went on offering
+        # the corrected invoice as credit the supplier had confirmed. Back to
+        # ``parsed``: the next run over the period restores whichever verdict
+        # the new figures earn, and nothing in between claims one. An HSN code
+        # or a name is left alone, because the statement carries neither and
+        # the run never read them.
+        withdrawn = invoice.status in VERDICT_STATUSES and bool(corrections & RECONCILED_FIELDS)
+        if invoice.status in UNREADABLE_STATUSES or withdrawn:
             invoice.status = InvoiceStatus.PARSED
     if changes and invoice.invoice_type == InvoiceType.PURCHASE and invoice.counterparty_gstin:
         supplier = invoice_service.get_or_create_supplier(
