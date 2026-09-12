@@ -187,6 +187,20 @@ def _period_of(record: GSTR2BRecord, fallback: str | None) -> str | None:
     return fallback
 
 
+# The longest an invoice number is under rule 46 of the CGST Rules, so a real
+# one is always quoted whole; anything past it is a file that has been edited.
+_MAX_QUOTED_NUMBER = 16
+
+
+def _quoted(invoice_number: str | None) -> str:
+    """An invoice number for an error message: whole if real, cut if not."""
+    if not invoice_number:
+        return "(unnumbered)"
+    if len(invoice_number) <= _MAX_QUOTED_NUMBER:
+        return invoice_number
+    return invoice_number[:_MAX_QUOTED_NUMBER] + "…"
+
+
 def _money(value: object) -> Decimal:
     # ``to_money`` rather than ``to_decimal``: a statement is a file someone
     # uploads, so nothing in it is trusted to be an amount a money column can
@@ -715,8 +729,13 @@ def _refuse_money_no_column_could_hold(records: list[GSTR2BRecord]) -> None:
     for record in records:
         for name in _MONEY_FIELDS:
             if abs(getattr(record, name)) > MONEY_MAX:
+                # Quoted so the reader can find the line, and cut so the
+                # sentence survives the quoting: the number is whatever the
+                # file said it was, and a corrupt file — which is what a
+                # figure this size means — is not one whose fields are the
+                # length a GST invoice number is.
                 raise GSTR2BParseError(
-                    f"Invoice {record.invoice_number or '(unnumbered)'} totals "
+                    f"Invoice {_quoted(record.invoice_number)} totals "
                     f"{getattr(record, name)} in {name.replace('_', ' ')}, which is "
                     "larger than any invoice carries. Check the file — its rate "
                     "lines do not add up to a real document."

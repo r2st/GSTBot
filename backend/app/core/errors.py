@@ -131,6 +131,43 @@ def _bounded(value: Any) -> Any:
     return value
 
 
+# How long a whole ``HTTPException`` detail may be.
+#
+# The ceiling above bounds what pydantic quotes; this bounds what a *route*
+# hands the handler, which until now was nothing. A detail is prose a person
+# wrote, so it was trusted — but several are built around a value out of the
+# request: a return type out of the path, an invoice number out of an uploaded
+# statement. ``params.Slug`` bounds the first at the input. The second came
+# out of a GSTR-2B file as a 100KB ``inum``, was quoted in the refusal, and
+# left as a 200KB 422 — the file reflected twice, once in ``detail`` and once
+# in ``message``, with a 15MB upload allowance behind it.
+#
+# Bounded here rather than at each ``detail=`` so the guarantee does not
+# depend on every route remembering, and set well above any sentence a route
+# actually writes — the longest is a few hundred characters — so nothing real
+# is ever cut. What this cuts is a detail that is mostly the caller's own
+# bytes, and by then it has stopped being a message.
+_MAX_DETAIL_LENGTH = 2000
+
+
+def _bounded_detail(detail: Any) -> Any:
+    """*detail* with any string in it cut to :data:`_MAX_DETAIL_LENGTH`.
+
+    Dicts and lists are walked one level, which is every shape a route here
+    raises: a string, ``{"message": ..., "invoice_id": ...}``, or a list of
+    lines. The keys are the route's own and are left alone.
+    """
+    if isinstance(detail, str):
+        if len(detail) <= _MAX_DETAIL_LENGTH:
+            return detail
+        return detail[:_MAX_DETAIL_LENGTH] + _TRUNCATION_MARKER
+    if isinstance(detail, dict):
+        return {key: _bounded_detail(value) for key, value in detail.items()}
+    if isinstance(detail, list):
+        return [_bounded_detail(item) for item in detail]
+    return detail
+
+
 def _bounded_errors(exc: RequestValidationError) -> list[dict[str, Any]]:
     """``exc.errors()`` with every echoed value bounded.
 
@@ -211,7 +248,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
         return JSONResponse(
             status_code=exc.status_code,
-            content=error_body(exc.status_code, exc.detail),
+            content=error_body(exc.status_code, _bounded_detail(exc.detail)),
             headers=getattr(exc, "headers", None),
         )
 

@@ -11,8 +11,10 @@ turn it into a response, which would mean never reaching the code under test.
 """
 from __future__ import annotations
 
+from typing import Literal
+
 import pytest
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 
 from app.core.config import settings
@@ -57,6 +59,21 @@ async def _raise_sqlalchemy() -> None:
 @_boom.get("/keyerror")
 async def _raise_keyerror() -> None:
     raise KeyError("taxable_value")
+
+
+# The three shapes a route here raises a detail in, each carrying a value the
+# size the caller controls. ``query`` rather than a constant so one route can
+# answer both the oversized and the ordinary case.
+@_boom.get("/http-detail")
+async def _raise_http_detail(
+    shape: Literal["string", "dict", "list"], size: int = Query(ge=0, le=200_000)
+) -> None:
+    value = "V" * size
+    if shape == "string":
+        raise HTTPException(status_code=422, detail=f"Invoice {value} is not right.")
+    if shape == "dict":
+        raise HTTPException(status_code=409, detail={"message": value, "invoice_id": 7})
+    raise HTTPException(status_code=422, detail=[value, "second line"])
 
 
 app.include_router(_boom)
@@ -625,3 +642,98 @@ class TestAPathNothingServesAndAMethodNothingAccepts:
         behind it the way a route's own 404 does."""
         detail = str(client.delete("/api/v1/invoices/1").json()["detail"])
         assert "invoice" not in detail.lower()
+
+
+class TestAnHTTPExceptionDetailIsBoundedToo:
+    """The other handler every 4xx leaves through.
+
+    The 422 handler above learned to cut what pydantic quotes. A route's own
+    ``HTTPException`` was trusted, because its detail is a sentence somebody
+    wrote — but a sentence built around a value out of the request is only as
+    short as the value. A GSTR-2B statement with a 100KB invoice number in a
+    line the import refused came back as a 200KB 422: the number once in
+    ``detail`` and again in ``message``, with the 15MB upload allowance behind
+    it. Bounded in the handler, so the guarantee does not depend on every
+    ``detail=`` remembering.
+    """
+
+    OVERSIZED = 100_000
+
+    @pytest.mark.parametrize("shape", ["string", "dict", "list"])
+    def test_an_oversized_detail_is_cut_whatever_its_shape(self, client, shape):
+        response = client.get(
+            "/_test_errors/http-detail", params={"shape": shape, "size": self.OVERSIZED}
+        )
+        assert response.status_code in (409, 422)
+        assert len(response.content) < 5_000
+        assert "truncated" in response.text
+
+    def test_the_message_is_bounded_as_well_as_the_detail(self, client):
+        # ``message`` is a rendering of ``detail``; bounding one and not the
+        # other would halve the reflection rather than close it.
+        response = client.get(
+            "/_test_errors/http-detail", params={"shape": "dict", "size": self.OVERSIZED}
+        )
+        assert len(response.json()["error"]["message"]) < 3_000
+
+    def test_the_keys_beside_the_string_survive(self, client):
+        # The dict shape carries an ``invoice_id`` a client links to; the cut
+        # must touch the string and nothing else in the envelope.
+        response = client.get(
+            "/_test_errors/http-detail", params={"shape": "dict", "size": self.OVERSIZED}
+        )
+        assert response.json()["detail"]["invoice_id"] == 7
+
+    @pytest.mark.parametrize("shape", ["string", "dict", "list"])
+    def test_a_detail_the_length_a_route_writes_is_untouched(self, client, shape):
+        # Every real detail is a few hundred characters; the ceiling has to
+        # sit far enough above them that none is ever cut mid-sentence.
+        response = client.get("/_test_errors/http-detail", params={"shape": shape, "size": 600})
+        assert "truncated" not in response.text
+        assert "V" * 600 in response.text
+
+    def test_the_real_route_that_reflected_a_file_no_longer_does(self, auth_client):
+        """The upload that found this, end to end.
+
+        A single cell past ``MONEY_MAX`` is clamped on the way in, so the
+        refusal is reached by two rate lines that sum a paisa over it — the
+        same route ``test_gstr2b_boundaries`` takes — with the invoice
+        number the file quotes back set to the size an edited file can make it.
+        """
+        import json
+
+        huge = "X" * self.OVERSIZED
+        body = json.dumps(
+            {
+                "data": {
+                    "rtnprd": "042026",
+                    "docdata": {
+                        "b2b": [
+                            {
+                                "ctin": SUPPLIER_GSTIN_SAME_STATE,
+                                "inv": [
+                                    {
+                                        "inum": huge,
+                                        "dt": "15-04-2026",
+                                        "items": [
+                                            {"txval": "99999999999999.99"},
+                                            {"txval": "0.01"},
+                                        ],
+                                    }
+                                ],
+                            }
+                        ]
+                    },
+                }
+            }
+        ).encode()
+        response = auth_client.post(
+            "/api/v1/reconciliation/gstr2b/import",
+            files={"file": ("gstr2b.json", body, "application/json")},
+        )
+        assert response.status_code == 422
+        assert len(response.content) < 2_000
+        # And the sentence that tells the reader what was wrong survived the
+        # quoting: the number is cut at the source, not the message at the
+        # handler.
+        assert "larger than any invoice carries" in response.json()["detail"]

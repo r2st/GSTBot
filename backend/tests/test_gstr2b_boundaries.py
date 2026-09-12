@@ -362,6 +362,57 @@ class TestTheFigureAtTheCeiling:
                 "2b.json",
             )
 
+    def test_the_refusal_quotes_a_real_invoice_number_whole(self):
+        # Sixteen characters is the most rule 46 allows, so a number that
+        # long is the longest a genuine statement can carry and must come
+        # back intact — it is how the reader finds the line.
+        number = "AB/2026-27/00042"
+        assert len(number) == 16
+        with pytest.raises(GSTR2BParseError, match=f"Invoice {number} totals"):
+            gstr2b.parse(
+                portal_statement(
+                    {
+                        "inum": number,
+                        "dt": "15-04-2026",
+                        "items": [{"txval": str(MONEY_MAX)}, {"txval": "0.01"}],
+                    }
+                ),
+                "2b.json",
+            )
+
+    def test_the_refusal_cuts_a_number_no_invoice_could_have(self):
+        # Past sixteen the file has been edited, and the message must not
+        # grow with it: what it quotes is a prefix and a mark that says so,
+        # and the rest of the sentence still arrives.
+        number = "N" * 5_000
+        with pytest.raises(GSTR2BParseError) as caught:
+            gstr2b.parse(
+                portal_statement(
+                    {
+                        "inum": number,
+                        "dt": "15-04-2026",
+                        "items": [{"txval": str(MONEY_MAX)}, {"txval": "0.01"}],
+                    }
+                ),
+                "2b.json",
+            )
+        message = str(caught.value)
+        assert len(message) < 400
+        assert "N" * 16 + "…" in message
+        assert "larger than any invoice carries" in message
+
+    def test_an_unnumbered_line_is_still_called_unnumbered(self):
+        with pytest.raises(GSTR2BParseError, match=r"Invoice \(unnumbered\) totals"):
+            gstr2b.parse(
+                portal_statement(
+                    {
+                        "dt": "15-04-2026",
+                        "items": [{"txval": str(MONEY_MAX)}, {"txval": "0.01"}],
+                    }
+                ),
+                "2b.json",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Whose statement it is
