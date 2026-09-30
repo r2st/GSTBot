@@ -378,7 +378,7 @@ describe("InvoicesPage", () => {
       mockApi();
       renderPage();
       await screen.findByText("INV-2026-0042");
-      expect(document.title).toBe("Invoices · GSTBot");
+      expect(document.title).toBe("Invoices · DoAide GST");
     });
 
     it("makes the scroll container a named, focusable region", async () => {

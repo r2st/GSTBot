@@ -7,7 +7,7 @@ import StatusPage from "./StatusPage";
 function health(overrides = {}) {
   return {
     status: "ok",
-    app: "GSTBot",
+    app: "DoAide GST",
     version: "0.1.0",
     environment: "production",
     database: "ok",

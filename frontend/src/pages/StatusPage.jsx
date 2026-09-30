@@ -198,7 +198,7 @@ export default function StatusPage() {
         <div>
           <h1>System status</h1>
           <p className="muted">
-            Whether the parts of GSTBot that run without you are running.
+            Whether the parts of DoAide GST that run without you are running.
           </p>
         </div>
         <button

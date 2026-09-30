@@ -89,7 +89,7 @@ const SCREENS = [
   { route: "/filing", loading: "Loading the return preview…", settled: /Ready to file/ },
   { route: "/suppliers", loading: "Loading suppliers…", settled: /Northwind/ },
   { route: "/alerts", loading: "Loading alerts…", settled: /GSTR-3B for 2026-04/ },
-  { route: "/status", loading: "Checking system status…", settled: /GSTBot/ },
+  { route: "/status", loading: "Checking system status…", settled: /DoAide GST/ },
 ];
 
 describe("what a screen shows before its data lands", () => {

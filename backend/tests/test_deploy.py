@@ -104,7 +104,7 @@ TIMER_UNITS = (BACKUP_TIMER, MONITOR_TIMER)
 # The one address this deployment answers on. Written out rather than derived,
 # because "the site block and the CORS list agree" is only interesting if they
 # agree on the right thing.
-SITE = "gstbot.aiknol.com"
+SITE = "gst.doaide.com"
 
 # The Docker bridge gateway. Both host processes bind it: reachable from the
 # Caddy container, and not routed from the internet. See gstbot-api.service.

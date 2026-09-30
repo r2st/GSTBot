@@ -1,4 +1,4 @@
-// API client for the GSTBot backend.
+// API client for the DoAide GST backend.
 // Stores the JWT in localStorage and attaches it as a Bearer token.
 
 const BASE = "/api/v1";
@@ -641,7 +641,7 @@ export const api = {
 
   // ---- Businesses (multi-GSTIN) ----
   //
-  // A GSTBot sign-up is one GSTIN, so a company with several registrations —
+  // A DoAide GST sign-up is one GSTIN, so a company with several registrations —
   // or an accountant with several clients — ends up with one login per
   // business. These are what let one of those logins reach the others: link
   // a second account by proving you also hold its password, then switch
@@ -690,7 +690,7 @@ function query(params = {}) {
 }
 
 /** Pull the filename out of a Content-Disposition header. */
-export function filenameFrom(header, fallback = "gstbot-export") {
+export function filenameFrom(header, fallback = "doaide-gst-export") {
   const match = /filename="?([^"]+)"?/.exec(header ?? "");
   return match ? match[1] : fallback;
 }

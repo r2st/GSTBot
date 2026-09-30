@@ -1,7 +1,7 @@
 # Deploying GSTBot
 
 Target: the shared Hetzner box (Ubuntu 24.04, aarch64, 4 GB) that also runs
-GoSumo, Documedic, Herald and the knol stack, serving `gstbot.aiknol.com`.
+GoSumo, Documedic, Herald and the knol stack, serving `gst.doaide.com`.
 Postgres, Redis, the API, the web server, the Celery worker and the scheduler
 are host processes; the edge is a container.
 
@@ -191,7 +191,7 @@ docker exec knol-caddy caddy reload  --config /etc/caddy/Caddyfile
 
 `reload`, not a container restart: the other sites on that instance are
 serving, and a restart drops their connections to publish ours.
-`gstbot.aiknol.com` must already resolve to this box, or the certificate order
+`gst.doaide.com` must already resolve to this box, or the certificate order
 fails and Caddy retries with a backoff.
 
 **8. First release**

@@ -88,7 +88,7 @@ AI-powered GST compliance assistant that automates invoice matching, reconciliat
 ## Deployment
 
 - Hetzner VPS (same as other products)
-- Domain: gstbot.aiknol.com
+- Domain: gst.doaide.com
 - Systemd services: gstbot-api, gstbot-worker, gstbot-beat, gstbot-web
 
 ## MVP Timeline

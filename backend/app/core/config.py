@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     )
 
     # ---- App ----
-    app_name: str = "GSTBot"
+    app_name: str = "DoAide GST"
     app_version: str = "1.0.0"
     environment: str = "development"
     debug: bool = True
@@ -156,8 +156,8 @@ class Settings(BaseSettings):
     openrouter_model: str = "openai/gpt-oss-20b:free"
     # Vision extraction: a photographed or scanned invoice, sent as an image.
     openrouter_vision_model: str = "qwen/qwen2.5-vl-72b-instruct:free"
-    openrouter_app_url: str = "https://gstbot.aiknol.com"
-    openrouter_app_title: str = "GSTBot"
+    openrouter_app_url: str = "https://gst.doaide.com"
+    openrouter_app_title: str = "DoAide GST"
     openrouter_timeout_seconds: float = 90.0
     # Total tries, not retries: 1 disables retrying entirely. Only transient
     # failures (429, 408, 5xx, network) consume one — a 401 fails on the first.
@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     # False for a local mail-catcher (Mailhog, Mailpit) that speaks plain SMTP
     # on an unencrypted loopback port; every real relay needs this on.
     smtp_use_tls: bool = True
-    smtp_from_address: str = "alerts@gstbot.aiknol.com"
+    smtp_from_address: str = "alerts@gst.doaide.com"
     smtp_timeout_seconds: float = Field(default=10.0, gt=0, le=120)
     # Total tries, not retries: 1 disables retrying entirely. Only a transient
     # refusal spends one — SMTP's 4xx, a dropped connection, a relay that is

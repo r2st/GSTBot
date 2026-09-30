@@ -6,7 +6,7 @@
 # the thing that would notice the stack is down, and a release restarting the
 # target must not fire a check against units that are mid-restart.
 Description=GSTBot health check
-Documentation=https://gstbot.aiknol.com/api/v1/health
+Documentation=https://gst.doaide.com/api/v1/health
 Wants=network-online.target
 After=network-online.target
 # Nothing is Requires=. A check that refuses to run because what it checks is

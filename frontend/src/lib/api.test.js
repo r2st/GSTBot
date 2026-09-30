@@ -828,12 +828,12 @@ describe("api", () => {
 
       const { filename } = await api.downloadExport("gstr1", "csv", "2026-04");
 
-      expect(filename).toBe("gstbot-export");
+      expect(filename).toBe("doaide-gst-export");
     });
 
     it("raises the server's reason when the export is refused", async () => {
       // A period with no invoices is a 400 with a detail worth showing —
-      // saving that JSON to disk as "gstbot-export.csv" would be worse than
+      // saving that JSON to disk as "doaide-gst-export.csv" would be worse than
       // any error message.
       global.fetch.mockResolvedValueOnce(
         fileResponse({ detail: "Nothing to export for 2026-04" }, { status: 400 }),

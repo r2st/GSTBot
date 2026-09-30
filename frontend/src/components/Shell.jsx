@@ -60,7 +60,7 @@ export default function Shell({ children }) {
           <span className="brand-mark" aria-hidden="true">
             ₹
           </span>
-          <span className="brand-name">GSTBot</span>
+          <span className="brand-name">DoAide GST</span>
         </div>
 
         <button

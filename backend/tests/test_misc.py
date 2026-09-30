@@ -216,7 +216,7 @@ class TestProbes:
 
 def test_root_points_at_the_docs(client):
     body = client.get("/").json()
-    assert body["app"] == "GSTBot"
+    assert body["app"] == "DoAide GST"
     assert body["health"] == "/api/v1/health"
 
 

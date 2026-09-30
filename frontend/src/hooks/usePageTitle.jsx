@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
  *
  * Two problems, one cause. Every screen in this app shared the single title
  * from index.html, so a browser history full of GST work read as eight
- * identical "GSTBot" entries, and a bookmarked reconciliation was
+ * identical "DoAide GST" entries, and a bookmarked reconciliation was
  * indistinguishable from a bookmarked upload form.
  *
  * The second is the one that matters more. Following a link in a
@@ -21,8 +21,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
  * is why this is a provider wrapping the routes rather than a line in Shell.
  */
 
-const SUFFIX = "GSTBot";
-const DEFAULT_TITLE = "GSTBot — GST compliance on autopilot";
+const SUFFIX = "DoAide GST";
+const DEFAULT_TITLE = "DoAide GST — GST compliance on autopilot";
 
 function formatTitle(title) {
   return title ? `${title} · ${SUFFIX}` : DEFAULT_TITLE;
@@ -61,7 +61,7 @@ export function PageTitleProvider({ children }) {
  *
  * Pass a falsy title while the name is still loading — an invoice whose number
  * has not arrived — and the tab shows the app name until it does, rather than
- * "undefined · GSTBot".
+ * "undefined · DoAide GST".
  *
  * Works without the provider, minus the announcement, so a page rendered on its
  * own in a test still sets a sensible title instead of throwing.

@@ -1,5 +1,5 @@
 /**
- * A GSTBot API small enough to keep in one file and whole enough to walk
+ * A DoAide GST API small enough to keep in one file and whole enough to walk
  * through.
  *
  * Every other test in this suite mounts one page and mocks the one or two
@@ -748,7 +748,7 @@ function route(state, method, path, params, init) {
     return {
       body: {
         status: "ok",
-        app: "GSTBot",
+        app: "DoAide GST",
         version: "0.1.0",
         environment: "test",
         database: "ok",

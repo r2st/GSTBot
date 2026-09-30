@@ -9,7 +9,7 @@
 # and was not chosen: it couples the release to a container restart and puts
 # the app's files inside another product's compose project.
 Description=GSTBot Web (static SPA server)
-Documentation=https://gstbot.aiknol.com
+Documentation=https://gst.doaide.com
 Wants=network-online.target docker.service
 After=network-online.target docker.service
 PartOf=gstbot.target

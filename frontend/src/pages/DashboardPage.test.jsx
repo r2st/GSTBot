@@ -707,7 +707,7 @@ describe("DashboardPage", () => {
       mockDashboard(dashboard());
       renderPage();
       await screen.findByText(/Umang Traders/);
-      expect(document.title).toBe("Dashboard · GSTBot");
+      expect(document.title).toBe("Dashboard · DoAide GST");
     });
 
     it("makes the tax table reachable when it has to scroll", async () => {

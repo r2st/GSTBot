@@ -7,7 +7,7 @@
 # for maintenance must not stop the thing that would have captured its state
 # beforehand. The timer is the only thing that starts this.
 Description=GSTBot database backup
-Documentation=https://gstbot.aiknol.com
+Documentation=https://gst.doaide.com
 Wants=network-online.target
 After=network-online.target postgresql.service
 # Not Requires=postgresql.service, for the same reason gstbot-migrate is not:

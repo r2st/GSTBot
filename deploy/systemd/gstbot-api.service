@@ -1,6 +1,6 @@
 [Unit]
 Description=GSTBot API (uvicorn)
-Documentation=https://gstbot.aiknol.com/api/v1/health
+Documentation=https://gst.doaide.com/api/v1/health
 Wants=network-online.target docker.service
 After=network-online.target docker.service postgresql.service redis-server.service gstbot-migrate.service
 # Requires only the migration: Postgres and Redis may be remote, and the app

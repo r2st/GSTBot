@@ -160,7 +160,7 @@ export default function LoginPage() {
           <span className="brand-mark" aria-hidden="true">
             ₹
           </span>
-          <h1>GSTBot</h1>
+          <h1>DoAide GST</h1>
           <p className="auth-tagline">GST compliance on autopilot</p>
         </div>
 

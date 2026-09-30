@@ -43,7 +43,7 @@ const EDITABLE = [
 //
 // `paid_at` is the expensive one. Rule 37 reverses the whole of an invoice's
 // credit once it is 180 days unpaid, and with no way to record a payment every
-// purchase stayed unpaid for ever — so a business six months into using GSTBot
+// purchase stayed unpaid for ever — so a business six months into using DoAide GST
 // had credit reversed on invoices it had settled on time, in a GSTR-3B it then
 // filed. `is_capital_good` fails the other way: left false, a machine's credit
 // is claimed whole in the month of purchase instead of over Rule 43's sixty

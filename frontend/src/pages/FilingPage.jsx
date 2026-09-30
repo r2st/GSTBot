@@ -509,7 +509,7 @@ export default function FilingPage() {
           <section className="panel">
             <h2>Record this filing</h2>
             <p className="muted small">
-              GSTBot prepares the return; the portal is where it is submitted, and nothing
+              DoAide GST prepares the return; the portal is where it is submitted, and nothing
               here can see that happen. Tell us once you have filed — otherwise the
               deadline reminders keep treating {periodLabel(period)} as outstanding.
             </p>

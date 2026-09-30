@@ -26,12 +26,12 @@ describe("usePageTitle", () => {
   describe("the document title", () => {
     it("names the screen and keeps the app name as a suffix", () => {
       render(<Page title="Reconcile" />);
-      expect(document.title).toBe("Reconcile · GSTBot");
+      expect(document.title).toBe("Reconcile · DoAide GST");
     });
 
     it("falls back to the app name when the screen has none yet", () => {
       // InvoiceDetailPage passes a falsy title until the invoice number
-      // arrives; "undefined · GSTBot" would be worse than waiting.
+      // arrives; "undefined · DoAide GST" would be worse than waiting.
       render(<Page title="" />);
       expect(document.title).toBe(DEFAULT_TITLE);
     });
@@ -48,17 +48,17 @@ describe("usePageTitle", () => {
         );
       }
       render(<Detail />);
-      expect(document.title).toBe("Invoice · GSTBot");
+      expect(document.title).toBe("Invoice · DoAide GST");
 
       await user.click(screen.getByRole("button"));
-      expect(document.title).toBe("Invoice INV-9001 · GSTBot");
+      expect(document.title).toBe("Invoice INV-9001 · DoAide GST");
     });
 
     it("works without the provider", () => {
       // Every page test renders its page on its own. The title is the part
       // that should still work there; only the announcement needs the provider.
       render(<Page title="Filing" />);
-      expect(document.title).toBe("Filing · GSTBot");
+      expect(document.title).toBe("Filing · DoAide GST");
     });
   });
 

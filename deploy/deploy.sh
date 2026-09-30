@@ -259,7 +259,7 @@ await "the SPA is being served" http://172.18.0.1:3009/ 30 \
 # operator to go read the edge logs. Waiting past one full interval is what
 # makes this check report the edge's steady state rather than its blind spot.
 await "the site is answering through Caddy" \
-    https://gstbot.aiknol.com/api/v1/health/live 45 \
+    https://gst.doaide.com/api/v1/health/live 45 \
     "docker logs knol-caddy --tail 100"
 
 log "Deployed $REVISION"

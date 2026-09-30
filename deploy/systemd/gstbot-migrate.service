@@ -7,7 +7,7 @@
 # get a half-applied schema. This is the only thing that touches it, and the
 # API and worker are ordered behind it.
 Description=GSTBot database migrations
-Documentation=https://gstbot.aiknol.com
+Documentation=https://gst.doaide.com
 Wants=network-online.target
 After=network-online.target postgresql.service
 # Not Requires=: Postgres may legitimately be on another host, in which case

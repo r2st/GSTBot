@@ -58,7 +58,7 @@ def _configured(monkeypatch):
     monkeypatch.setattr(settings, "smtp_username", "")
     monkeypatch.setattr(settings, "smtp_password", "")
     monkeypatch.setattr(settings, "smtp_use_tls", True)
-    monkeypatch.setattr(settings, "smtp_from_address", "alerts@gstbot.aiknol.com")
+    monkeypatch.setattr(settings, "smtp_from_address", "alerts@gst.doaide.com")
     monkeypatch.setattr(settings, "smtp_timeout_seconds", 10.0)
     # Pinned rather than left to the environment, so the retry assertions
     # below count attempts this file chose and not whatever a deployment set.
@@ -90,7 +90,7 @@ def test_a_message_is_sent_with_the_configured_from_address():
     assert client.port == 587
     assert client.timeout == 10.0
     assert client.sent["To"] == "owner@example.com"
-    assert client.sent["From"] == "alerts@gstbot.aiknol.com"
+    assert client.sent["From"] == "alerts@gst.doaide.com"
     assert client.sent["Subject"] == "Test"
     assert client.sent.get_content().strip() == "Body text"
 
@@ -341,7 +341,7 @@ def test_the_retried_send_is_the_same_message_not_a_rebuilt_one(monkeypatch):
     delivered = _FakeSMTP.instances[-1].sent
     assert delivered["To"] == "owner@example.com"
     assert delivered["Subject"] == "Deadlines"
-    assert delivered["From"] == "alerts@gstbot.aiknol.com"
+    assert delivered["From"] == "alerts@gst.doaide.com"
     assert delivered.get_content().strip() == "Body text"
 
 

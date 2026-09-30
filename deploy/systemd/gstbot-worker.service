@@ -1,6 +1,6 @@
 [Unit]
 Description=GSTBot Celery worker (invoice extraction)
-Documentation=https://gstbot.aiknol.com
+Documentation=https://gst.doaide.com
 Wants=network-online.target
 After=network-online.target postgresql.service redis-server.service gstbot-migrate.service
 Requires=gstbot-migrate.service

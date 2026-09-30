@@ -10,7 +10,7 @@
 # the schedule does not move with it — either this unit stays on one machine or
 # beat needs a lock, and nothing here provides one.
 Description=GSTBot Celery beat (scheduled filing-deadline alerts)
-Documentation=https://gstbot.aiknol.com
+Documentation=https://gst.doaide.com
 Wants=network-online.target
 After=network-online.target redis-server.service
 PartOf=gstbot.target

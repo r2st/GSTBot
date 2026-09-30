@@ -46,7 +46,7 @@ READY_URL="${GSTBOT_MONITOR_READY_URL:-http://172.18.0.1:3008/api/v1/health/read
 # And this asks the opposite — the whole path a browser takes, including DNS,
 # TLS and a Caddy container that belongs to another product. /health/live
 # rather than /health/ready, so a degraded dependency is not reported twice.
-PUBLIC_URL="${GSTBOT_MONITOR_PUBLIC_URL:-https://gstbot.aiknol.com/api/v1/health/live}"
+PUBLIC_URL="${GSTBOT_MONITOR_PUBLIC_URL:-https://gst.doaide.com/api/v1/health/live}"
 # Optional. Unset, everything below still runs and still lands in the journal
 # with a failed unit behind it; set, the same summary reaches somewhere with a
 # person attached. See "Monitoring" in deploy/README.md.
