@@ -25,10 +25,10 @@ class BusinessOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    gstin: str
+    gstin: str | None = None
     legal_name: str
     trade_name: str | None = None
-    state_code: str
+    state_code: str | None = None
     state_name: str = ""
     plan: BusinessPlan
     is_active: bool
@@ -38,7 +38,13 @@ class BusinessOut(BaseModel):
     def from_business(cls, business) -> BusinessOut:
         data = cls.model_validate(business)
         return data.model_copy(
-            update={"state_name": gstin_service.STATE_CODES.get(business.state_code, "")}
+            update={
+                "state_name": (
+                    gstin_service.STATE_CODES.get(business.state_code, "")
+                    if business.state_code
+                    else ""
+                )
+            }
         )
 
 
@@ -83,11 +89,11 @@ class MeOut(UserOut):
 
 
 class RegisterRequest(BaseModel):
-    """Sign-up: one GSTIN, one owner login.
+    """Sign-up: create a business and its owner login.
 
-    Registration creates the business too — a GST compliance product has
-    nothing to show a user who has not told it which registration they file
-    under, so there is no useful account state before that point.
+    GSTIN is optional — a user can register to explore the product and add
+    their GST registration later. When provided, it is validated, and the
+    state code and PAN are decoded from it.
     """
 
     model_config = ConfigDict(
@@ -114,19 +120,17 @@ class RegisterRequest(BaseModel):
             "not there."
         ),
     )
-    gstin: str = Field(
-        # Bounded generously rather than at exactly 15: the validator below
-        # normalises away the spacing people paste out of a registration
-        # certificate, and rejecting "27 AAPFU0939F 1ZV" on length before that
-        # runs would be a worse error than the one it is trying to give.
+    gstin: str | None = Field(
+        default=None,
         max_length=32,
         description=(
-            "15-character GSTIN of the business. Spaces are stripped, case is "
-            "normalised, and the check digit is verified."
+            "15-character GSTIN of the business, or null to register without one. "
+            "Spaces are stripped, case is normalised, and the check digit is verified."
         ),
     )
-    legal_name: str = Field(
-        min_length=1, max_length=255, description="Name as registered with GST."
+    legal_name: str | None = Field(
+        default=None, max_length=255,
+        description="Name as registered with GST. Defaults to full_name or the email local part.",
     )
     trade_name: str | None = Field(
         default=None, max_length=255, description="Name the business trades under."
@@ -136,9 +140,9 @@ class RegisterRequest(BaseModel):
 
     @field_validator("gstin")
     @classmethod
-    def _valid_gstin(cls, v: str) -> str:
-        # Validated here rather than in the route so a malformed GSTIN comes
-        # back as a 422 naming the field, like every other bad input.
+    def _valid_gstin(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
         try:
             return gstin_service.parse(v).gstin
         except gstin_service.InvalidGSTIN as exc:

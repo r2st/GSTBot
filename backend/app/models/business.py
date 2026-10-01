@@ -36,12 +36,12 @@ class Business(Base, TimestampMixin, SoftDeleteMixin):
     __tablename__ = "businesses"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    gstin: Mapped[str] = mapped_column(String(15), unique=True, nullable=False, index=True)
+    gstin: Mapped[str | None] = mapped_column(String(15), unique=True, nullable=True, index=True)
     legal_name: Mapped[str] = mapped_column(String(255), nullable=False)
     trade_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     # Derived from the GSTIN's first two characters at registration, and stored
     # because it decides the IGST-vs-CGST/SGST split on every invoice.
-    state_code: Mapped[str] = mapped_column(String(2), nullable=False)
+    state_code: Mapped[str | None] = mapped_column(String(2), nullable=True)
     pan: Mapped[str | None] = mapped_column(String(10), nullable=True, index=True)
     plan: Mapped[BusinessPlan] = mapped_column(
         SAEnum(BusinessPlan, native_enum=False, length=20),

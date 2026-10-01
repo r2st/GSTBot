@@ -82,6 +82,60 @@ def test_duplicate_email_is_rejected(auth_client):
     assert "email" in response.json()["detail"].lower()
 
 
+def test_register_without_gstin_creates_a_business_with_no_registration(client, db_session):
+    payload = {
+        "email": "explorer@example.com",
+        "password": "supersecret123",
+        "full_name": "Explorer User",
+    }
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 201, response.text
+    body = response.json()
+
+    assert body["access_token"]
+    assert body["business"]["gstin"] is None
+    assert body["business"]["state_code"] is None
+    assert body["business"]["state_name"] == ""
+    assert body["business"]["legal_name"] == "Explorer User"
+    assert body["business"]["plan"] == BusinessPlan.FREE.value
+
+    business = db_session.get(Business, body["business"]["id"])
+    assert business.gstin is None
+    assert business.state_code is None
+    assert business.pan is None
+
+
+def test_register_without_gstin_falls_back_to_email_local_part(client):
+    payload = {
+        "email": "fallback@example.com",
+        "password": "supersecret123",
+    }
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 201, response.text
+    assert response.json()["business"]["legal_name"] == "fallback"
+
+
+def test_two_businesses_without_gstin_do_not_conflict(client):
+    for email in ("first@example.com", "second-no-gstin@example.com"):
+        response = client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": "supersecret123", "full_name": "No GSTIN"},
+        )
+        assert response.status_code == 201, response.text
+
+
+def test_register_with_empty_string_gstin_treats_it_as_absent(client):
+    payload = {
+        "email": "empty-gstin@example.com",
+        "password": "supersecret123",
+        "gstin": "   ",
+        "full_name": "Whitespace GSTIN",
+    }
+    response = client.post("/api/v1/auth/register", json=payload)
+    assert response.status_code == 201, response.text
+    assert response.json()["business"]["gstin"] is None
+
+
 def test_duplicate_gstin_is_rejected(auth_client):
     """One GSTIN is one tenant.
 

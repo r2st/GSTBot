@@ -117,33 +117,45 @@ def _account_key(username: str) -> str:
 def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> RegisterResponse:
     """Create a business and its owner login in one step.
 
-    The GSTIN has already been validated and normalised by the schema, so what
-    remains here is uniqueness: one registration is one tenant, and a second
-    sign-up against a GSTIN already on file is an invitation problem rather
-    than a registration one.
+    GSTIN is optional — a user can sign up to explore the product and add their
+    registration later. When provided, the GSTIN has already been validated and
+    normalised by the schema, so what remains here is uniqueness.
     """
     email = payload.email.lower()
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="Email already registered"
         )
-    if db.scalar(select(Business).where(Business.gstin == payload.gstin)):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="This GSTIN is already registered. Ask its owner to invite you.",
+
+    legal_name = (payload.legal_name or payload.full_name or email.split("@")[0]).strip()
+
+    if payload.gstin:
+        if db.scalar(select(Business).where(Business.gstin == payload.gstin)):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This GSTIN is already registered. Ask its owner to invite you.",
+            )
+        parts = gstin_service.parse(payload.gstin)
+        business = Business(
+            gstin=parts.gstin,
+            legal_name=legal_name,
+            trade_name=payload.trade_name,
+            state_code=parts.state_code,
+            pan=parts.pan,
+            plan=BusinessPlan.FREE,
+        )
+    else:
+        business = Business(
+            gstin=None,
+            legal_name=legal_name,
+            trade_name=payload.trade_name,
+            state_code=None,
+            pan=None,
+            plan=BusinessPlan.FREE,
         )
 
-    parts = gstin_service.parse(payload.gstin)
-    business = Business(
-        gstin=parts.gstin,
-        legal_name=payload.legal_name,
-        trade_name=payload.trade_name,
-        state_code=parts.state_code,
-        pan=parts.pan,
-        plan=BusinessPlan.FREE,
-    )
     db.add(business)
-    db.flush()  # Assigns business.id without ending the transaction.
+    db.flush()
 
     user = User(
         business_id=business.id,
@@ -158,8 +170,6 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> Registe
     db.refresh(user)
     db.refresh(business)
 
-    # The GSTIN identifies the tenant and belongs in the audit trail; the email
-    # does not, and a log aggregator is a lower-trust store than the database.
     logger.info(
         "Business registered",
         extra={"business_id": business.id, "gstin": business.gstin, "user_id": user.id},
