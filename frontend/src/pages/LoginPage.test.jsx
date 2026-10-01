@@ -64,9 +64,9 @@ describe("LoginPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    expect(screen.queryByLabelText("GSTIN")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/GSTIN/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Create account" }));
-    expect(screen.getByLabelText("GSTIN")).toBeInTheDocument();
+    expect(screen.getByLabelText(/GSTIN/)).toBeInTheDocument();
     expect(screen.getByLabelText("Legal name")).toBeInTheDocument();
   });
 
@@ -78,7 +78,7 @@ describe("LoginPage", () => {
 
     renderPage();
     await user.click(screen.getByRole("tab", { name: "Create account" }));
-    await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+    await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
 
     // Validated server-side rather than by a second copy of the check-digit
     // arithmetic in the browser.
@@ -93,7 +93,7 @@ describe("LoginPage", () => {
 
     renderPage();
     await user.click(screen.getByRole("tab", { name: "Create account" }));
-    await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZW");
+    await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZW");
 
     expect(await screen.findByText(/check digit does not match/)).toBeInTheDocument();
   });
@@ -128,7 +128,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await user.click(screen.getByRole("tab", { name: "Create account" }));
-      const field = screen.getByLabelText("GSTIN");
+      const field = screen.getByLabelText(/GSTIN/);
 
       // Fifteen characters ending in the wrong check digit fires one check.
       await user.type(field, "27AAPFU0939F1ZW");
@@ -175,7 +175,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await user.click(screen.getByRole("tab", { name: "Create account" }));
-      const field = screen.getByLabelText("GSTIN");
+      const field = screen.getByLabelText(/GSTIN/);
 
       await user.type(field, "27AAPFU0939F1ZW");
       await waitFor(() => expect(pending).toHaveLength(1));
@@ -199,7 +199,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await user.click(screen.getByRole("tab", { name: "Create account" }));
-      const field = screen.getByLabelText("GSTIN");
+      const field = screen.getByLabelText(/GSTIN/);
 
       await user.type(field, "27AAPFU0939F1ZV");
       await waitFor(() => expect(pending).toHaveLength(1));
@@ -224,7 +224,7 @@ describe("LoginPage", () => {
 
     renderPage();
     await user.click(screen.getByRole("tab", { name: "Create account" }));
-    await user.type(screen.getByLabelText("GSTIN"), "27aapfu0939f1zv");
+    await user.type(screen.getByLabelText(/GSTIN/), "27aapfu0939f1zv");
     await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
     await user.type(screen.getByLabelText("Email"), "new@example.com");
     await user.type(screen.getByLabelText("Password"), "supersecret123");
@@ -253,7 +253,7 @@ describe("LoginPage", () => {
 
     renderPage();
     await user.click(screen.getByRole("tab", { name: "Create account" }));
-    await user.type(screen.getByLabelText("GSTIN"), "27aapfu0939f1zv");
+    await user.type(screen.getByLabelText(/GSTIN/), "27aapfu0939f1zv");
     await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
     await user.type(screen.getByLabelText("Trade name (optional)"), "Umang Traders");
     await user.type(screen.getByLabelText("Your name (optional)"), "Umang Shah");
@@ -285,7 +285,7 @@ describe("LoginPage", () => {
 
     renderPage();
     await user.click(screen.getByRole("tab", { name: "Create account" }));
-    await user.type(screen.getByLabelText("GSTIN"), "27aapfu0939f1zv");
+    await user.type(screen.getByLabelText(/GSTIN/), "27aapfu0939f1zv");
     await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
     await user.type(screen.getByLabelText("Email"), "new@example.com");
     await user.type(screen.getByLabelText("Password"), "supersecret123");
@@ -329,7 +329,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await goToRegister(user);
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
       await user.type(screen.getByLabelText("Legal name"), "Umang Traders Private Limited");
       await user.type(screen.getByLabelText("Email"), "new@example.com");
       await user.type(screen.getByLabelText("Password"), "supersecret123");
@@ -362,8 +362,12 @@ describe("LoginPage", () => {
       expect(global.fetch).not.toHaveBeenCalled();
     });
 
-    it("requires a GSTIN to register", async () => {
+    it("registers without a GSTIN", async () => {
       const user = userEvent.setup();
+      global.fetch
+        .mockResolvedValueOnce(jsonResponse({ access_token: "tok-no-gstin" }))
+        .mockResolvedValueOnce(jsonResponse({ email: "owner@example.com", business: {} }));
+
       renderPage();
       await goToRegister(user);
 
@@ -372,8 +376,13 @@ describe("LoginPage", () => {
       await user.type(screen.getByLabelText("Password"), "supersecret123");
       await user.click(screen.getByRole("button", { name: "Create account" }));
 
-      expect(await screen.findByText(/GSTIN is required/)).toBeInTheDocument();
-      expect(global.fetch).not.toHaveBeenCalled();
+      await waitFor(() => {
+        const registerCall = global.fetch.mock.calls.find(
+          ([url]) => url === "/api/v1/auth/register",
+        );
+        expect(registerCall).toBeDefined();
+        expect(JSON.parse(registerCall[1].body).gstin).toBeNull();
+      });
     });
 
     it("refuses a short password before the server does", async () => {
@@ -381,7 +390,7 @@ describe("LoginPage", () => {
       renderPage();
       await goToRegister(user);
 
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
       await user.type(screen.getByLabelText("Legal name"), "Acme Supplies");
       await user.type(screen.getByLabelText("Email"), "owner@example.com");
       await user.type(screen.getByLabelText("Password"), "short");
@@ -396,7 +405,7 @@ describe("LoginPage", () => {
       renderPage();
       await goToRegister(user);
 
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
       await user.type(screen.getByLabelText("Email"), "owner@example.com");
       await user.type(screen.getByLabelText("Password"), "supersecret123");
       await user.click(screen.getByRole("button", { name: "Create account" }));
@@ -412,7 +421,7 @@ describe("LoginPage", () => {
 
       // Fifteen characters, but a digit where the PAN letters belong. The
       // shape check answers this without a round trip.
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPF00939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPF00939F1ZV");
 
       expect(await screen.findByText(/does not look like a GSTIN/)).toBeInTheDocument();
       expect(global.fetch).not.toHaveBeenCalled();
@@ -438,7 +447,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await goToRegister(user);
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
 
       // The check digit deliberately is not duplicated in the browser, so a
       // correctly-shaped GSTIN must still be verified over the wire.
@@ -453,7 +462,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await goToRegister(user);
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZZ");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZZ");
       await screen.findByText("Checksum does not match");
 
       await user.type(screen.getByLabelText("Legal name"), "Acme Supplies");
@@ -471,7 +480,7 @@ describe("LoginPage", () => {
       renderPage();
       await goToRegister(user);
 
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
       await user.type(screen.getByLabelText("Legal name"), "Acme Supplies");
       await user.type(screen.getByLabelText("Password"), "supersecret123");
       await user.click(screen.getByRole("button", { name: "Create account" }));
@@ -487,7 +496,7 @@ describe("LoginPage", () => {
       renderPage();
       await goToRegister(user);
 
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
       await user.type(screen.getByLabelText("Legal name"), "Acme Supplies");
       await user.type(screen.getByLabelText("Email"), "owner@acme");
       await user.type(screen.getByLabelText("Password"), "supersecret123");
@@ -535,7 +544,7 @@ describe("LoginPage", () => {
 
       renderPage();
       await user.click(screen.getByRole("tab", { name: "Create account" }));
-      await user.type(screen.getByLabelText("GSTIN"), "27AAPFU0939F1ZV");
+      await user.type(screen.getByLabelText(/GSTIN/), "27AAPFU0939F1ZV");
       expect(await screen.findByText(/Maharashtra/)).toBeInTheDocument();
 
       await user.click(screen.getByRole("tab", { name: "Sign in" }));

@@ -517,9 +517,11 @@ const EMAIL_SHAPE = /^\S+@\S+\.\S+$/;
  */
 export function registrationErrors(form) {
   const errors = {};
-  const gstin = gstinShapeError(form.gstin);
-  if (!normalizeGstin(form.gstin)) errors.gstin = "A GSTIN is required to register.";
-  else if (gstin) errors.gstin = gstin;
+  const cleaned = normalizeGstin(form.gstin);
+  if (cleaned) {
+    const gstin = gstinShapeError(cleaned);
+    if (gstin) errors.gstin = gstin;
+  }
 
   const email = String(form.email ?? "").trim();
   if (!email) errors.email = "Enter your email.";

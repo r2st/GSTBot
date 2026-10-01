@@ -449,8 +449,8 @@ describe("registrationErrors", () => {
     }
   });
 
-  it("requires a GSTIN", () => {
-    expect(registrationErrors({ ...good, gstin: "" }).gstin).toContain("required");
+  it("accepts an empty GSTIN — it is optional", () => {
+    expect(registrationErrors({ ...good, gstin: "" }).gstin).toBeUndefined();
   });
 
   it("passes the shape complaint through", () => {
@@ -473,7 +473,6 @@ describe("registrationErrors", () => {
     // in" rather than as the literal "undefined" that String() would make of
     // it — which is 9 characters long, and would pass the password rule.
     expect(registrationErrors({})).toEqual({
-      gstin: "A GSTIN is required to register.",
       email: "Enter your email.",
       legal_name: "Legal name is required — it is what appears on your returns.",
       password: "Use at least 8 characters.",

@@ -122,7 +122,7 @@ export default function LoginPage() {
       // A GSTIN the server has already rejected blocks the submit too. Letting
       // it through costs a round trip to be told the same thing, and the reply
       // to a failed registration is a generic 400 rather than this sentence.
-      if (!problems.gstin && gstinCheck && !gstinCheck.valid) {
+      if (!problems.gstin && form.gstin.trim() && gstinCheck && !gstinCheck.valid) {
         problems.gstin = gstinCheck.error || "That GSTIN is not valid.";
       }
       if (Object.keys(problems).length > 0) {
@@ -137,7 +137,7 @@ export default function LoginPage() {
         await register({
           email: form.email,
           password: form.password,
-          gstin: form.gstin.replace(/\s/g, "").toUpperCase(),
+          gstin: form.gstin.trim() ? form.gstin.replace(/\s/g, "").toUpperCase() : null,
           legal_name: form.legal_name,
           trade_name: form.trade_name || null,
           full_name: form.full_name || null,
@@ -188,11 +188,10 @@ export default function LoginPage() {
           <form onSubmit={handleSubmit} className="auth-form" noValidate>
             {registering && (
               <>
-                <label htmlFor="gstin">GSTIN</label>
+                <label htmlFor="gstin">GSTIN (optional)</label>
                 <input
                   id="gstin"
                   name="gstin"
-                  required
                   autoComplete="off"
                   spellCheck="false"
                   placeholder="27AAPFU0939F1ZV"
