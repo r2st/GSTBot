@@ -155,151 +155,179 @@ export default function LoginPage() {
 
   return (
     <div className="auth-page">
-      <div className="auth-card">
-        <div className="auth-brand">
-          <span className="brand-mark" aria-hidden="true">
-            ₹
-          </span>
-          <h1>DoAide GST</h1>
-          <p className="auth-tagline">GST compliance on autopilot</p>
-        </div>
+      <div className="auth-container">
+        <svg viewBox="0 0 48 48" className="auth-robot" aria-hidden="true">
+          <g fill="none">
+            <line x1="24" y1="8" x2="24" y2="3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            <circle cx="24" cy="2" r="1.8" fill="currentColor" opacity="0.9" />
+            <circle cx="24" cy="2" r="2.8" fill="currentColor" opacity="0.25" />
+            <rect x="14" y="8" width="20" height="14" rx="4" fill="currentColor" />
+            <circle cx="19.5" cy="14" r="2.2" fill="#0A0A0B" />
+            <circle cx="28.5" cy="14" r="2.2" fill="#0A0A0B" />
+            <path d="M20 18.5 Q24 21.5 28 18.5" stroke="#0A0A0B" strokeWidth="1.4" fill="none" strokeLinecap="round" />
+            <rect x="16" y="23" width="16" height="12" rx="3" fill="currentColor" />
+            <rect x="8" y="24" width="7" height="3.5" rx="1.8" fill="currentColor" />
+            <rect x="33" y="24" width="7" height="3.5" rx="1.8" fill="currentColor" />
+            <rect x="19" y="36" width="3.5" height="5" rx="1.5" fill="currentColor" />
+            <rect x="25.5" y="36" width="3.5" height="5" rx="1.5" fill="currentColor" />
+            <g transform="translate(36, 28)">
+              <rect x="-2.5" y="0" width="7" height="5.5" rx="1" fill="#0A0A0B" stroke="currentColor" strokeWidth="0.8" />
+              <path d="M-0.5 0 v-1.2 a1.2 1.2 0 0 1 1.2-1.2 h0.6 a1.2 1.2 0 0 1 1.2 1.2 v1.2" stroke="currentColor" strokeWidth="0.7" fill="none" />
+              <rect x="0" y="2" width="2" height="1" rx="0.3" fill="currentColor" />
+            </g>
+          </g>
+        </svg>
 
-        <div className="auth-tabs" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={!registering}
-            className={!registering ? "auth-tab is-active" : "auth-tab"}
-            onClick={() => switchTo("login")}
-          >
-            Sign in
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={registering}
-            className={registering ? "auth-tab is-active" : "auth-tab"}
-            onClick={() => switchTo("register")}
-          >
-            Create account
-          </button>
-        </div>
+        <h1 className="auth-title">
+          DoAide <span className="auth-title-accent">GST</span>
+        </h1>
+        <p className="auth-subtitle">AI-powered GST compliance for Indian businesses</p>
 
-        <ErrorBanner message={error} onDismiss={() => setError("")} />
+        <div className="auth-card">
+          <ErrorBanner message={error} onDismiss={() => setError("")} />
 
-        {/* noValidate: the browser's own bubbles say "Please fill in this
-            field" with no reference to what the field is for, and they cannot
-            be styled or read by the tests. The rules are enforced above. */}
-        <form onSubmit={handleSubmit} className="auth-form" noValidate>
-          {registering && (
-            <>
-              <label htmlFor="gstin">GSTIN</label>
-              <input
-                id="gstin"
-                name="gstin"
-                required
-                autoComplete="off"
-                spellCheck="false"
-                placeholder="27AAPFU0939F1ZV"
-                value={form.gstin}
-                aria-invalid={fieldErrors.gstin ? true : undefined}
-                aria-describedby={fieldErrors.gstin ? "gstin-error" : undefined}
-                onChange={(e) => {
-                  update("gstin", e.target.value);
-                  checkGstin(e.target.value);
-                }}
-              />
-              {fieldErrors.gstin ? (
-                <p className="field-error" id="gstin-error" role="alert">
-                  {fieldErrors.gstin}
-                </p>
-              ) : (
-                gstinCheck && (
-                  <p className={gstinCheck.valid ? "field-hint is-good" : "field-hint is-bad"}>
-                    {gstinCheck.valid
-                      ? `Valid — ${gstinCheck.state_name} (PAN ${gstinCheck.pan})`
-                      : gstinCheck.error}
+          {/* noValidate: the browser's own bubbles say "Please fill in this
+              field" with no reference to what the field is for, and they cannot
+              be styled or read by the tests. The rules are enforced above. */}
+          <form onSubmit={handleSubmit} className="auth-form" noValidate>
+            {registering && (
+              <>
+                <label htmlFor="gstin">GSTIN</label>
+                <input
+                  id="gstin"
+                  name="gstin"
+                  required
+                  autoComplete="off"
+                  spellCheck="false"
+                  placeholder="27AAPFU0939F1ZV"
+                  value={form.gstin}
+                  aria-invalid={fieldErrors.gstin ? true : undefined}
+                  aria-describedby={fieldErrors.gstin ? "gstin-error" : undefined}
+                  onChange={(e) => {
+                    update("gstin", e.target.value);
+                    checkGstin(e.target.value);
+                  }}
+                />
+                {fieldErrors.gstin ? (
+                  <p className="field-error" id="gstin-error" role="alert">
+                    {fieldErrors.gstin}
                   </p>
-                )
-              )}
+                ) : (
+                  gstinCheck && (
+                    <p className={gstinCheck.valid ? "field-hint is-good" : "field-hint is-bad"}>
+                      {gstinCheck.valid
+                        ? `Valid — ${gstinCheck.state_name} (PAN ${gstinCheck.pan})`
+                        : gstinCheck.error}
+                    </p>
+                  )
+                )}
 
-              <label htmlFor="legal_name">Legal name</label>
-              <input
-                id="legal_name"
-                name="legal_name"
-                required
-                value={form.legal_name}
-                aria-invalid={fieldErrors.legal_name ? true : undefined}
-                aria-describedby={fieldErrors.legal_name ? "legal_name-error" : undefined}
-                onChange={(e) => update("legal_name", e.target.value)}
-              />
-              {fieldErrors.legal_name && (
-                <p className="field-error" id="legal_name-error" role="alert">
-                  {fieldErrors.legal_name}
-                </p>
-              )}
+                <label htmlFor="legal_name">Legal name</label>
+                <input
+                  id="legal_name"
+                  name="legal_name"
+                  required
+                  value={form.legal_name}
+                  aria-invalid={fieldErrors.legal_name ? true : undefined}
+                  aria-describedby={fieldErrors.legal_name ? "legal_name-error" : undefined}
+                  onChange={(e) => update("legal_name", e.target.value)}
+                />
+                {fieldErrors.legal_name && (
+                  <p className="field-error" id="legal_name-error" role="alert">
+                    {fieldErrors.legal_name}
+                  </p>
+                )}
 
-              <label htmlFor="trade_name">Trade name (optional)</label>
-              <input
-                id="trade_name"
-                name="trade_name"
-                value={form.trade_name}
-                onChange={(e) => update("trade_name", e.target.value)}
-              />
+                <label htmlFor="trade_name">Trade name (optional)</label>
+                <input
+                  id="trade_name"
+                  name="trade_name"
+                  value={form.trade_name}
+                  onChange={(e) => update("trade_name", e.target.value)}
+                />
 
-              <label htmlFor="full_name">Your name (optional)</label>
-              <input
-                id="full_name"
-                name="full_name"
-                value={form.full_name}
-                onChange={(e) => update("full_name", e.target.value)}
-              />
+                <label htmlFor="full_name">Your name (optional)</label>
+                <input
+                  id="full_name"
+                  name="full_name"
+                  value={form.full_name}
+                  onChange={(e) => update("full_name", e.target.value)}
+                />
+              </>
+            )}
+
+            <label htmlFor="email">Email</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              required
+              autoComplete="email"
+              value={form.email}
+              aria-invalid={fieldErrors.email ? true : undefined}
+              aria-describedby={fieldErrors.email ? "email-error" : undefined}
+              onChange={(e) => update("email", e.target.value)}
+            />
+            {fieldErrors.email && (
+              <p className="field-error" id="email-error" role="alert">
+                {fieldErrors.email}
+              </p>
+            )}
+
+            <label htmlFor="password">Password</label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              required
+              minLength={registering ? 8 : undefined}
+              autoComplete={registering ? "new-password" : "current-password"}
+              value={form.password}
+              aria-invalid={fieldErrors.password ? true : undefined}
+              aria-describedby={fieldErrors.password ? "password-error" : undefined}
+              onChange={(e) => update("password", e.target.value)}
+            />
+            {fieldErrors.password ? (
+              <p className="field-error" id="password-error" role="alert">
+                {fieldErrors.password}
+              </p>
+            ) : (
+              registering && <p className="field-hint">At least 8 characters.</p>
+            )}
+
+            <button type="submit" className="auth-submit" disabled={busy}>
+              {busy ? "Please wait…" : registering ? "Create account" : "Sign in"}
+            </button>
+          </form>
+        </div>
+
+        <p className="auth-switch">
+          {registering ? (
+            <>
+              Already have an account?{" "}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={!registering}
+                onClick={() => switchTo("login")}
+              >
+                Sign in
+              </button>
+            </>
+          ) : (
+            <>
+              {"Don’t have an account? "}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={registering}
+                onClick={() => switchTo("register")}
+              >
+                Create account
+              </button>
             </>
           )}
-
-          <label htmlFor="email">Email</label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            required
-            autoComplete="email"
-            value={form.email}
-            aria-invalid={fieldErrors.email ? true : undefined}
-            aria-describedby={fieldErrors.email ? "email-error" : undefined}
-            onChange={(e) => update("email", e.target.value)}
-          />
-          {fieldErrors.email && (
-            <p className="field-error" id="email-error" role="alert">
-              {fieldErrors.email}
-            </p>
-          )}
-
-          <label htmlFor="password">Password</label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            required
-            minLength={registering ? 8 : undefined}
-            autoComplete={registering ? "new-password" : "current-password"}
-            value={form.password}
-            aria-invalid={fieldErrors.password ? true : undefined}
-            aria-describedby={fieldErrors.password ? "password-error" : undefined}
-            onChange={(e) => update("password", e.target.value)}
-          />
-          {fieldErrors.password ? (
-            <p className="field-error" id="password-error" role="alert">
-              {fieldErrors.password}
-            </p>
-          ) : (
-            registering && <p className="field-hint">At least 8 characters.</p>
-          )}
-
-          <button type="submit" className="btn btn-primary btn-block" disabled={busy}>
-            {busy ? "Please wait…" : registering ? "Create account" : "Sign in"}
-          </button>
-        </form>
+        </p>
       </div>
     </div>
   );

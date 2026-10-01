@@ -331,72 +331,137 @@ select[aria-invalid="true"]:focus {
 }
 
 /* ---- Auth ---- */
+@keyframes auth-fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .auth-page {
   min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 1.5rem;
+  background: #0A0A0B;
+}
+.auth-container {
+  width: 100%;
+  max-width: 380px;
+  text-align: center;
+  animation: auth-fade-up 0.6s ease-out;
+}
+.auth-robot {
+  width: 48px;
+  height: 48px;
+  color: #F0B429;
+  margin: 0 auto 20px;
+  display: block;
+}
+.auth-title {
+  font-family: var(--doaide-font-display, "Instrument Serif", Georgia, serif);
+  font-size: 42px;
+  font-weight: 400;
+  color: #fff;
+  margin: 0;
+  line-height: 1.1;
+}
+.auth-title-accent {
+  font-style: italic;
+  color: #F0B429;
+}
+.auth-subtitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.45);
+  margin: 8px 0 24px;
 }
 .auth-card {
   width: 100%;
-  max-width: 420px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-  padding: 1.75rem;
-}
-.auth-brand {
-  text-align: center;
-  margin-bottom: 1.25rem;
-}
-.auth-brand h1 {
-  margin: 0.5rem 0 0;
-}
-.auth-brand .brand-mark {
-  margin: 0 auto;
-  width: 40px;
-  height: 40px;
-  font-size: 1.2rem;
-}
-.auth-tagline {
-  margin: 0.25rem 0 0;
-  color: var(--ink-soft);
-  font-size: 0.9rem;
-}
-.auth-tabs {
-  display: flex;
-  gap: 0.25rem;
-  background: var(--canvas);
-  padding: 0.25rem;
-  border-radius: var(--radius);
-  margin-bottom: 1rem;
-}
-.auth-tab {
-  flex: 1;
-  padding: 0.45rem;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  font: inherit;
-  font-weight: 600;
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-.auth-tab.is-active {
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: var(--shadow);
+  background: rgba(16, 16, 18, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+              0 8px 24px -12px rgba(0, 0, 0, 0.9);
+  text-align: left;
 }
 .auth-form {
   display: grid;
-  gap: 0.35rem;
+  gap: 6px;
 }
 .auth-form label {
-  margin-top: 0.5rem;
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 12px;
 }
-.auth-form .btn {
-  margin-top: 1rem;
+.auth-form input {
+  background: rgba(10, 10, 11, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 8px !important;
+  padding: 10px 14px !important;
+  font-size: 14px !important;
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace) !important;
+  color: #fff !important;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 150ms ease;
+}
+.auth-form input:focus {
+  border-color: rgba(240, 180, 41, 0.5) !important;
+  outline: none;
+  box-shadow: none !important;
+}
+.auth-form input::placeholder {
+  color: rgba(255, 255, 255, 0.25) !important;
+}
+.auth-form .field-error {
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 11px;
+}
+.auth-form .field-hint {
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 11px;
+}
+.auth-submit {
+  background: #F0B429 !important;
+  color: #0A0A0B !important;
+  border: none !important;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  font-family: var(--doaide-font, "Schibsted Grotesk", system-ui, sans-serif);
+  width: 100%;
+  cursor: pointer;
+  margin-top: 16px;
+  transition: background 150ms ease;
+}
+.auth-submit:hover:not(:disabled) {
+  background: #F7D070 !important;
+}
+.auth-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.auth-switch {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.35);
+  margin-top: 20px;
+}
+.auth-switch button {
+  background: none;
+  border: none;
+  color: #F0B429;
+  font-size: 14px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+.auth-switch button:hover {
+  color: #F7D070;
 }
 
 /* ---- Page furniture ---- */
@@ -1066,7 +1131,7 @@ button.chip.is-active {
    users, which is who it is for. */
 .btn:focus-visible,
 .nav-link:focus-visible,
-.auth-tab:focus-visible,
+.auth-switch button:focus-visible,
 .banner-close:focus-visible,
 button.chip:focus-visible,
 a:focus-visible {
@@ -1290,7 +1355,10 @@ a:focus-visible {
     font-size: 0.62rem;
   }
   .auth-card {
-    padding: 1.25rem;
+    padding: 16px;
+  }
+  .auth-title {
+    font-size: 36px;
   }
   /* Tables scroll inside their own container at every width, but on a phone
      the cells also need to stop wrapping to two words per line. */
@@ -1308,7 +1376,7 @@ a:focus-visible {
 @media (pointer: coarse) {
   .btn,
   .nav-link,
-  .auth-tab {
+  .auth-switch button {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
