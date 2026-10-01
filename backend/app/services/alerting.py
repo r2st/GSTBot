@@ -313,9 +313,10 @@ def sweep_business(
         if undone or (escalated and alert.status not in OPEN_STATUSES):
             alert.status = AlertStatus.PENDING
             reopened += 1
-        elif escalated and alert.status is AlertStatus.READ:
-            # Read, not dismissed, and now more serious than when it was read.
-            # Back to pending so it counts as open again.
+        elif escalated and alert.status in (AlertStatus.READ, AlertStatus.SENT):
+            # The severity changed since the user last saw (READ) or was
+            # emailed (SENT) this alert.  Back to pending so the new severity
+            # reaches the email sender.
             alert.status = AlertStatus.PENDING
 
     return SweepResult(
@@ -480,7 +481,7 @@ def sweep_itc_deadlines(
         if undone or (escalated and alert.status not in OPEN_STATUSES):
             alert.status = AlertStatus.PENDING
             reopened += 1
-        elif escalated and alert.status is AlertStatus.READ:
+        elif escalated and alert.status in (AlertStatus.READ, AlertStatus.SENT):
             alert.status = AlertStatus.PENDING
 
     # A year that has dropped off the list has had its returns recorded — every

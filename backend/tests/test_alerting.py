@@ -536,6 +536,33 @@ class TestRespectingADismissal:
         # would overstate how often dismissals are overridden.
         assert result.reopened == 0
 
+    def test_a_sent_alert_that_gets_worse_becomes_pending_again(
+        self, db_session, business
+    ):
+        sweep(db_session, business, today=date(2026, 5, 13))
+        alert = one_alert(db_session, business, ReturnType.GSTR3B)
+        alert.status = AlertStatus.SENT
+        db_session.commit()
+
+        sweep(db_session, business, today=date(2026, 5, 21))
+        alert = one_alert(db_session, business, ReturnType.GSTR3B)
+
+        assert alert.status is AlertStatus.PENDING
+        assert alert.severity is AlertSeverity.CRITICAL
+
+    def test_a_sent_alert_at_the_same_severity_stays_sent(
+        self, db_session, business
+    ):
+        sweep(db_session, business, today=date(2026, 5, 13))
+        alert = one_alert(db_session, business, ReturnType.GSTR3B)
+        alert.status = AlertStatus.SENT
+        db_session.commit()
+
+        sweep(db_session, business, today=date(2026, 5, 14))
+        alert = one_alert(db_session, business, ReturnType.GSTR3B)
+
+        assert alert.status is AlertStatus.SENT
+
     def test_a_failed_delivery_leaves_the_alert_live(self, db_session, business):
         # The deadline is every bit as unmet; it is the sending that broke.
         sweep(db_session, business, today=date(2026, 5, 13))
