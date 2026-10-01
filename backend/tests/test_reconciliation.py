@@ -502,6 +502,23 @@ def test_run_writes_counts_itc_and_statuses(db_session, business):
     assert missing.status is InvoiceStatus.MISSING_IN_2B
 
 
+def test_a_successful_run_emits_a_structured_log_line(db_session, business, caplog):
+    save(db_session, business.id, invoice_number="A-1")
+    import_2b(db_session, business.id, [portal(invoice_number="A-1")])
+
+    with caplog.at_level("INFO", logger="app.services.reconciliation"):
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+    assert run.status is ReconciliationStatus.COMPLETED
+    completed = [r for r in caplog.records if "completed" in r.message.lower()]
+    assert completed, "No success log line emitted for a completed reconciliation"
+    record = completed[0]
+    assert record.business_id == business.id
+    assert record.period == PERIOD
+    assert record.matched == 1
+    assert record.duration_ms >= 0
+
+
 def test_only_purchases_are_reconciled(db_session, business):
     """GSTR-2B is a statement of inward supply; a sale has no counterpart."""
     save(db_session, business.id, invoice_type=InvoiceType.SALES, invoice_number="S-1")

@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -957,6 +958,7 @@ def run_reconciliation(
         )
 
     started_at = datetime.now(UTC)
+    wall_start = time.perf_counter()
     run = ReconciliationRun(
         business_id=business_id,
         period=period,
@@ -1006,6 +1008,27 @@ def run_reconciliation(
         run.status = ReconciliationStatus.COMPLETED
         run.completed_at = datetime.now(UTC)
         db.commit()
+        duration_ms = round((time.perf_counter() - wall_start) * 1000, 2)
+        logger.info(
+            "Reconciliation completed for business %s period %s",
+            business_id, period,
+            extra={
+                "business_id": business_id,
+                "period": period,
+                "run_id": run.id,
+                "duration_ms": duration_ms,
+                "total_invoices": run.total_invoices,
+                "matched": run.matched_count,
+                "mismatched": run.mismatched_count,
+                "missing_in_2b": run.missing_in_2b_count,
+                "missing_in_books": run.missing_in_books_count,
+                "duplicates": run.duplicate_count,
+                "gstr2b_records": len(records),
+                "itc_eligible": str(run.itc_eligible),
+                "itc_at_risk": str(run.itc_at_risk),
+                "findings_count": len(result.findings),
+            },
+        )
     except Exception as exc:  # noqa: BLE001 - the run row is the error channel
         logger.exception("Reconciliation failed for business %s period %s", business_id, period)
         # Throw away everything the half-finished run wrote. By the time this
