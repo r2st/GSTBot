@@ -25,11 +25,11 @@ function recentPeriodOptions(now = new Date()) {
 const RETURNS = {
   gstr1: {
     label: "GSTR-1",
-    help: "Your outward supplies. This is what becomes your customers' GSTR-2B, so the GSTINs on it decide whether they can claim their credit.",
+    help: "Outward supplies — feeds your customers' GSTR-2B.",
   },
   gstr3b: {
     label: "GSTR-3B",
-    help: "The monthly summary and payment, pre-filled from the reconciled ITC position.",
+    help: "Monthly summary and payment, pre-filled from ITC.",
   },
 };
 

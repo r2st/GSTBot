@@ -516,7 +516,7 @@ export default function InvoiceDetailPage() {
           Read by {invoice.parsed_with ?? "unknown"}
           {invoice.extraction_confidence != null &&
             ` · confidence ${(invoice.extraction_confidence * 100).toFixed(0)}%`}
-          . Correct anything wrong — your edit is what gets filed.
+          . Your edits override the extraction.
         </p>
 
         {warnings.length > 0 && (

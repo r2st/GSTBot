@@ -153,7 +153,7 @@ describe("the invoice lifecycle, end to end", () => {
     // --- Import the portal's 2B and match against it ----------------------
     await goTo(user, "Reconcile", "Reconciliation");
     await selectApril(user);
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
 
     await user.upload(screen.getByLabelText("Import GSTR-2B"), gstr2bFile());
     // The count is the statement's own, and it counts the purchase that was
@@ -226,7 +226,7 @@ describe("the invoice lifecycle, end to end", () => {
 
     await screen.findByRole("heading", { name: "Reconciliation", level: 1 });
     await selectApril(user);
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
 
     expect(screen.getByRole("button", { name: "Run reconciliation" })).toBeDisabled();
   });

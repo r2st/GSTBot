@@ -309,10 +309,7 @@ export default function DashboardPage() {
                 </table>
               </TableScroll>
               <p className="muted small">
-                Credit is the claimable part of your purchases — tax blocked under s.17(5)
-                or paid under reverse charge is not counted. It is tracked per head: IGST
-                credit can offset CGST and SGST, but CGST credit can never discharge an
-                SGST liability.
+                Credit excludes s.17(5) blocked and reverse-charge amounts.
               </p>
             </div>
           </section>

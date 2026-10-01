@@ -128,7 +128,7 @@ describe("StatusPage", () => {
 
       expect(await screen.findByText(/Running, with something degraded/)).toBeInTheDocument();
       expect(
-        screen.getByText(/Uploads are read as they arrive rather than in the background/),
+        screen.getByText(/Queue offline/),
       ).toBeInTheDocument();
     });
 
@@ -156,7 +156,7 @@ describe("StatusPage", () => {
       expect(await screen.findByText(/Running, with something degraded/)).toBeInTheDocument();
       expect(screen.getByText("Upload storage")).toBeInTheDocument();
       expect(
-        screen.getByText(/The disk uploads are written to is full or read-only/),
+        screen.getByText(/Disk full or read-only/),
       ).toBeInTheDocument();
     });
 
@@ -173,7 +173,7 @@ describe("StatusPage", () => {
       renderPage();
 
       expect(
-        await screen.findByText(/invoices are read with the built-in patterns alone/),
+        await screen.findByText(/AI extractor offline/),
       ).toBeInTheDocument();
     });
 
@@ -223,7 +223,7 @@ describe("StatusPage", () => {
 
       expect(await screen.findByText("Deadline alerts")).toBeInTheDocument();
       expect(
-        screen.getByText("New filing-deadline alerts are not being raised."),
+        screen.getByText("Deadline alerts paused."),
       ).toBeInTheDocument();
       expect(screen.getByText("Something is behind")).toBeInTheDocument();
     });
@@ -308,7 +308,7 @@ describe("StatusPage", () => {
 
       expect(await screen.findByText("Not in use")).toBeInTheDocument();
       expect(
-        screen.queryByText(/Uploads are being read as they arrive/),
+        screen.queryByText(/Uploads parse inline/),
       ).not.toBeInTheDocument();
     });
 
@@ -323,7 +323,7 @@ describe("StatusPage", () => {
 
       expect(await screen.findByText("None answering")).toBeInTheDocument();
       expect(
-        screen.getByText(/Uploads are being read as they arrive/),
+        screen.getByText(/Uploads parse inline/),
       ).toBeInTheDocument();
     });
 

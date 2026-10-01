@@ -177,7 +177,7 @@ export default function LoginPage() {
         <h1 className="auth-title">
           DoAide <span className="auth-title-accent">GST</span>
         </h1>
-        <p className="auth-subtitle">AI-powered GST compliance for Indian businesses</p>
+        <p className="auth-subtitle">GST compliance, simplified.</p>
 
         <div className="auth-card">
           <ErrorBanner message={error} onDismiss={() => setError("")} />

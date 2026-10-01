@@ -25,25 +25,19 @@ import { api, isAbortError } from "../lib/api";
 const DEPENDENCIES = {
   database: {
     label: "Your data",
-    down: "The API cannot reach its database. Nothing will load until this clears.",
+    down: "Database unreachable — nothing will load.",
   },
   redis: {
     label: "Background queue",
-    down:
-      "Uploads are read as they arrive rather than in the background, and the " +
-      "scheduled sweeps are not running.",
+    down: "Queue offline — uploads parse inline, sweeps paused.",
   },
   ai: {
     label: "Invoice reading",
-    down:
-      "The AI extractor is not configured, so invoices are read with the " +
-      "built-in patterns alone. Figures are more likely to need correcting.",
+    down: "AI extractor offline — using built-in patterns only.",
   },
   storage: {
     label: "Upload storage",
-    down:
-      "The disk uploads are written to is full or read-only. New uploads will " +
-      "fail until it is cleared; everything already uploaded is unaffected.",
+    down: "Disk full or read-only — new uploads will fail.",
   },
 };
 
@@ -53,15 +47,15 @@ const DEPENDENCIES = {
 const JOBS = {
   "filing-deadline-sweep": {
     label: "Deadline alerts",
-    stale: "New filing-deadline alerts are not being raised.",
+    stale: "Deadline alerts paused.",
   },
   "filing-deadline-alert-emails": {
     label: "Alert emails",
-    stale: "Alerts are being raised but not emailed out.",
+    stale: "Alert emails not sending.",
   },
   "stalled-parse-sweep": {
     label: "Stuck upload recovery",
-    stale: "An upload that stalls mid-read will stay stuck rather than being retried.",
+    stale: "Stuck uploads won't auto-retry.",
   },
 };
 
@@ -197,9 +191,7 @@ export default function StatusPage() {
       <div className="page-head">
         <div>
           <h1>System status</h1>
-          <p className="muted">
-            Whether the parts of DoAide GST that run without you are running.
-          </p>
+          <p className="muted">Live service health</p>
         </div>
         <button
           type="button"
@@ -263,8 +255,7 @@ export default function StatusPage() {
                     </strong>
                     {jobs.celery_enabled && !jobs.workers?.reachable && (
                       <div className="stat-sub">
-                        Uploads are being read as they arrive instead of in the
-                        background, so a large batch will be slow.
+                        Uploads parse inline — large batches will be slow.
                       </div>
                     )}
                   </div>

@@ -561,8 +561,7 @@ export default function ReconcilePage() {
           null
         ) : (
           <p className="muted">
-            No GSTR-2B imported yet. Download it from the GST portal (Returns → GSTR-2B →
-            Download) and upload the JSON or CSV here.
+            No GSTR-2B yet — upload the JSON or CSV from the GST portal.
           </p>
         )}
 

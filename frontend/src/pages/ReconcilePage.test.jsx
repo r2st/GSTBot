@@ -266,8 +266,8 @@ describe("ReconcilePage", () => {
     mockApi({});
     renderPage();
 
-    expect(await screen.findByText(/No GSTR-2B imported yet/)).toBeInTheDocument();
-    expect(screen.getByText(/Returns → GSTR-2B → Download/)).toBeInTheDocument();
+    expect(await screen.findByText(/No GSTR-2B yet/)).toBeInTheDocument();
+    expect(screen.getByText(/upload the JSON or CSV from the GST portal/)).toBeInTheDocument();
   });
 
   describe("a period the server could not answer for", () => {
@@ -285,7 +285,7 @@ describe("ReconcilePage", () => {
       // not do on its own. The sentence is not a caption on the banner — it is
       // a finding about the period, and it comes with an instruction to go and
       // import a 2B that may well already be there.
-      expect(screen.queryByText(/No GSTR-2B imported yet/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/No GSTR-2B yet/)).not.toBeInTheDocument();
     });
 
     it("says something even when the edge answers with no body it can read", async () => {
@@ -300,7 +300,7 @@ describe("ReconcilePage", () => {
       mockApi({});
       renderPage();
 
-      await screen.findByText(/No GSTR-2B imported yet/);
+      await screen.findByText(/No GSTR-2B yet/);
       // A 404 from both endpoints is the ordinary first visit to a period.
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     });
@@ -351,7 +351,7 @@ describe("ReconcilePage", () => {
     mockApi({});
     renderPage();
 
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
     expect(screen.getByRole("button", { name: /Run reconciliation/ })).toBeDisabled();
   });
 
@@ -523,7 +523,7 @@ describe("ReconcilePage", () => {
     const movedLoads = pending.splice(0);
     movedLoads.find((r) => r.url.includes("/gstr2b/")).refuse(404);
     movedLoads.find((r) => r.url.includes("/latest")).refuse(404);
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
 
     reconcile.refuse(500);
 
@@ -543,7 +543,7 @@ describe("ReconcilePage", () => {
     });
     renderPage();
 
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
     const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
     await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
 
@@ -563,7 +563,7 @@ describe("ReconcilePage", () => {
     });
     renderPage();
 
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
     const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
     await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
 
@@ -591,7 +591,7 @@ describe("ReconcilePage", () => {
       },
     });
     renderPage();
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
 
     const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
     Object.defineProperty(file, "size", { value: 41 * 1024 * 1024 });
@@ -605,7 +605,7 @@ describe("ReconcilePage", () => {
     const user = userEvent.setup();
     mockApi({});
     renderPage();
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
 
     const file = new File([""], "gstr2b.json", { type: "application/json" });
     Object.defineProperty(file, "size", { value: 0 });
@@ -641,7 +641,7 @@ describe("ReconcilePage", () => {
       return { ok: false, status: 404, statusText: "Not Found", text: async () => "{}" };
     });
     renderPage();
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
     const before = onScreen();
 
     const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
@@ -666,7 +666,7 @@ describe("ReconcilePage", () => {
       return { ok: false, status: 404, statusText: "Not Found", text: async () => "{}" };
     });
     renderPage();
-    await screen.findByText(/No GSTR-2B imported yet/);
+    await screen.findByText(/No GSTR-2B yet/);
 
     const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
     await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
@@ -750,7 +750,7 @@ describe("ReconcilePage", () => {
 
       pending[2].refuse(404);
       pending[3].refuse(404);
-      await screen.findByText(/No GSTR-2B imported yet/);
+      await screen.findByText(/No GSTR-2B yet/);
 
       // An AbortError carries no status, so the 404-is-the-empty-state test
       // does not exempt it: left unguarded, "The operation was aborted."
@@ -806,7 +806,7 @@ describe("ReconcilePage", () => {
       const startedOn = screen.getByLabelText("Period").value;
       pending[0].refuse(404);
       pending[1].refuse(404);
-      await screen.findByText(/No GSTR-2B imported yet/);
+      await screen.findByText(/No GSTR-2B yet/);
 
       const file = new File(['{"data":{}}'], "gstr2b.json", { type: "application/json" });
       await user.upload(screen.getByLabelText(/Import GSTR-2B/), file);
