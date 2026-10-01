@@ -60,7 +60,7 @@ class ReconciliationRun(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMix
     period: Mapped[str] = mapped_column(String(7), nullable=False, index=True)
     status: Mapped[ReconciliationStatus] = mapped_column(
         SAEnum(ReconciliationStatus, native_enum=False, length=20),
-        default=ReconciliationStatus.QUEUED,
+        default=ReconciliationStatus.RUNNING,
         nullable=False,
     )
 
