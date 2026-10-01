@@ -87,7 +87,10 @@ def list_suppliers(
     ).all()
 
     return SupplierListOut(
-        items=[SupplierOut.model_validate(row) for row in rows], total=total
+        items=[SupplierOut.model_validate(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

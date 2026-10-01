@@ -87,6 +87,8 @@ class SupplierDetailOut(SupplierOut):
 class SupplierListOut(BaseModel):
     items: list[SupplierOut]
     total: int
+    limit: int
+    offset: int
 
 
 class RescoreOut(BaseModel):

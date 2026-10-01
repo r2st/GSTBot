@@ -325,7 +325,10 @@ def list_runs(
         .offset(offset)
     ).all()
     return ReconciliationListOut(
-        items=[ReconciliationRunOut.model_validate(row) for row in rows], total=total
+        items=[ReconciliationRunOut.model_validate(row) for row in rows],
+        total=total,
+        limit=limit,
+        offset=offset,
     )
 
 

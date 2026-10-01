@@ -196,6 +196,7 @@ def link_business(
 @router.delete(
     "/mine/{business_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Unlink a business from this login",
     description=(
         "Removes access this login gained through `POST /businesses/mine/link`. "

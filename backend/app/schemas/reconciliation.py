@@ -68,6 +68,8 @@ class ReconciliationDetailOut(ReconciliationRunOut):
 class ReconciliationListOut(BaseModel):
     items: list[ReconciliationRunOut]
     total: int
+    limit: int
+    offset: int
 
 
 class ReconcileRequest(BaseModel):
