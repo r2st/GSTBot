@@ -5,21 +5,21 @@
    bytes than the app. */
 
 :root {
-  --ink: #10182a;
-  --ink-soft: #5a6478;
-  --line: #e3e7ef;
-  --surface: #ffffff;
-  --canvas: #f6f8fb;
-  --brand: #1a6b4f;
-  --brand-dark: #12503b;
-  --good: #1a7f4f;
-  --warn: #a86400;
-  --bad: #b3261e;
-  --good-bg: #e7f5ee;
-  --warn-bg: #fdf3e2;
-  --bad-bg: #fdeceb;
+  --ink: #E5E7EB;
+  --ink-soft: #9CA3AF;
+  --line: #2A2A2D;
+  --surface: #1A1A1D;
+  --canvas: #0A0A0B;
+  --brand: #F0B429;
+  --brand-dark: #D4A017;
+  --good: #34D399;
+  --warn: #FBBF24;
+  --bad: #F87171;
+  --good-bg: rgba(52, 211, 153, 0.12);
+  --warn-bg: rgba(251, 191, 36, 0.12);
+  --bad-bg: rgba(248, 113, 113, 0.12);
   --radius: 10px;
-  --shadow: 0 1px 2px rgba(16, 24, 42, 0.06), 0 4px 12px rgba(16, 24, 42, 0.04);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 * {
@@ -89,15 +89,20 @@ a {
   gap: 0.5rem;
   font-weight: 700;
 }
-.brand-mark {
-  display: grid;
-  place-items: center;
+.brand-robot {
   width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--brand);
+  height: auto;
+  flex-shrink: 0;
+}
+.brand-name {
+  font-family: var(--doaide-font-display, "Instrument Serif", Georgia, serif);
+  font-size: 1.2rem;
+  font-weight: 400;
   color: #fff;
-  font-weight: 700;
+}
+.brand-accent {
+  font-style: italic;
+  color: #F0B429;
 }
 .shell-nav {
   display: flex;
@@ -111,8 +116,8 @@ a {
   text-decoration: none;
 }
 .nav-link.is-active {
-  background: var(--good-bg);
-  color: var(--brand-dark);
+  background: rgba(240, 180, 41, 0.12);
+  color: #F0B429;
   font-weight: 600;
 }
 .shell-user {
@@ -156,7 +161,7 @@ a {
 .business-current:hover,
 .business-current[aria-expanded="true"] {
   border-color: var(--line);
-  background: var(--good-bg);
+  background: rgba(240, 180, 41, 0.08);
 }
 .business-menu {
   position: absolute;
@@ -167,8 +172,8 @@ a {
   padding: 0.75rem;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface, #fff);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 12%);
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 40%);
   text-align: left;
 }
 .business-menu-title {
@@ -208,10 +213,10 @@ a {
   cursor: pointer;
 }
 .business-option:hover:not(:disabled) {
-  background: var(--good-bg);
+  background: rgba(240, 180, 41, 0.08);
 }
 .business-option.is-current {
-  background: var(--good-bg);
+  background: rgba(240, 180, 41, 0.12);
   font-weight: 600;
 }
 .business-unlink,
@@ -262,7 +267,7 @@ a {
 .btn-danger {
   background: var(--bad-bg);
   color: var(--bad);
-  border-color: #f3c9c6;
+  border-color: rgba(248, 113, 113, 0.3);
 }
 .btn-block {
   display: block;
@@ -349,9 +354,8 @@ select[aria-invalid="true"]:focus {
   animation: auth-fade-up 0.6s ease-out;
 }
 .auth-robot {
-  width: 48px;
-  height: 48px;
-  color: #F0B429;
+  width: 72px;
+  height: auto;
   margin: 0 auto 20px;
   display: block;
 }
@@ -490,7 +494,7 @@ select[aria-invalid="true"]:focus {
   margin-bottom: 1.25rem;
 }
 .panel-warn {
-  border-color: #f0d8a8;
+  border-color: rgba(251, 191, 36, 0.25);
   background: var(--warn-bg);
 }
 .panel-row {
@@ -843,7 +847,7 @@ button.chip.is-active {
 }
 .dropzone.is-dragging {
   border-color: var(--brand);
-  background: var(--good-bg);
+  background: rgba(240, 180, 41, 0.08);
 }
 .result-list {
   list-style: none;
@@ -1003,7 +1007,7 @@ button.chip.is-active {
    Placeholders shaped like the content they stand in for, so the page does not
    jump when the data lands. */
 .skeleton {
-  background: linear-gradient(90deg, var(--canvas) 25%, #eef1f6 37%, var(--canvas) 63%);
+  background: linear-gradient(90deg, var(--surface) 25%, #2A2A2D 37%, var(--surface) 63%);
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: 6px;
