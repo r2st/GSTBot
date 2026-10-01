@@ -616,6 +616,59 @@ class TestAcrossSeveralBusinesses:
         )
 
 
+class TestAnAlertResolvedBetweenReadAndWrite:
+    """The prefetch reads PENDING alerts; the sweep or a user action can
+    resolve one before the UPDATE stamps it SENT.  Without a status guard
+    the UPDATE overwrites RESOLVED with SENT, reopening a closed alert.
+    """
+
+    @pytest.fixture()
+    def resolve_before_the_stamp(self, db_session):
+        """Resolve an alert the instant the UPDATE is about to fire."""
+        fired: list[str] = []
+        bind = db_session.get_bind()
+        listeners: list = []
+
+        def arm(alert_id: int):
+            def _resolve_mid_flight(
+                conn, cursor, statement, parameters, context, executemany
+            ):
+                if fired or "UPDATE" not in statement.upper():
+                    return
+                fired.append(statement)
+                writer = conn.connection.cursor()
+                try:
+                    writer.execute(
+                        f"UPDATE alerts SET status = 'RESOLVED' WHERE id = {int(alert_id)}"
+                    )
+                finally:
+                    writer.close()
+
+            event.listen(bind, "before_cursor_execute", _resolve_mid_flight)
+            listeners.append(_resolve_mid_flight)
+            return fired
+
+        try:
+            yield arm
+        finally:
+            for listener in listeners:
+                event.remove(bind, "before_cursor_execute", listener)
+
+    def test_a_resolved_alert_is_not_overwritten_with_sent(
+        self, db_session, business, sent, resolve_before_the_stamp
+    ):
+        make_user(db_session, business)
+        alert = make_alert(db_session, business)
+        resolve_before_the_stamp(alert.id)
+
+        send_pending_alerts(db_session, now=NOW)
+
+        db_session.refresh(alert)
+        assert alert.status is AlertStatus.RESOLVED, (
+            "the email sender overwrote a concurrently resolved alert"
+        )
+
+
 def test_the_result_is_json_serialisable_for_the_task_backend():
     assert alert_delivery.AlertEmailResult(businesses=1, emails_sent=1).as_dict() == {
         "businesses": 1,

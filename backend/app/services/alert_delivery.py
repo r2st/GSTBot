@@ -296,7 +296,14 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
             for ids in _chunked([alert.id for alert in alerts]):
                 db.execute(
                     update(Alert)
-                    .where(Alert.id.in_(ids))
+                    .where(
+                        Alert.id.in_(ids),
+                        # The sweep or a user action may have changed the status
+                        # between the prefetch and this write.  Without this
+                        # guard, a RESOLVED or DISMISSED alert would be
+                        # overwritten with SENT.
+                        Alert.status.in_(_SENDABLE_STATUSES),
+                    )
                     .values(**stamp)
                     # Nothing in this session is mapped to these rows, so there
                     # is no in-memory state to reconcile and the extra SELECT
