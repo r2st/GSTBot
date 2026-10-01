@@ -459,16 +459,17 @@ class TestAnUnexpectedSendFailure:
 
         db_session.refresh(first_alert)
         db_session.refresh(second_alert)
-        # The broken business is rolled back and left exactly as the sweep
-        # found it - not marked failed, since it was never actually attempted
-        # in a way this module could account for.
+        # The broken business is rolled back and its alerts left exactly as
+        # the sweep found them, but it still counts in the result so the
+        # summary log and the Celery task see the true number of failures.
         assert first_alert.status is AlertStatus.PENDING
         assert first_alert.channel is None
         # The second business is unaffected by the first one's crash.
         assert second_alert.status is AlertStatus.SENT
         assert second_alert.sent_at == NOW
-        assert result.businesses == 1
+        assert result.businesses == 2
         assert result.emails_sent == 1
+        assert result.alerts_failed == 1
 
 
 class TestAcrossSeveralBusinesses:

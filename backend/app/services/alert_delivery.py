@@ -314,6 +314,13 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
         except Exception:  # noqa: BLE001 - one tenant must not end the run
             db.rollback()
             logger.exception("Could not send/record alert delivery for business %s", business_id)
+            total = AlertEmailResult(
+                businesses=total.businesses + 1,
+                emails_sent=total.emails_sent,
+                alerts_sent=total.alerts_sent,
+                alerts_failed=total.alerts_failed + len(alerts),
+                skipped_no_recipient=total.skipped_no_recipient,
+            )
             continue
 
         total = AlertEmailResult(
