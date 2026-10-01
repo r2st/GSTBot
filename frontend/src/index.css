@@ -1,3 +1,5 @@
+@import './doaide-theme.css';
+
 /* GSTBot — a small hand-written stylesheet rather than a framework.
    The whole UI is a handful of screens; a utility framework would be more
    bytes than the app. */
