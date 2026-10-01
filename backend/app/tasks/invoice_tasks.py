@@ -10,7 +10,7 @@ import logging
 
 from app.celery_app import celery_app
 from app.core.database import SessionLocal
-from app.models.invoice import Invoice
+from app.models.invoice import Invoice, InvoiceStatus
 from app.services import invoice_service, job_health
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,21 @@ def parse_invoice_task(self, invoice_id: int) -> dict:
         if invoice is None or invoice.deleted_at is not None:
             logger.warning("Invoice %s is gone; nothing to parse", invoice_id)
             return {"invoice_id": invoice_id, "status": "missing"}
+
+        # The user may have manually corrected the invoice, or another worker
+        # may have already parsed it, between the upload and this task running.
+        # Re-extracting would overwrite that work.  The explicit /reparse
+        # endpoint bypasses this guard because the user chose to re-extract.
+        if invoice.status is not InvoiceStatus.UPLOADED:
+            logger.info(
+                "Invoice %s is already %s; skipping auto-parse",
+                invoice_id, invoice.status.value,
+            )
+            return {
+                "invoice_id": invoice_id,
+                "status": invoice.status.value,
+                "skipped": True,
+            }
 
         invoice = invoice_service.process_invoice(db, invoice)
         return {

@@ -149,6 +149,76 @@ class TestTheHappyPath:
         assert task.retries == [], "a recorded failure must not be retried"
 
 
+class TestTheAlreadyModifiedGuard:
+    """A user can correct an invoice before the worker gets to it."""
+
+    def test_a_manually_corrected_invoice_is_not_re_extracted(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business, status=InvoiceStatus.PARSED)
+        called = {"n": 0}
+
+        def fake_process(db, row):
+            called["n"] += 1
+            return row
+
+        monkeypatch.setattr(invoice_service, "process_invoice", fake_process)
+        result = parse_invoice_task(invoice.id)
+        assert result["skipped"] is True
+        assert result["status"] == "parsed"
+        assert called["n"] == 0, "process_invoice was called on a non-UPLOADED invoice"
+
+    def test_an_invoice_already_processing_is_skipped(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(
+            db_session, business, status=InvoiceStatus.PROCESSING,
+        )
+        called = {"n": 0}
+        monkeypatch.setattr(
+            invoice_service, "process_invoice",
+            lambda db, row: (called.__setitem__("n", called["n"] + 1), row)[-1],
+        )
+        result = parse_invoice_task(invoice.id)
+        assert result["skipped"] is True
+        assert called["n"] == 0
+
+    def test_a_failed_invoice_is_not_re_extracted_automatically(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business, status=InvoiceStatus.FAILED)
+        called = {"n": 0}
+        monkeypatch.setattr(
+            invoice_service, "process_invoice",
+            lambda db, row: (called.__setitem__("n", called["n"] + 1), row)[-1],
+        )
+        result = parse_invoice_task(invoice.id)
+        assert result["skipped"] is True
+        assert result["status"] == "failed"
+        assert called["n"] == 0
+
+    def test_the_skip_is_logged(
+        self, monkeypatch, task, sessions, db_session, business, caplog
+    ):
+        invoice = _store_invoice(db_session, business, status=InvoiceStatus.PARSED)
+        monkeypatch.setattr(
+            invoice_service, "process_invoice", lambda db, row: row,
+        )
+        with caplog.at_level("INFO"):
+            parse_invoice_task(invoice.id)
+        assert "skipping auto-parse" in caplog.text
+
+    def test_the_skip_does_not_retry(
+        self, monkeypatch, task, sessions, db_session, business
+    ):
+        invoice = _store_invoice(db_session, business, status=InvoiceStatus.PARSED)
+        monkeypatch.setattr(
+            invoice_service, "process_invoice", lambda db, row: row,
+        )
+        parse_invoice_task(invoice.id)
+        assert task.retries == []
+
+
 class TestTheMissingRowGuard:
     def test_an_unknown_id_is_reported_as_missing(self, task, sessions):
         assert parse_invoice_task(99_999) == {
