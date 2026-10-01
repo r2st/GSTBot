@@ -64,7 +64,7 @@ class TurnoverTier:
 
 # Ordered by ascending threshold; the last tier has no ceiling. Aggregate
 # turnover is the *previous financial year's*, which is a figure this product
-# has no invoice history to derive — GSTBot only ever holds what has been
+# has no invoice history to derive — DoAide GST only ever holds what has been
 # uploaded since a business signed up, not the years before — so it is always
 # an input the caller supplies, never something computed here.
 _TURNOVER_TIERS: list[tuple[Decimal | None, TurnoverTier]] = [

@@ -212,7 +212,7 @@ class Invoice(Base, BusinessScopedMixin, TimestampMixin, SoftDeleteMixin):
     # When the supplier was paid. Rule 37 reverses the credit on a purchase left
     # unpaid 180 days past the invoice date, so "not yet paid" and "paid" have
     # to be distinguishable per invoice rather than inferred from a ledger the
-    # product does not hold. None means unpaid as far as GSTBot knows.
+    # product does not hold. None means unpaid as far as DoAide GST knows.
     paid_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     # Capital goods take their credit over 60 months under Rule 43 instead of
     # in the month of purchase, so they cannot sit in the same pool as inputs.

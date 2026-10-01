@@ -2,7 +2,7 @@
 
 A GST registration is one GSTIN, and this product's tenant is the registration
 — see :mod:`app.models.business`. So a company holding three registrations, or
-an accountant serving several clients, ends up with several separate GSTBot
+an accountant serving several clients, ends up with several separate DoAide GST
 logins, one per sign-up. This router is what lets one of those logins reach
 the others: link a second account by proving you also hold its password, then
 pick which business a request acts for with the ``X-Business-Id`` header — see
@@ -134,7 +134,7 @@ def link_business(
     other = db.scalar(select(User).where(User.email == payload.email.lower()))
     # Same message whether the email is unknown or the password is wrong —
     # telling the two apart would let this endpoint be used to check whether
-    # an email address has a GSTBot account at all.
+    # an email address has a DoAide GST account at all.
     if other is None or not other.is_active or not verify_password(
         payload.password, other.hashed_password
     ):

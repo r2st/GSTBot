@@ -138,13 +138,13 @@ def _digest(alerts: list[Row]) -> tuple[str, str]:
         if len(alerts) == 1
         else f"{len(alerts)} GST alerts need your attention"
     )
-    lines = ["GSTBot has the following open items:", ""]
+    lines = ["DoAide GST has the following open items:", ""]
     for alert in alerts:
         due = f" (due {alert.due_date.isoformat()})" if alert.due_date else ""
         lines.append(f"- {alert.title}{due}")
         lines.append(f"  {alert.message}")
         lines.append("")
-    lines.append("Sign in to GSTBot to review or dismiss these.")
+    lines.append("Sign in to DoAide GST to review or dismiss these.")
     return subject, "\n".join(lines)
 
 

@@ -40,7 +40,7 @@ _setoff_limit = RateLimit("itc_setoff", "240/minute")
         "`exempt_turnover` and `total_turnover` are overridable because Rule 42 "
         "turns on exempt turnover, and the product can only infer that from "
         "sales invoices carrying no tax. A business with exempt supplies it does "
-        "not invoice through GSTBot knows the real number, and a reversal "
+        "not invoice through DoAide GST knows the real number, and a reversal "
         "computed from the wrong denominator is worse than one the user "
         "supplied.\n\n"
         "`as_of` exists for the same reason a CA asks 'where did this stand at "
@@ -66,7 +66,7 @@ def get_itc_summary(
     The turnover figures are overridable because Rule 42 turns on *exempt
     turnover*, and the product can only infer that from sales invoices that
     carry no tax. A business with exempt supplies it does not invoice through
-    GSTBot knows the real number, and a reversal computed from the wrong
+    DoAide GST knows the real number, and a reversal computed from the wrong
     denominator is worse than one the user supplied.
 
     ``as_of`` exists for the same reason a CA asks "where did this stand at

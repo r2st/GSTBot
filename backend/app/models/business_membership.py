@@ -6,7 +6,7 @@ that way by default, with nothing here in the path. This table is the join
 table :class:`~app.models.user.User`'s own docstring already anticipated: a
 second, third, ... business the *same person* also owns, linked after the
 fact rather than assumed at sign-up — because GST registration, and therefore
-a GSTBot account, happens one GSTIN at a time, and a practice or a business
+a DoAide GST account, happens one GSTIN at a time, and a practice or a business
 with several registrations accumulates logins for each before it ever wants
 to see them together.
 
