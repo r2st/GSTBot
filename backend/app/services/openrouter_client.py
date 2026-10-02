@@ -279,6 +279,13 @@ def chat_completion(
                 budget,
                 attempt,
                 attempts,
+                extra={
+                    "model": payload["model"],
+                    "attempt": attempt,
+                    "attempts": attempts,
+                    "waited_seconds": round(waited, 2),
+                    "budget_seconds": budget,
+                },
             )
             break
 
@@ -288,6 +295,7 @@ def chat_completion(
             attempts,
             delay,
             last_error,
+            extra={"model": payload["model"], "attempt": attempt, "attempts": attempts},
         )
         _sleep(delay)
         waited += delay

@@ -226,7 +226,11 @@ def _store_and_extract(
         except Exception as exc:  # noqa: BLE001 - a dead broker must not lose the file
             # The row is already committed, so falling back to inline parsing
             # costs latency rather than the upload.
-            logger.warning("Could not queue invoice %s, parsing inline: %s", invoice.id, exc)
+            logger.warning(
+                "Could not queue invoice %s, parsing inline: %s",
+                invoice.id, exc,
+                extra={"invoice_id": invoice.id, "business_id": tenant.id},
+            )
 
     if not queued:
         invoice = invoice_service.process_invoice(db, invoice, business_gstin=tenant.gstin)
