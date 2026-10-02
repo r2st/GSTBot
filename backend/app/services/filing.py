@@ -1568,4 +1568,5 @@ def to_csv(db: Session, business: Business, period: str, invoice_type: InvoiceTy
 
 def filename_for(business: Business, period: str, kind: str, extension: str) -> str:
     """A download name that says what the file is without being opened."""
-    return f"{kind}_{business.gstin}_{to_portal_period(period)}.{extension}"
+    gstin = business.gstin or f"biz{business.id}"
+    return f"{kind}_{gstin}_{to_portal_period(period)}.{extension}"
