@@ -804,25 +804,31 @@ select[aria-invalid="true"]:focus {
   .landing-hero-robot-wrap { display: none; }
   .landing-pipeline { display: none; }
   .landing-typewriter-wrap { display: none; }
-  .landing-subtitle { display: none; }
   .landing-particles { display: none; }
+  .landing-split { opacity: 1 !important; animation: none !important; }
+  .landing-header { opacity: 1 !important; animation: none !important; }
   .landing-header { padding: 10px 16px; }
   .landing-headline {
     font-size: 1.5rem;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
     text-align: left;
+  }
+  .landing-subtitle {
+    font-size: 0.8rem;
+    margin-bottom: 12px;
   }
   .landing-left {
     align-items: stretch;
     text-align: left;
   }
   .landing-split {
+    flex-direction: column;
     padding: 8px 16px;
-    gap: 10px;
+    gap: 16px;
     align-items: stretch;
   }
   .landing-right {
-    max-width: 100%;
+    width: 100%;
   }
   .auth-card {
     padding: 16px;
