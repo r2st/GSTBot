@@ -188,6 +188,13 @@ def send_email(*, to: str, subject: str, body: str) -> None:
                     budget,
                     attempt,
                     attempts,
+                    extra={
+                        "recipient": to,
+                        "attempt": attempt,
+                        "attempts": attempts,
+                        "waited_seconds": round(waited, 2),
+                        "budget_seconds": budget,
+                    },
                 )
                 raise failure from exc
 
@@ -198,6 +205,7 @@ def send_email(*, to: str, subject: str, body: str) -> None:
                 to,
                 delay,
                 exc,
+                extra={"recipient": to, "attempt": attempt, "attempts": attempts},
             )
             _sleep(delay)
             waited += delay
