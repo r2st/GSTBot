@@ -550,6 +550,31 @@ def test_malformed_history_entries_are_skipped():
     assert len(scoring.observations_from_history(supplier)) == 1
 
 
+def test_non_numeric_history_values_fall_back_to_zero():
+    """A corrupted filing_history entry with a string where an int belongs
+    must not crash the score computation — it should degrade to zero."""
+    supplier = Supplier(
+        business_id=1,
+        gstin=SUPPLIER_GSTIN_OTHER_STATE,
+        filing_history=[
+            {
+                "period": "2026-04",
+                "matched": "not a number",
+                "mismatched": "N/A",
+                "missing": None,
+                "filing_delay_days": "unknown",
+            },
+        ],
+    )
+    (obs,) = scoring.observations_from_history(supplier)
+    assert obs.matched == 0
+    assert obs.mismatched == 0
+    assert obs.missing == 0
+    # filing_delay_days is not None in the entry, so _safe_int is called
+    # and falls back to 0 rather than raising.
+    assert obs.filing_delay_days == 0
+
+
 # ---------------------------------------------------------------------------
 # Integration with reconciliation
 # ---------------------------------------------------------------------------

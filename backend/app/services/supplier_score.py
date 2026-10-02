@@ -438,6 +438,16 @@ def score_from_observations(
     )
 
 
+def _safe_int(value: object, default: int = 0) -> int:
+    """``int(value)`` that survives a non-numeric string in stored JSON."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
 def observations_from_history(supplier: Supplier) -> list[Observation]:
     """Rebuild observations from a supplier's stored ``filing_history``.
 
@@ -452,11 +462,11 @@ def observations_from_history(supplier: Supplier) -> list[Observation]:
         observations.append(
             Observation(
                 period=str(entry["period"]),
-                matched=int(entry.get("matched") or 0),
-                mismatched=int(entry.get("mismatched") or 0),
-                missing=int(entry.get("missing") or 0),
+                matched=_safe_int(entry.get("matched")),
+                mismatched=_safe_int(entry.get("mismatched")),
+                missing=_safe_int(entry.get("missing")),
                 filing_delay_days=(
-                    int(entry["filing_delay_days"])
+                    _safe_int(entry["filing_delay_days"], default=0)
                     if entry.get("filing_delay_days") is not None
                     else None
                 ),

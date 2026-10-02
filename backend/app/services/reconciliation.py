@@ -899,6 +899,14 @@ def latest_completed_run(
     )
 
 
+def _safe_decimal(value: object) -> Decimal:
+    """``Decimal`` from a stored JSON value, falling back to zero on junk."""
+    try:
+        return Decimal(str(value or "0"))
+    except (ArithmeticError, ValueError):
+        return ZERO
+
+
 def records_from_return(gstr_return: GSTRReturn) -> list[GSTR2BRecord]:
     """Rebuild records from a stored return's normalised ``invoices`` block."""
     from app.services.invoice_parser import to_date
@@ -917,12 +925,12 @@ def records_from_return(gstr_return: GSTRReturn) -> list[GSTR2BRecord]:
                 invoice_date=to_date(row.get("invoice_date")),
                 period=row.get("period"),
                 place_of_supply=row.get("place_of_supply"),
-                taxable_value=Decimal(str(row.get("taxable_value") or "0")),
-                cgst=Decimal(str(row.get("cgst") or "0")),
-                sgst=Decimal(str(row.get("sgst") or "0")),
-                igst=Decimal(str(row.get("igst") or "0")),
-                cess=Decimal(str(row.get("cess") or "0")),
-                total_value=Decimal(str(row.get("total_value") or "0")),
+                taxable_value=_safe_decimal(row.get("taxable_value")),
+                cgst=_safe_decimal(row.get("cgst")),
+                sgst=_safe_decimal(row.get("sgst")),
+                igst=_safe_decimal(row.get("igst")),
+                cess=_safe_decimal(row.get("cess")),
+                total_value=_safe_decimal(row.get("total_value")),
                 itc_available=bool(row.get("itc_available", True)),
                 reverse_charge=bool(row.get("reverse_charge", False)),
                 document_type=str(row.get("document_type") or "R"),

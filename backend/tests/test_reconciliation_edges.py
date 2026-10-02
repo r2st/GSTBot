@@ -334,6 +334,34 @@ class TestRecordsFromReturn:
         assert record.total_value == Decimal("0")
         assert record.igst == Decimal("0")
 
+    def test_non_numeric_money_strings_fall_back_to_zero(
+        self, db_session, business
+    ):
+        stored = _stored_return(
+            db_session,
+            business.id,
+            {
+                "invoices": [
+                    {
+                        "invoice_number": "INV-1",
+                        "taxable_value": "not a number",
+                        "igst": "N/A",
+                        "cgst": "---",
+                        "sgst": "pending",
+                        "cess": "TBD",
+                        "total_value": "err",
+                    }
+                ]
+            },
+        )
+        record = reconciliation.records_from_return(stored)[0]
+        assert record.taxable_value == Decimal("0")
+        assert record.igst == Decimal("0")
+        assert record.cgst == Decimal("0")
+        assert record.sgst == Decimal("0")
+        assert record.cess == Decimal("0")
+        assert record.total_value == Decimal("0")
+
     def test_an_unparseable_date_becomes_none_rather_than_raising(
         self, db_session, business
     ):
