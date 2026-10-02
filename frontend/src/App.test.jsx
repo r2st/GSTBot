@@ -23,6 +23,7 @@ vi.mock("./pages/DashboardPage", () => ({
     return <div>Dashboard page</div>;
   },
 }));
+vi.mock("./pages/LandingPage", () => ({ default: () => <div>Landing page</div> }));
 vi.mock("./pages/LoginPage", () => ({ default: () => <div>Login page</div> }));
 vi.mock("./pages/InvoicesPage", () => ({ default: () => <div>Invoices page</div> }));
 vi.mock("./pages/InvoiceDetailPage", () => ({ default: () => <div>Invoice detail page</div> }));
@@ -97,19 +98,17 @@ describe("App routing", () => {
       expect(screen.getByText("Login page")).toBeInTheDocument();
     });
 
-    it("does not leak the shell navigation to an anonymous visitor", () => {
+    it("shows the landing page to an anonymous visitor, not the shell", () => {
       renderAt("/", { user: null, loading: false });
 
+      expect(screen.getByText("Landing page")).toBeInTheDocument();
       expect(screen.queryByRole("navigation", { name: "Main" })).not.toBeInTheDocument();
     });
 
-    it("lands an unknown path on login, via the dashboard redirect", () => {
-      // "*" redirects to "/", which is itself protected — the two redirects
-      // have to compose rather than leaving a signed-out visitor at a blank
-      // dashboard.
+    it("lands an unknown path on the landing page, via the catch-all redirect", () => {
       renderAt("/nope/not/a/page", { user: null, loading: false });
 
-      expect(screen.getByText("Login page")).toBeInTheDocument();
+      expect(screen.getByText("Landing page")).toBeInTheDocument();
     });
   });
 

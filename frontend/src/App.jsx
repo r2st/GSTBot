@@ -9,6 +9,7 @@ import FilingPage from "./pages/FilingPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ITCPage from "./pages/ITCPage";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
 import ReconcilePage from "./pages/ReconcilePage";
 import StatusPage from "./pages/StatusPage";
@@ -51,6 +52,25 @@ function Protected({ children }) {
   );
 }
 
+function Home() {
+  const { user, loading } = useAuth();
+  if (loading) {
+    return (
+      <div className="shell-main">
+        <SkeletonPanel lines={5} label="Checking your session" />
+      </div>
+    );
+  }
+  if (!user) return <LandingPage />;
+  return (
+    <Shell>
+      <ErrorBoundary key={user.business?.id ?? "home"}>
+        <DashboardPage />
+      </ErrorBoundary>
+    </Shell>
+  );
+}
+
 export default function App() {
   const { user, loading } = useAuth();
 
@@ -60,14 +80,7 @@ export default function App() {
         path="/login"
         element={loading ? null : user ? <Navigate to="/" replace /> : <LoginPage />}
       />
-      <Route
-        path="/"
-        element={
-          <Protected>
-            <DashboardPage />
-          </Protected>
-        }
-      />
+      <Route path="/" element={<Home />} />
       <Route
         path="/invoices"
         element={
