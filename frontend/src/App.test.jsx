@@ -24,7 +24,6 @@ vi.mock("./pages/DashboardPage", () => ({
   },
 }));
 vi.mock("./pages/LandingPage", () => ({ default: () => <div>Landing page</div> }));
-vi.mock("./pages/LoginPage", () => ({ default: () => <div>Login page</div> }));
 vi.mock("./pages/InvoicesPage", () => ({ default: () => <div>Invoices page</div> }));
 vi.mock("./pages/InvoiceDetailPage", () => ({ default: () => <div>Invoice detail page</div> }));
 vi.mock("./pages/UploadPage", () => ({ default: () => <div>Upload page</div> }));
@@ -67,35 +66,33 @@ describe("App routing", () => {
       expect(screen.queryByText("Dashboard page")).not.toBeInTheDocument();
     });
 
-    it("renders nothing at /login rather than flashing the form", () => {
-      // The mirror case: showing the form to someone who turns out to be
-      // signed in means the form is yanked away mid-keystroke.
-      const { container } = renderAt("/login", LOADING);
+    it("holds /login behind the loading check too, via the redirect to /", () => {
+      renderAt("/login", LOADING);
 
-      expect(screen.queryByText("Login page")).not.toBeInTheDocument();
-      expect(container).toBeEmptyDOMElement();
+      expect(screen.getByText(/checking your session/i)).toBeInTheDocument();
+      expect(screen.queryByText("Landing page")).not.toBeInTheDocument();
     });
   });
 
   describe("when signed out", () => {
-    it("sends a protected route to the login page", () => {
+    it("sends a protected route to the landing page", () => {
       renderAt("/invoices", { user: null, loading: false });
 
-      expect(screen.getByText("Login page")).toBeInTheDocument();
+      expect(screen.getByText("Landing page")).toBeInTheDocument();
       expect(screen.queryByText("Invoices page")).not.toBeInTheDocument();
     });
 
-    it("keeps alerts behind the login, since they name a tenant's returns", () => {
+    it("keeps alerts behind the landing page, since they name a tenant's returns", () => {
       renderAt("/alerts", { user: null, loading: false });
 
-      expect(screen.getByText("Login page")).toBeInTheDocument();
+      expect(screen.getByText("Landing page")).toBeInTheDocument();
       expect(screen.queryByText("Alerts page")).not.toBeInTheDocument();
     });
 
-    it("shows the login page at /login", () => {
+    it("redirects /login to the landing page", () => {
       renderAt("/login", { user: null, loading: false });
 
-      expect(screen.getByText("Login page")).toBeInTheDocument();
+      expect(screen.getByText("Landing page")).toBeInTheDocument();
     });
 
     it("shows the landing page to an anonymous visitor, not the shell", () => {

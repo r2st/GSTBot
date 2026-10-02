@@ -5,19 +5,16 @@ import { describe, expect, it, vi } from "vitest";
 import LandingPage from "./LandingPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
-
-const navigated = vi.hoisted(() => ({ to: null, opts: null }));
-vi.mock("react-router-dom", async () => {
-  const actual = await vi.importActual("react-router-dom");
-  return {
-    ...actual,
-    useNavigate: () => (to, opts) => { navigated.to = to; navigated.opts = opts; },
-  };
-});
+vi.mock("../hooks/useAuth", () => ({
+  useAuth: () => ({
+    user: null,
+    loading: false,
+    login: vi.fn(),
+    register: vi.fn(),
+  }),
+}));
 
 function renderLanding() {
-  navigated.to = null;
-  navigated.opts = null;
   return render(
     <MemoryRouter>
       <LandingPage />
@@ -26,37 +23,45 @@ function renderLanding() {
 }
 
 describe("LandingPage", () => {
-  it("shows the gradient title", () => {
+  it("shows the headline in serif font", () => {
     renderLanding();
 
-    expect(screen.getByText("GST compliance, on autopilot.")).toBeInTheDocument();
+    expect(screen.getByText("GST compliance, automated.")).toBeInTheDocument();
   });
 
-  it("renders four feature cards", () => {
+  it("shows the monospace subtitle", () => {
     renderLanding();
 
-    expect(screen.getByText("Auto Filing")).toBeInTheDocument();
-    expect(screen.getByText("Reconciliation")).toBeInTheDocument();
-    expect(screen.getByText("ITC Tracking")).toBeInTheDocument();
-    expect(screen.getByText("Deadline Alerts")).toBeInTheDocument();
+    expect(
+      screen.getByText(/AI-powered GST filing, invoice matching/),
+    ).toBeInTheDocument();
   });
 
-  it("navigates to login with register mode on the primary CTA", async () => {
+  it("renders the four pipeline stages", () => {
     renderLanding();
 
-    await userEvent.click(screen.getAllByText("Get started free")[0]);
-
-    expect(navigated.to).toBe("/login");
-    expect(navigated.opts).toEqual({ state: { mode: "register" } });
+    expect(screen.getByText("Upload")).toBeInTheDocument();
+    expect(screen.getByText("Match")).toBeInTheDocument();
+    expect(screen.getByText("Reconcile")).toBeInTheDocument();
+    expect(screen.getByText("File")).toBeInTheDocument();
   });
 
-  it("navigates to /login on the sign-in button", async () => {
+  it("renders the auth form with sign-in tab active by default", () => {
     renderLanding();
 
-    const signIns = screen.getAllByText("Sign in");
-    await userEvent.click(signIns[0]);
+    const signIn = screen.getByRole("tab", { name: "Sign in" });
+    const create = screen.getByRole("tab", { name: "Create account" });
+    expect(signIn).toHaveAttribute("aria-selected", "true");
+    expect(create).toHaveAttribute("aria-selected", "false");
+  });
 
-    expect(navigated.to).toBe("/login");
+  it("switches to the registration form on the Create account tab", async () => {
+    renderLanding();
+
+    await userEvent.click(screen.getByRole("tab", { name: "Create account" }));
+
+    expect(screen.getByLabelText(/GSTIN/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Legal name")).toBeInTheDocument();
   });
 
   it("renders the footer with all DoAide product links", () => {
@@ -78,23 +83,5 @@ describe("LandingPage", () => {
 
     const brand = screen.getByText("doaide.com").closest("a");
     expect(brand).toHaveAttribute("href", "https://doaide.com");
-  });
-
-  it("renders the header Get started button", async () => {
-    renderLanding();
-
-    await userEvent.click(screen.getByText("Get started"));
-
-    expect(navigated.to).toBe("/login");
-    expect(navigated.opts).toEqual({ state: { mode: "register" } });
-  });
-
-  it("renders the hero Sign in button", async () => {
-    renderLanding();
-
-    const heroSignIn = screen.getAllByText("Sign in")[1];
-    await userEvent.click(heroSignIn);
-
-    expect(navigated.to).toBe("/login");
   });
 });

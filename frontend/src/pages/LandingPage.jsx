@@ -1,13 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import AuthForm from "../components/AuthForm";
 import { usePageTitle } from "../hooks/usePageTitle";
-
-const FEATURES = [
-  { icon: "📄", title: "Auto Filing" },
-  { icon: "🔄", title: "Reconciliation" },
-  { icon: "💰", title: "ITC Tracking" },
-  { icon: "⏰", title: "Deadline Alerts" },
-];
 
 const DOAIDE_PRODUCTS = [
   { name: "Desk", url: "https://desk.doaide.com" },
@@ -19,6 +12,13 @@ const DOAIDE_PRODUCTS = [
   { name: "Realty", url: "https://realty.doaide.com" },
   { name: "Reach", url: "https://reach.doaide.com" },
   { name: "Trade", url: "https://trade.doaide.com" },
+];
+
+const TYPEWRITER_PHRASES = [
+  "Smart invoice matching",
+  "Automated GST returns",
+  "Real-time reconciliation",
+  "AI-powered compliance",
 ];
 
 function RobotFace({ size = 32, color }) {
@@ -55,9 +55,140 @@ function HeroRobot({ color }) {
   );
 }
 
+function Typewriter({ phrases }) {
+  const [index, setIndex] = useState(0);
+  const [text, setText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+
+  useEffect(() => {
+    const phrase = phrases[index];
+    let timeout;
+
+    if (!deleting && text === phrase) {
+      timeout = setTimeout(() => setDeleting(true), 2000);
+    } else if (deleting && text === "") {
+      setDeleting(false);
+      setIndex((i) => (i + 1) % phrases.length);
+    } else {
+      const speed = deleting ? 30 : 60;
+      timeout = setTimeout(() => {
+        setText(deleting ? phrase.slice(0, text.length - 1) : phrase.slice(0, text.length + 1));
+      }, speed);
+    }
+
+    return () => clearTimeout(timeout);
+  }, [text, deleting, index, phrases]);
+
+  return (
+    <span className="landing-typewriter" aria-label={phrases[index]}>
+      {text}
+      <span className="landing-cursor" aria-hidden="true">|</span>
+    </span>
+  );
+}
+
+function PipelineGraphic() {
+  return (
+    <div className="landing-pipeline" aria-hidden="true">
+      <svg viewBox="0 0 520 90" xmlns="http://www.w3.org/2000/svg">
+        {/* Connecting lines */}
+        <line x1="78" y1="36" x2="152" y2="36" stroke="rgba(240,180,41,0.2)" strokeWidth="2" />
+        <line x1="218" y1="36" x2="302" y2="36" stroke="rgba(240,180,41,0.2)" strokeWidth="2" />
+        <line x1="368" y1="36" x2="442" y2="36" stroke="rgba(240,180,41,0.2)" strokeWidth="2" />
+
+        {/* Flowing particles along lines */}
+        <circle r="3" fill="#F0B429" opacity="0.8">
+          <animateMotion dur="2s" repeatCount="indefinite" path="M78,36 L152,36" />
+        </circle>
+        <circle r="2" fill="#F7CC5F" opacity="0.5">
+          <animateMotion dur="2s" repeatCount="indefinite" begin="0.5s" path="M78,36 L152,36" />
+        </circle>
+        <circle r="3" fill="#F0B429" opacity="0.8">
+          <animateMotion dur="2s" repeatCount="indefinite" begin="0.7s" path="M218,36 L302,36" />
+        </circle>
+        <circle r="2" fill="#F7CC5F" opacity="0.5">
+          <animateMotion dur="2s" repeatCount="indefinite" begin="1.2s" path="M218,36 L302,36" />
+        </circle>
+        <circle r="3" fill="#F0B429" opacity="0.8">
+          <animateMotion dur="2s" repeatCount="indefinite" begin="1.4s" path="M368,36 L442,36" />
+        </circle>
+        <circle r="2" fill="#F7CC5F" opacity="0.5">
+          <animateMotion dur="2s" repeatCount="indefinite" begin="1.9s" path="M368,36 L442,36" />
+        </circle>
+
+        {/* Stage 1: Upload */}
+        <circle cx="50" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
+        <path d="M44 42V30h8l4 4v8H44z" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M52 30v4h4" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
+        <line x1="50" y1="40" x2="50" y2="35" stroke="#F0B429" strokeWidth="1.2" strokeLinecap="round" />
+        <path d="M47 37l3-3 3 3" fill="none" stroke="#F0B429" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
+        <text x="50" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">Upload</text>
+
+        {/* Stage 2: Match */}
+        <circle cx="190" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
+        <rect x="179" y="26" width="10" height="13" rx="1.5" fill="none" stroke="#F0B429" strokeWidth="1.3" />
+        <rect x="185" y="30" width="10" height="13" rx="1.5" fill="none" stroke="#F0B429" strokeWidth="1.3" />
+        <circle cx="196" cy="42" r="4" fill="none" stroke="#F0B429" strokeWidth="1.3" />
+        <line x1="199" y1="45" x2="202" y2="48" stroke="#F0B429" strokeWidth="1.3" strokeLinecap="round" />
+        <text x="190" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">Match</text>
+
+        {/* Stage 3: Reconcile */}
+        <circle cx="330" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
+        <circle cx="330" cy="35" r="10" fill="none" stroke="#F0B429" strokeWidth="1.3" />
+        <path d="M325 35l3 4 7-9" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        <text x="330" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">Reconcile</text>
+
+        {/* Stage 4: File */}
+        <circle cx="470" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
+        <path d="M462 42V28h10l4 4v10H462z" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M472 28v4h4" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
+        <path d="M465 35h8M465 38h5" stroke="#F0B429" strokeWidth="1" strokeLinecap="round" />
+        <circle cx="473" cy="44" r="3.5" fill="none" stroke="#F0B429" strokeWidth="1.2" />
+        <path d="M471 44l1.5 1.5 3-3" fill="none" stroke="#F0B429" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
+        <text x="470" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">File</text>
+      </svg>
+    </div>
+  );
+}
+
+const PARTICLES = [
+  { left: "8%", top: "15%", size: 3, delay: 0, dur: 18 },
+  { left: "22%", top: "65%", size: 2, delay: 3, dur: 22 },
+  { left: "35%", top: "30%", size: 4, delay: 7, dur: 15 },
+  { left: "50%", top: "80%", size: 2, delay: 1, dur: 20 },
+  { left: "65%", top: "20%", size: 3, delay: 5, dur: 17 },
+  { left: "78%", top: "55%", size: 2, delay: 9, dur: 23 },
+  { left: "90%", top: "35%", size: 3, delay: 2, dur: 19 },
+  { left: "15%", top: "85%", size: 2, delay: 6, dur: 21 },
+  { left: "42%", top: "45%", size: 3, delay: 4, dur: 16 },
+  { left: "72%", top: "75%", size: 2, delay: 8, dur: 24 },
+  { left: "88%", top: "10%", size: 4, delay: 10, dur: 14 },
+  { left: "5%", top: "50%", size: 2, delay: 11, dur: 25 },
+];
+
+function ParticleField() {
+  return (
+    <div className="landing-particles" aria-hidden="true">
+      {PARTICLES.map((p, i) => (
+        <div
+          key={i}
+          className="landing-particle"
+          style={{
+            left: p.left,
+            top: p.top,
+            width: p.size,
+            height: p.size,
+            animationDelay: `${p.delay}s`,
+            animationDuration: `${p.dur}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function LandingPage() {
   usePageTitle("GST compliance on autopilot");
-  const navigate = useNavigate();
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -68,11 +199,7 @@ export default function LandingPage() {
 
   return (
     <div className="landing-root">
-      <div className="landing-bg" aria-hidden="true">
-        <div className="landing-orb landing-orb-1" />
-        <div className="landing-orb landing-orb-2" />
-        <div className="landing-orb landing-orb-3" />
-      </div>
+      <ParticleField />
 
       <header className={`landing-header ${vis}`}>
         <a href="https://doaide.com" className="landing-brand">
@@ -81,43 +208,27 @@ export default function LandingPage() {
             Do<em>Aide</em> GST
           </span>
         </a>
-        <div className="landing-header-actions">
-          <button className="landing-btn-ghost" onClick={() => navigate("/login")}>
-            Sign in
-          </button>
-          <button className="landing-btn-primary" onClick={() => navigate("/login", { state: { mode: "register" } })}>
-            Get started
-          </button>
-        </div>
       </header>
 
-      <main className={`landing-hero ${vis}`}>
-        <div className="landing-hero-robot-wrap">
-          <HeroRobot color="#F0B429" />
+      <main className={`landing-split ${vis}`}>
+        <div className="landing-left">
+          <div className="landing-hero-robot-wrap">
+            <HeroRobot color="#F0B429" />
+          </div>
+          <h1 className="landing-headline">GST compliance, automated.</h1>
+          <p className="landing-subtitle">
+            AI-powered GST filing, invoice matching, and reconciliation for Indian businesses.
+          </p>
+          <div className="landing-typewriter-wrap">
+            <Typewriter phrases={TYPEWRITER_PHRASES} />
+          </div>
+          <PipelineGraphic />
         </div>
-        <h1 className="landing-title">GST compliance, on autopilot.</h1>
-        <div className="landing-cta-group">
-          <button className="landing-btn-primary landing-btn-lg" onClick={() => navigate("/login", { state: { mode: "register" } })}>
-            Get started free
-          </button>
-          <button className="landing-btn-ghost landing-btn-lg" onClick={() => navigate("/login")}>
-            Sign in
-          </button>
+
+        <div className="landing-right">
+          <AuthForm />
         </div>
       </main>
-
-      <section className={`landing-features ${vis}`} aria-label="Features">
-        {FEATURES.map((f, i) => (
-          <div
-            key={f.title}
-            className="landing-feature-card"
-            style={{ animationDelay: `${0.3 + i * 0.1}s` }}
-          >
-            <span className="landing-feature-icon">{f.icon}</span>
-            <span className="landing-feature-title">{f.title}</span>
-          </div>
-        ))}
-      </section>
 
       <footer className="landing-footer">
         <div className="landing-footer-products">

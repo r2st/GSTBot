@@ -10,7 +10,6 @@ import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ITCPage from "./pages/ITCPage";
 import LandingPage from "./pages/LandingPage";
-import LoginPage from "./pages/LoginPage";
 import ReconcilePage from "./pages/ReconcilePage";
 import StatusPage from "./pages/StatusPage";
 import SuppliersPage from "./pages/SuppliersPage";
@@ -27,7 +26,7 @@ function Protected({ children }) {
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/" replace />;
   // The boundary sits inside the Shell rather than around it, so a page that
   // crashes leaves the navigation intact and the user can click away from it.
   //
@@ -72,14 +71,9 @@ function Home() {
 }
 
 export default function App() {
-  const { user, loading } = useAuth();
-
   return (
     <Routes>
-      <Route
-        path="/login"
-        element={loading ? null : user ? <Navigate to="/" replace /> : <LoginPage />}
-      />
+      <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/" element={<Home />} />
       <Route
         path="/invoices"

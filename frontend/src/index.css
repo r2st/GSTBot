@@ -382,8 +382,8 @@ select[aria-invalid="true"]:focus {
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 12px;
-  padding: 24px;
+  border-radius: 24px;
+  padding: 28px;
   box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
               0 8px 24px -12px rgba(0, 0, 0, 0.9);
   text-align: left;
@@ -468,64 +468,43 @@ select[aria-invalid="true"]:focus {
   color: #F7D070;
 }
 
-/* ---- Landing page (DoAide standard template) ---- */
+/* Auth form inputs (shared between landing and standalone login) */
+
+/* ---- Landing page (DoAide 409A split template) ---- */
 .landing-root {
   --accent: #F0B429;
   --accent-dark: #D4A017;
-  --bg-card: #141416;
+  --accent-light: #F7CC5F;
   --text-muted-landing: #71717A;
   min-height: 100vh;
-  background: var(--canvas);
+  display: flex;
+  flex-direction: column;
+  background: rgb(10, 10, 11);
   color: var(--ink);
   overflow-x: hidden;
   position: relative;
 }
 
-/* Animated background orbs */
-.landing-bg {
+/* Particle background */
+.landing-particles {
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 0;
   overflow: hidden;
 }
-.landing-orb {
+.landing-particle {
   position: absolute;
+  background: var(--accent);
   border-radius: 50%;
-  filter: blur(80px);
-  opacity: 0.15;
+  opacity: 0;
+  animation: particle-drift linear infinite;
 }
-.landing-orb-1 {
-  width: 400px; height: 400px;
-  background: var(--accent);
-  top: -100px; left: -100px;
-  animation: landing-drift-1 20s ease-in-out infinite;
-}
-.landing-orb-2 {
-  width: 300px; height: 300px;
-  background: var(--accent);
-  bottom: -50px; right: -50px;
-  animation: landing-drift-2 25s ease-in-out infinite;
-}
-.landing-orb-3 {
-  width: 200px; height: 200px;
-  background: var(--accent);
-  top: 40%; left: 50%;
-  animation: landing-drift-3 18s ease-in-out infinite;
-}
-@keyframes landing-drift-1 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(80px, 60px) scale(1.1); }
-  66% { transform: translate(-40px, 100px) scale(0.9); }
-}
-@keyframes landing-drift-2 {
-  0%, 100% { transform: translate(0, 0) scale(1); }
-  33% { transform: translate(-60px, -80px) scale(1.15); }
-  66% { transform: translate(40px, -40px) scale(0.85); }
-}
-@keyframes landing-drift-3 {
-  0%, 100% { transform: translate(0, 0) scale(1); opacity: 0.1; }
-  50% { transform: translate(-100px, 50px) scale(1.2); opacity: 0.2; }
+@keyframes particle-drift {
+  0% { opacity: 0; transform: translateY(0) translateX(0); }
+  15% { opacity: 0.35; }
+  85% { opacity: 0.35; }
+  100% { opacity: 0; transform: translateY(-60px) translateX(20px); }
 }
 
 /* Fade / animation keyframes */
@@ -545,10 +524,6 @@ select[aria-invalid="true"]:focus {
   0%, 100% { opacity: 0.6; }
   50% { opacity: 1; }
 }
-@keyframes landing-card-pop {
-  from { opacity: 0; transform: translateY(20px) scale(0.95); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
 
 /* Header */
 .landing-header {
@@ -556,8 +531,7 @@ select[aria-invalid="true"]:focus {
   z-index: 10;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 16px 24px;
+  padding: 20px 32px;
   opacity: 0;
   animation: landing-fade-in 0.6s ease forwards;
 }
@@ -581,74 +555,35 @@ select[aria-invalid="true"]:focus {
   color: var(--accent);
   font-style: italic;
 }
-.landing-header-actions {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
 
-/* Buttons */
-.landing-btn-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 20px;
-  background: var(--accent);
-  color: #0A0A0B;
-  border-radius: 8px;
-  font-weight: 600;
-  font-size: 14px;
-  text-decoration: none;
-  transition: all 0.2s ease;
-  border: none;
-  cursor: pointer;
-}
-.landing-btn-primary:hover {
-  background: var(--accent-dark);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(240, 180, 41, 0.3);
-}
-.landing-btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 8px 20px;
-  background: transparent;
-  color: var(--ink);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  font-weight: 500;
-  font-size: 14px;
-  text-decoration: none;
-  transition: all 0.2s ease;
-  cursor: pointer;
-}
-.landing-btn-ghost:hover {
-  border-color: var(--accent);
-  color: var(--accent);
-  transform: translateY(-1px);
-}
-.landing-btn-lg {
-  padding: 14px 32px;
-  font-size: 16px;
-  border-radius: 12px;
-}
-
-/* Hero */
-.landing-hero {
+/* Split layout — 55% left / 45% right */
+.landing-split {
   position: relative;
   z-index: 5;
   display: flex;
-  flex-direction: column;
   align-items: center;
-  text-align: center;
-  padding: 80px 24px 40px;
+  gap: 48px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 40px 32px 60px;
+  flex: 1;
   opacity: 0;
 }
-.landing-hero.landing-visible {
+.landing-split.landing-visible {
   opacity: 0;
   animation: landing-fade-up 0.8s ease 0.2s forwards;
 }
+.landing-left {
+  flex: 1;
+  min-width: 0;
+}
+.landing-right {
+  width: 400px;
+  flex-shrink: 0;
+}
+
+/* Hero robot */
 .landing-hero-robot-wrap {
   margin-bottom: 24px;
   animation: landing-float 4s ease-in-out infinite;
@@ -657,68 +592,91 @@ select[aria-invalid="true"]:focus {
 .landing-hero-robot .landing-antenna-glow {
   animation: landing-pulse 2s ease-in-out infinite;
 }
-.landing-title {
-  font-size: clamp(28px, 6vw, 52px);
-  font-weight: 700;
-  letter-spacing: -1.5px;
-  line-height: 1.15;
-  max-width: 600px;
-  margin: 0 0 32px;
-  background: linear-gradient(to right, var(--ink), var(--accent));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-.landing-cta-group {
-  display: flex;
-  gap: 14px;
-  flex-wrap: wrap;
-  justify-content: center;
+
+/* Headline — large serif */
+.landing-headline {
+  font-family: var(--doaide-font-display, "Instrument Serif", Georgia, serif);
+  font-size: clamp(32px, 5vw, 56px);
+  font-weight: 400;
+  font-style: normal;
+  letter-spacing: -0.5px;
+  line-height: 1.1;
+  color: #fff;
+  margin: 0 0 16px;
 }
 
-/* Features */
-.landing-features {
-  position: relative;
-  z-index: 5;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-  gap: 14px;
-  max-width: 640px;
-  margin: 40px auto;
-  padding: 0 24px;
-  opacity: 0;
+/* Subtitle — monospace */
+.landing-subtitle {
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 14px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.45);
+  line-height: 1.6;
+  margin: 0 0 24px;
+  max-width: 480px;
 }
-.landing-features.landing-visible {
-  opacity: 1;
+
+/* Typewriter effect */
+.landing-typewriter-wrap {
+  margin-bottom: 32px;
+  min-height: 28px;
 }
-.landing-feature-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  padding: 20px 12px;
-  background: var(--bg-card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  opacity: 0;
-  animation: landing-card-pop 0.5s ease forwards;
-  transition: all 0.3s ease;
-  cursor: default;
-}
-.landing-feature-card:hover {
-  border-color: rgba(240, 180, 41, 0.3);
-  transform: translateY(-4px);
-  box-shadow: 0 8px 30px rgba(240, 180, 41, 0.1);
-}
-.landing-feature-icon {
-  font-size: 28px;
-  line-height: 1;
-}
-.landing-feature-title {
-  font-size: 13px;
+.landing-typewriter {
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 15px;
   font-weight: 500;
-  color: var(--text-muted-landing);
-  text-align: center;
+  color: var(--accent);
+}
+.landing-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  animation: cursor-blink 0.8s step-end infinite;
+  color: var(--accent);
+}
+@keyframes cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Pipeline graphic */
+.landing-pipeline {
+  max-width: 480px;
+}
+.landing-pipeline svg {
+  width: 100%;
+  height: auto;
+}
+
+/* Auth tabs */
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.auth-tab {
+  flex: 1;
+  padding: 10px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  font-family: var(--doaide-font, "Schibsted Grotesk", system-ui, sans-serif);
+  font-size: 14px;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+.auth-tab:hover {
+  color: rgba(255, 255, 255, 0.7);
+}
+.auth-tab.is-active {
+  color: #fff;
+  border-bottom-color: var(--accent);
+}
+.auth-tab:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
 }
 
 /* Footer */
@@ -769,43 +727,55 @@ select[aria-invalid="true"]:focus {
   font-size: 12px;
 }
 
-/* Focus rings */
-.landing-btn-primary:focus-visible,
-.landing-btn-ghost:focus-visible {
-  outline: 2px solid var(--brand);
-  outline-offset: 2px;
+/* Responsive — stack vertically on narrower screens */
+@media (max-width: 860px) {
+  .landing-split {
+    flex-direction: column;
+    text-align: center;
+    padding: 24px 20px 40px;
+    gap: 32px;
+  }
+  .landing-left {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .landing-right {
+    width: 100%;
+    max-width: 400px;
+  }
+  .landing-subtitle {
+    max-width: 100%;
+  }
+  .landing-pipeline {
+    max-width: 100%;
+  }
+  .landing-header {
+    padding: 16px 20px;
+  }
 }
-
 @media (max-width: 600px) {
   .landing-header { padding: 12px 16px; }
-  .landing-hero { padding: 50px 16px 30px; }
-  .landing-features {
-    grid-template-columns: repeat(2, 1fr);
-    gap: 10px;
-    padding: 0 16px;
-  }
-  .landing-cta-group {
-    flex-direction: column;
-    width: 100%;
-    max-width: 280px;
-  }
-  .landing-btn-lg {
-    width: 100%;
-    text-align: center;
-  }
+  .landing-split { padding: 16px 16px 32px; }
+  .landing-headline { font-size: 28px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .landing-orb,
+  .landing-particle,
   .landing-hero-robot-wrap,
-  .landing-hero-robot .landing-antenna-glow {
+  .landing-hero-robot .landing-antenna-glow,
+  .landing-cursor {
     animation: none !important;
   }
-  .landing-hero,
-  .landing-header,
-  .landing-feature-card {
+  .landing-particle { opacity: 0.25 !important; }
+  .landing-cursor { opacity: 1 !important; }
+  .landing-split,
+  .landing-header {
     animation: none !important;
     opacity: 1 !important;
     transform: none !important;
+  }
+  .landing-pipeline animateMotion {
+    dur: 0s;
   }
 }
 
