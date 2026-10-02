@@ -218,7 +218,8 @@ describe("dismissing a refused sign-in", () => {
     const user = userEvent.setup();
     renderApp("/login");
 
-    await user.type(await screen.findByLabelText("Email"), "owner@example.com");
+    await user.click(await screen.findByRole("tab", { name: "Sign in" }));
+    await user.type(screen.getByLabelText("Email"), "owner@example.com");
     await user.type(screen.getByLabelText("Password"), "hunter2hunter2");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
