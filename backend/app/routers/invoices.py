@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 # the two the row is found by, the one that fixes which period's run judges
 # it, and the money it compares.
 VERDICT_STATUSES = frozenset(
-    {InvoiceStatus.MATCHED, InvoiceStatus.MISMATCHED, InvoiceStatus.MISSING_IN_2B}
+    {InvoiceStatus.MATCHED, InvoiceStatus.MISMATCHED, InvoiceStatus.MISSING_IN_2B,
+     InvoiceStatus.DUPLICATE}
 )
 RECONCILED_FIELDS = frozenset(
     {"counterparty_gstin", "invoice_number", "invoice_date", *COMPARED_FIELDS}

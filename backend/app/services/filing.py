@@ -39,7 +39,7 @@ from app.core.sanitize import csv_safe
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnStatus, ReturnType
 from app.models.invoice import (
-    UNREADABLE_STATUSES,
+    UNCOUNTABLE_STATUSES,
     Invoice,
     InvoiceStatus,
     InvoiceType,
@@ -457,7 +457,13 @@ def _unreadable_issue(invoice: Invoice) -> ValidationIssue:
     is fixed by a re-parse or by typing the figures in, the other by waiting —
     so they are not collapsed into one message.
     """
-    if invoice.status is InvoiceStatus.FAILED:
+    if invoice.status is InvoiceStatus.DUPLICATE:
+        message = (
+            "Reconciliation found this is a duplicate of another invoice with the "
+            "same supplier and number. It is left out of the return to avoid "
+            "double-declaring the supply. Correct the identifying fields or delete it."
+        )
+    elif invoice.status is InvoiceStatus.FAILED:
         reason = invoice.parse_error or "the extraction gave up"
         message = (
             f"Could not be read ({reason}), so it is left out of the return entirely. "
@@ -791,11 +797,12 @@ def _invoices(
 ) -> list[Invoice]:
     """Filable invoices of one direction for a period, oldest first.
 
-    Excludes every row whose figures were never extracted — see
-    :data:`UNREADABLE_STATUSES`. An invoice whose fields were never read has
-    nothing to file, and putting a row of zeros in a return is worse than
-    leaving it out and reporting it as unfiled, which
-    :func:`validate_period` does.
+    Excludes every row whose figures were never extracted or that duplicates
+    another row — see :data:`UNCOUNTABLE_STATUSES`. An invoice whose fields
+    were never read has nothing to file, and putting a row of zeros in a
+    return is worse than leaving it out and reporting it as unfiled, which
+    :func:`validate_period` does. A duplicate has figures, but they belong
+    to the original row and filing them double-declares the supply.
     """
     return list(
         db.scalars(
@@ -805,7 +812,7 @@ def _invoices(
                 Invoice.deleted_at.is_(None),
                 Invoice.invoice_type == invoice_type,
                 Invoice.period == period,
-                Invoice.status.not_in(UNREADABLE_STATUSES),
+                Invoice.status.not_in(UNCOUNTABLE_STATUSES),
             )
             .order_by(Invoice.invoice_date.asc(), Invoice.id.asc())
         ).all()
@@ -824,7 +831,7 @@ def _unreadable_invoices(
                 Invoice.deleted_at.is_(None),
                 Invoice.invoice_type == invoice_type,
                 Invoice.period == period,
-                Invoice.status.in_(UNREADABLE_STATUSES),
+                Invoice.status.in_(UNCOUNTABLE_STATUSES),
             )
             .order_by(Invoice.id.asc())
         ).all()

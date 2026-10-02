@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.business import Business
 from app.models.invoice import (
-    UNREADABLE_STATUSES,
+    UNCOUNTABLE_STATUSES,
     Invoice,
     InvoiceSource,
     InvoiceStatus,
@@ -833,7 +833,7 @@ def _summarise(
     conditions = [
         Invoice.business_id == business_id,
         Invoice.deleted_at.is_(None),
-        Invoice.status.not_in(UNREADABLE_STATUSES),
+        Invoice.status.not_in(UNCOUNTABLE_STATUSES),
     ]
     if periods:
         conditions.append(

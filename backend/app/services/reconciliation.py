@@ -830,6 +830,7 @@ def _apply_statuses(result: ReconciliationResult) -> None:
         MatchCategory.MATCHED: InvoiceStatus.MATCHED,
         MatchCategory.MISMATCHED: InvoiceStatus.MISMATCHED,
         MatchCategory.MISSING_IN_2B: InvoiceStatus.MISSING_IN_2B,
+        MatchCategory.DUPLICATE: InvoiceStatus.DUPLICATE,
     }
     for finding in result.findings:
         if finding.invoice is None or finding.carried:

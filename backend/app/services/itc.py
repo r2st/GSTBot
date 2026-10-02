@@ -33,7 +33,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.models.invoice import UNREADABLE_STATUSES, Invoice, InvoiceType
+from app.models.invoice import UNCOUNTABLE_STATUSES, Invoice, InvoiceType
 from app.services import gst_calendar, reconciliation
 
 ZERO = Decimal("0.00")
@@ -745,7 +745,7 @@ def _purchases(
         Invoice.business_id == business_id,
         Invoice.deleted_at.is_(None),
         Invoice.invoice_type == InvoiceType.PURCHASE,
-        Invoice.status.not_in(UNREADABLE_STATUSES),
+        Invoice.status.not_in(UNCOUNTABLE_STATUSES),
         *narrowed_by,
     ]
     if period:
@@ -806,9 +806,9 @@ def purchases_outside_periods(
 def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
     """Output tax declared on sales invoices for *period*.
 
-    Rows whose figures were never extracted are excluded, because the returns
-    exclude them: ``filing`` leaves anything in
-    :data:`~app.models.invoice.UNREADABLE_STATUSES` out of the document
+    Rows whose figures were never extracted or that duplicate another row are
+    excluded, because the returns exclude them: ``filing`` leaves anything in
+    :data:`~app.models.invoice.UNCOUNTABLE_STATUSES` out of the document
     entirely. Counting one here and not there makes the ITC screen quote an
     output tax the 3B it produces will not contain, and the difference lands on
     the cash the business is told to pay. A re-parse is where this bites — the
@@ -826,7 +826,7 @@ def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.SALES,
             Invoice.period == period,
-            Invoice.status.not_in(UNREADABLE_STATUSES),
+            Invoice.status.not_in(UNCOUNTABLE_STATUSES),
         )
     ).one()
     return TaxHeads(
@@ -863,7 +863,7 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.SALES,
             Invoice.period == period,
-            Invoice.status.not_in(UNREADABLE_STATUSES),
+            Invoice.status.not_in(UNCOUNTABLE_STATUSES),
         )
     ).all()
 

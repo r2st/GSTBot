@@ -1421,19 +1421,20 @@ class TestADuplicateThroughAWholeRun:
         assert run.mismatched_count == 0
         assert run.missing_in_2b_count == 0
 
-    def test_the_second_copy_keeps_the_status_it_arrived_with(
+    def test_the_second_copy_is_marked_duplicate(
         self, db_session, business
     ):
-        """``_apply_statuses`` has no status for a duplicate, and must leave the
-        row alone rather than reach for a default. Writing MATCHED here would
-        claim the portal row covers both copies; writing MISSING_IN_2B would
-        send the user looking for a supplier who filed exactly what they owed."""
+        """``_apply_statuses`` writes DUPLICATE so the copy is excluded from the
+        ITC pool, Rule 37, capital goods and the filing register. Writing
+        MATCHED would claim the portal row covers both copies; writing
+        MISSING_IN_2B would send the user looking for a supplier who filed
+        exactly what they owed."""
         _, original, copy = self._run_with_a_double_entry(db_session, business)
         db_session.refresh(original)
         db_session.refresh(copy)
 
         assert original.status is InvoiceStatus.MATCHED
-        assert copy.status is InvoiceStatus.PARSED
+        assert copy.status is InvoiceStatus.DUPLICATE
 
     def test_the_supplier_is_not_marked_down_for_our_double_entry(
         self, db_session, business

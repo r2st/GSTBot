@@ -50,7 +50,7 @@ from sqlalchemy import and_, case, func, select
 from sqlalchemy.orm import Session
 
 from app.models.invoice import (
-    UNREADABLE_STATUSES,
+    UNCOUNTABLE_STATUSES,
     Invoice,
     InvoiceStatus,
     InvoiceType,
@@ -561,9 +561,9 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
     what it says and what the count beside it is: how much of this supplier's
     paperwork is in the books, credit or not.
 
-    Rows whose figures were never extracted are left out — every status in
-    :data:`~app.models.invoice.UNREADABLE_STATUSES`, which is the line the
-    returns, the credit pool and the dashboard all draw. This was the last
+    Rows whose figures were never extracted or that duplicate another row are
+    left out — every status in :data:`~app.models.invoice.UNCOUNTABLE_STATUSES`,
+    which is the line the returns, the credit pool and the dashboard all draw. This was the last
     place still excluding ``FAILED`` alone, and the two ways past it are not
     symmetric. A row still queued for a worker carries columns of zeros, so it
     moved no money and inflated both the document count and the unpaid count
@@ -613,7 +613,7 @@ def exposure(db: Session, business_id: int, supplier: Supplier) -> SupplierExpos
             Invoice.deleted_at.is_(None),
             Invoice.invoice_type == InvoiceType.PURCHASE,
             Invoice.counterparty_gstin == supplier.gstin,
-            Invoice.status.not_in(UNREADABLE_STATUSES),
+            Invoice.status.not_in(UNCOUNTABLE_STATUSES),
         )
     ).one()
 

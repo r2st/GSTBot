@@ -49,6 +49,7 @@ class InvoiceStatus(str, Enum):
     MATCHED = "matched"  # Found in GSTR-2B with the same figures.
     MISMATCHED = "mismatched"  # Found, but the figures differ.
     MISSING_IN_2B = "missing_in_2b"  # In our books, absent from the supplier's GSTR-1.
+    DUPLICATE = "duplicate"  # Same supplier and invoice number as another row.
 
 
 # The statuses that mean "the figures on this row were never extracted".
@@ -67,6 +68,11 @@ UNREADABLE_STATUSES = (
     InvoiceStatus.UPLOADED,
     InvoiceStatus.PROCESSING,
 )
+
+# Statuses excluded from the filing, ITC and tax-summary registers.
+# Extends UNREADABLE_STATUSES with DUPLICATE: the figures exist but belong
+# to another row, and counting them overstates the totals.
+UNCOUNTABLE_STATUSES = UNREADABLE_STATUSES + (InvoiceStatus.DUPLICATE,)
 
 
 class InvoiceSource(str, Enum):

@@ -439,6 +439,9 @@ TARGETS: tuple[Target, ...] = (
             # it the query's own narrowing has no test at all, and the three
             # mutants in it survived for want of a caller.
             "tests/test_itc_deadline.py",
+            # The DUPLICATE exclusion from ``_purchases``: a duplicate invoice
+            # must not inflate the available credit pool.
+            "tests/test_duplicate_exclusion.py",
         ),
         # Tops out at 164/171. The seven are all guards against a value the
         # column types make impossible (``x or 0`` on a NOT NULL money column)
