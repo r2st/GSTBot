@@ -708,10 +708,12 @@ def reap_stalled_parses(
     if stalled:
         db.commit()
         logger.warning(
-            "Reaped %d invoice(s) stalled in processing for over %ds: %s",
-            len(stalled),
-            seconds,
-            [invoice.id for invoice in stalled],
+            "Reaped stalled invoices",
+            extra={
+                "count": len(stalled),
+                "stale_seconds": seconds,
+                "invoice_ids": [invoice.id for invoice in stalled],
+            },
         )
     return len(stalled)
 
