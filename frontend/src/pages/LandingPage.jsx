@@ -15,10 +15,10 @@ const DOAIDE_PRODUCTS = [
 ];
 
 const TYPEWRITER_PHRASES = [
-  "Upload invoices, get ITC",
+  "Free GST return filing online",
+  "Automated GSTR-2B reconciliation",
   "Never miss a filing deadline",
-  "Know which suppliers filed",
-  "GSTR-1 and 3B ready to file",
+  "ITC calculated in seconds",
 ];
 
 function RobotFace({ size = 32, color }) {
@@ -188,7 +188,7 @@ function ParticleField() {
 }
 
 export default function LandingPage() {
-  usePageTitle("GST filing made simple");
+  usePageTitle("Free GST Filing Software India — GSTR-2B Reconciliation & ITC Calculator");
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -215,10 +215,11 @@ export default function LandingPage() {
           <div className="landing-hero-robot-wrap">
             <HeroRobot color="#F0B429" />
           </div>
-          <h1 className="landing-headline">GST filing made simple.</h1>
+          <h1 className="landing-headline">Free GST Filing Software for India</h1>
           <p className="landing-subtitle">
-            Upload your invoices. We match them with GSTR-2B, calculate your ITC,
-            and prepare your returns — so you file on time, every time.
+            Upload your invoices, auto-reconcile with GSTR-2B, and calculate your
+            Input Tax Credit — GSTR-1 and GSTR-3B returns prepared in minutes, not
+            hours. Free GST return filing online for Indian SMBs.
           </p>
           <div className="landing-typewriter-wrap">
             <Typewriter phrases={TYPEWRITER_PHRASES} />
@@ -227,13 +228,18 @@ export default function LandingPage() {
           <div className="landing-features">
             <div className="landing-feature">
               <strong>Free forever</strong>
-              <span>50 invoices/month, full features</span>
+              <span>50 invoices/month, full GST compliance</span>
             </div>
             <div className="landing-feature">
               <strong>From ₹499/mo</strong>
               <span>500+ invoices, priority support</span>
             </div>
           </div>
+          <p className="landing-seo-blurb">
+            Trusted by Indian SMBs for automated GST compliance — invoice
+            matching, supplier tracking, ITC reconciliation, and on-time return
+            filing.
+          </p>
         </div>
 
         <div className="landing-right">

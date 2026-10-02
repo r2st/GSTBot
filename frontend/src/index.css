@@ -692,6 +692,13 @@ select[aria-invalid="true"]:focus {
 .landing-feature span {
   color: rgba(255, 255, 255, 0.5);
 }
+.landing-seo-blurb {
+  margin-top: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.35);
+  max-width: 420px;
+}
 
 /* Auth tabs */
 .auth-tabs {

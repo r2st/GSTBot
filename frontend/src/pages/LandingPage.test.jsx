@@ -26,7 +26,7 @@ describe("LandingPage", () => {
   it("shows the headline in serif font", () => {
     renderLanding();
 
-    expect(screen.getByText("GST filing made simple.")).toBeInTheDocument();
+    expect(screen.getByText("Free GST Filing Software for India")).toBeInTheDocument();
   });
 
   it("shows the monospace subtitle", () => {
