@@ -1,162 +1,139 @@
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { usePageTitle } from "../hooks/usePageTitle";
 
 const FEATURES = [
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="landing-feature-icon">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-        <line x1="16" y1="13" x2="8" y2="13" />
-        <line x1="16" y1="17" x2="8" y2="17" />
-        <polyline points="10 9 9 9 8 9" />
-      </svg>
-    ),
-    title: "Invoice ingestion",
-    desc: "Upload invoices in any format. AI extracts every field — GSTIN, amounts, tax splits — so you don't type them twice.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="landing-feature-icon">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-      </svg>
-    ),
-    title: "GSTR-2B reconciliation",
-    desc: "Match your purchase register against the government's 2B data. Mismatches surface before the return is due.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="landing-feature-icon">
-        <line x1="12" y1="1" x2="12" y2="23" />
-        <path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
-      </svg>
-    ),
-    title: "ITC tracking",
-    desc: "See exactly how much input tax credit you can claim, broken down by eligible, ineligible, and at-risk amounts.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="landing-feature-icon">
-        <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
-        <line x1="16" y1="2" x2="16" y2="6" />
-        <line x1="8" y1="2" x2="8" y2="6" />
-        <line x1="3" y1="10" x2="21" y2="10" />
-      </svg>
-    ),
-    title: "Deadline alerts",
-    desc: "Never miss a filing window. Alerts fire before each due date, and escalate when the deadline is close.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="landing-feature-icon">
-        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-        <polyline points="22 4 12 14.01 9 11.01" />
-      </svg>
-    ),
-    title: "Filing preparation",
-    desc: "GSTR-1 and GSTR-3B assembled from your data, reviewed for errors, and ready to file on the portal.",
-  },
-  {
-    icon: (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="landing-feature-icon">
-        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2" />
-        <circle cx="9" cy="7" r="4" />
-        <path d="M23 21v-2a4 4 0 00-3-3.87" />
-        <path d="M16 3.13a4 4 0 010 7.75" />
-      </svg>
-    ),
-    title: "Multi-business",
-    desc: "CAs and accountants switch between client books without logging out. Each business stays isolated.",
-  },
+  { icon: "📄", title: "Auto Filing" },
+  { icon: "🔄", title: "Reconciliation" },
+  { icon: "💰", title: "ITC Tracking" },
+  { icon: "⏰", title: "Deadline Alerts" },
 ];
+
+const DOAIDE_PRODUCTS = [
+  { name: "Desk", url: "https://desk.doaide.com" },
+  { name: "Jobs", url: "https://job.doaide.com" },
+  { name: "409A", url: "https://409a.doaide.com" },
+  { name: "GST", url: "https://gst.doaide.com" },
+  { name: "Pulse", url: "https://pulse.doaide.com" },
+  { name: "Med", url: "https://med.doaide.com" },
+  { name: "Realty", url: "https://realty.doaide.com" },
+  { name: "Reach", url: "https://reach.doaide.com" },
+  { name: "Trade", url: "https://trade.doaide.com" },
+];
+
+function RobotFace({ size = 32, color }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
+      <line x1="16" y1="6" x2="16" y2="2" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+      <circle cx="16" cy="1.5" r="1.5" fill={color} />
+      <rect x="5" y="6" width="22" height="17" rx="5" fill={color} />
+      <ellipse cx="11" cy="13" rx="2.5" ry="3" fill="#0A0A0B" />
+      <ellipse cx="21" cy="13" rx="2.5" ry="3" fill="#0A0A0B" />
+      <circle cx="11.5" cy="12.5" r="1" fill={color} opacity="0.6" />
+      <circle cx="21.5" cy="12.5" r="1" fill={color} opacity="0.6" />
+      <path d="M12 19Q16 22 20 19" stroke="#0A0A0B" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      <rect x="1" y="10" width="4" height="5" rx="2" fill={color} opacity="0.8" />
+      <rect x="27" y="10" width="4" height="5" rx="2" fill={color} opacity="0.8" />
+    </svg>
+  );
+}
+
+function HeroRobot({ color }) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" width="120" height="100" className="landing-hero-robot" aria-hidden="true">
+      <line x1="60" y1="18" x2="60" y2="6" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
+      <circle cx="60" cy="4" r="3" fill={color} className="landing-antenna-glow" />
+      <rect x="25" y="18" width="70" height="55" rx="16" fill={color} />
+      <ellipse cx="42" cy="40" rx="8" ry="10" fill="#0A0A0B" />
+      <ellipse cx="78" cy="40" rx="8" ry="10" fill="#0A0A0B" />
+      <circle cx="44" cy="38" r="3" fill={color} opacity="0.5" />
+      <circle cx="80" cy="38" r="3" fill={color} opacity="0.5" />
+      <path d="M45 60 Q60 72 75 60" stroke="#0A0A0B" strokeWidth="2.5" fill="none" strokeLinecap="round" />
+      <rect x="5" y="30" width="16" height="18" rx="6" fill={color} opacity="0.8" />
+      <rect x="99" y="30" width="16" height="18" rx="6" fill={color} opacity="0.8" />
+    </svg>
+  );
+}
 
 export default function LandingPage() {
   usePageTitle("GST compliance on autopilot");
   const navigate = useNavigate();
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    requestAnimationFrame(() => setVisible(true));
+  }, []);
+
+  const vis = visible ? "landing-visible" : "";
 
   return (
-    <div className="landing">
-      <div className="landing-glow" aria-hidden="true" />
+    <div className="landing-root">
+      <div className="landing-bg" aria-hidden="true">
+        <div className="landing-orb landing-orb-1" />
+        <div className="landing-orb landing-orb-2" />
+        <div className="landing-orb landing-orb-3" />
+      </div>
 
-      <header className="landing-header">
-        <div className="landing-brand">
-          <svg viewBox="0 0 400 320" className="landing-robot" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <defs><linearGradient id="lg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#F0B429" /><stop offset="100%" stopColor="#D4A017" /></linearGradient></defs>
-            <line x1="200" y1="45" x2="200" y2="20" stroke="#F0B429" strokeWidth="6" strokeLinecap="round" />
-            <circle cx="200" cy="14" r="10" fill="#F0B429" /><circle cx="200" cy="14" r="5" fill="#F7CC5F" />
-            <rect x="110" y="50" width="180" height="140" rx="35" fill="url(#lg)" />
-            <rect x="130" y="68" width="140" height="105" rx="25" fill="#D4A017" opacity="0.4" />
-            <ellipse cx="165" cy="115" rx="18" ry="20" fill="#0A0A0B" /><ellipse cx="235" cy="115" rx="18" ry="20" fill="#0A0A0B" />
-            <circle cx="170" cy="113" r="8" fill="#F7CC5F" /><circle cx="240" cy="113" r="8" fill="#F7CC5F" />
-            <circle cx="174" cy="109" r="3" fill="white" opacity="0.7" /><circle cx="244" cy="109" r="3" fill="white" opacity="0.7" />
-            <path d="M170 155Q200 178 230 155" stroke="#0A0A0B" strokeWidth="4" fill="none" strokeLinecap="round" />
-            <rect x="92" y="95" width="22" height="45" rx="8" fill="#D4A017" /><rect x="286" y="95" width="22" height="45" rx="8" fill="#D4A017" />
-            <rect x="175" y="190" width="50" height="14" rx="5" fill="#D4A017" />
-            <rect x="145" y="204" width="110" height="55" rx="18" fill="url(#lg)" />
-            <circle cx="200" cy="228" r="7" fill="#0A0A0B" /><circle cx="200" cy="228" r="3.5" fill="#0A0A0B" />
-            <path d="M145 218Q118 223 113 240Q108 257 120 262" stroke="#D4A017" strokeWidth="9" fill="none" strokeLinecap="round" /><circle cx="120" cy="265" r="7" fill="#D4A017" />
-            <path d="M255 218Q282 223 287 240Q292 257 280 262" stroke="#D4A017" strokeWidth="9" fill="none" strokeLinecap="round" /><circle cx="280" cy="265" r="7" fill="#D4A017" />
-          </svg>
+      <header className={`landing-header ${vis}`}>
+        <a href="https://doaide.com" className="landing-brand">
+          <RobotFace size={28} color="#F0B429" />
           <span className="landing-brand-text">
-            DoAide <span className="landing-brand-accent">GST</span>
+            Do<em>Aide</em> GST
           </span>
-        </div>
+        </a>
         <div className="landing-header-actions">
           <button className="landing-btn-ghost" onClick={() => navigate("/login")}>
             Sign in
           </button>
+          <button className="landing-btn-primary" onClick={() => navigate("/login", { state: { mode: "register" } })}>
+            Get started
+          </button>
         </div>
       </header>
 
-      <section className="landing-hero">
-        <h1 className="landing-h1">
-          <span className="landing-h1-line">GST compliance,</span>
-          <span className="landing-h1-line landing-h1-accent">on autopilot.</span>
-        </h1>
-        <p className="landing-lead">
-          Upload invoices, reconcile against GSTR-2B, track ITC, and prepare
-          filings — all from one place. Built for Indian SMBs and their
-          accountants.
-        </p>
-        <div className="landing-cta">
-          <button className="landing-btn-primary" onClick={() => navigate("/login", { state: { mode: "register" } })}>
+      <main className={`landing-hero ${vis}`}>
+        <div className="landing-hero-robot-wrap">
+          <HeroRobot color="#F0B429" />
+        </div>
+        <h1 className="landing-title">GST compliance, on autopilot.</h1>
+        <div className="landing-cta-group">
+          <button className="landing-btn-primary landing-btn-lg" onClick={() => navigate("/login", { state: { mode: "register" } })}>
             Get started free
           </button>
-          <button className="landing-btn-outline" onClick={() => navigate("/login")}>
+          <button className="landing-btn-ghost landing-btn-lg" onClick={() => navigate("/login")}>
             Sign in
           </button>
         </div>
-      </section>
+      </main>
 
-      <section className="landing-features" aria-label="Features">
-        <h2 className="landing-section-title">Everything you need for GST</h2>
-        <div className="landing-feature-grid">
-          {FEATURES.map((f) => (
-            <div className="landing-feature-card" key={f.title}>
-              <div className="landing-feature-icon-wrap">{f.icon}</div>
-              <h3 className="landing-feature-title">{f.title}</h3>
-              <p className="landing-feature-desc">{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="landing-bottom-cta">
-        <h2 className="landing-bottom-heading">
-          Stop chasing spreadsheets.
-        </h2>
-        <p className="landing-bottom-sub">
-          Create a free account and file your first return in minutes.
-        </p>
-        <button className="landing-btn-primary" onClick={() => navigate("/login", { state: { mode: "register" } })}>
-          Get started free
-        </button>
+      <section className={`landing-features ${vis}`} aria-label="Features">
+        {FEATURES.map((f, i) => (
+          <div
+            key={f.title}
+            className="landing-feature-card"
+            style={{ animationDelay: `${0.3 + i * 0.1}s` }}
+          >
+            <span className="landing-feature-icon">{f.icon}</span>
+            <span className="landing-feature-title">{f.title}</span>
+          </div>
+        ))}
       </section>
 
       <footer className="landing-footer">
-        <span className="landing-footer-text">
-          DoAide GST by Apprend Technologies
-        </span>
+        <div className="landing-footer-products">
+          {DOAIDE_PRODUCTS.map((p) => (
+            <a key={p.name} href={p.url} className="landing-footer-link">
+              {p.name}
+            </a>
+          ))}
+        </div>
+        <div className="landing-footer-bottom">
+          <a href="https://doaide.com" className="landing-footer-home">
+            <RobotFace size={16} color="#F0B429" />
+            doaide.com
+          </a>
+          <span className="landing-footer-copy">&copy; 2026 DoAide</span>
+        </div>
       </footer>
     </div>
   );

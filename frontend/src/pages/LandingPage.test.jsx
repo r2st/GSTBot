@@ -26,22 +26,19 @@ function renderLanding() {
 }
 
 describe("LandingPage", () => {
-  it("shows the branding and hero copy", () => {
+  it("shows the gradient title", () => {
     renderLanding();
 
-    expect(screen.getByText("GST compliance,")).toBeInTheDocument();
-    expect(screen.getByText("on autopilot.")).toBeInTheDocument();
+    expect(screen.getByText("GST compliance, on autopilot.")).toBeInTheDocument();
   });
 
-  it("renders all six feature cards", () => {
+  it("renders four feature cards", () => {
     renderLanding();
 
-    expect(screen.getByText("Invoice ingestion")).toBeInTheDocument();
-    expect(screen.getByText("GSTR-2B reconciliation")).toBeInTheDocument();
-    expect(screen.getByText("ITC tracking")).toBeInTheDocument();
-    expect(screen.getByText("Deadline alerts")).toBeInTheDocument();
-    expect(screen.getByText("Filing preparation")).toBeInTheDocument();
-    expect(screen.getByText("Multi-business")).toBeInTheDocument();
+    expect(screen.getByText("Auto Filing")).toBeInTheDocument();
+    expect(screen.getByText("Reconciliation")).toBeInTheDocument();
+    expect(screen.getByText("ITC Tracking")).toBeInTheDocument();
+    expect(screen.getByText("Deadline Alerts")).toBeInTheDocument();
   });
 
   it("navigates to login with register mode on the primary CTA", async () => {
@@ -62,27 +59,41 @@ describe("LandingPage", () => {
     expect(navigated.to).toBe("/login");
   });
 
-  it("has a footer crediting the company", () => {
+  it("renders the footer with all DoAide product links", () => {
     renderLanding();
 
-    expect(screen.getByText(/Apprend Technologies/)).toBeInTheDocument();
+    expect(screen.getByText("Desk")).toBeInTheDocument();
+    expect(screen.getByText("Jobs")).toBeInTheDocument();
+    expect(screen.getByText("Pulse")).toBeInTheDocument();
+    expect(screen.getByText("Med")).toBeInTheDocument();
+    expect(screen.getByText("Realty")).toBeInTheDocument();
+    expect(screen.getByText("Reach")).toBeInTheDocument();
+    expect(screen.getByText("Trade")).toBeInTheDocument();
+    expect(screen.getByText("409A")).toBeInTheDocument();
+    expect(screen.getByText("doaide.com")).toBeInTheDocument();
   });
 
-  it("includes the bottom call-to-action section", async () => {
+  it("links to doaide.com from the header brand", () => {
     renderLanding();
 
-    expect(screen.getByText("Stop chasing spreadsheets.")).toBeInTheDocument();
+    const brand = screen.getByText("doaide.com").closest("a");
+    expect(brand).toHaveAttribute("href", "https://doaide.com");
+  });
 
-    await userEvent.click(screen.getAllByText("Get started free")[1]);
+  it("renders the header Get started button", async () => {
+    renderLanding();
+
+    await userEvent.click(screen.getByText("Get started"));
 
     expect(navigated.to).toBe("/login");
+    expect(navigated.opts).toEqual({ state: { mode: "register" } });
   });
 
-  it("renders the sign-in outline button in the hero", async () => {
+  it("renders the hero Sign in button", async () => {
     renderLanding();
 
-    const outlineBtn = screen.getAllByText("Sign in")[1];
-    await userEvent.click(outlineBtn);
+    const heroSignIn = screen.getAllByText("Sign in")[1];
+    await userEvent.click(heroSignIn);
 
     expect(navigated.to).toBe("/login");
   });
