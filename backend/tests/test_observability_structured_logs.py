@@ -1,8 +1,10 @@
 """Structured logging on error and summary paths carries correlation fields.
 
-GB003 round 2: every log line that names a business, an invoice or a task
+GB003 rounds 2–3: every log line that names a business, an invoice or a task
 must carry that id as a structured ``extra`` field so a log aggregator can
-filter on it without parsing the message string.
+filter on it without parsing the message string. Round 3 added success lines
+for filing and GSTR-2B import, and the recipient field on alert delivery
+failures.
 """
 from __future__ import annotations
 

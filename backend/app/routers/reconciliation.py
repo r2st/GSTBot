@@ -209,6 +209,17 @@ async def import_gstr2b(
         db, business.id, resolved, records, source_filename=filename
     )
 
+    logger.info(
+        "GSTR-2B imported",
+        extra={
+            "business_id": business.id,
+            "period": resolved,
+            "record_count": len(records),
+            "replaced_previous": had_previous,
+            "source_filename": filename,
+        },
+    )
+
     other_periods = sorted(
         {record.period for record in records if record.period and record.period != resolved}
     )

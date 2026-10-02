@@ -168,7 +168,7 @@ def _send_to_all(recipients: list[str], subject: str, body: str, *, business_id:
             logger.warning(
                 "Alert email failed for recipient",
                 exc_info=True,
-                extra={"business_id": business_id},
+                extra={"business_id": business_id, "recipient": address},
             )
     return reached
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
@@ -46,6 +47,8 @@ from app.models.invoice import (
 from app.services import gst_calendar, invoice_parser, invoice_service
 from app.services import gstin as gstin_service
 from app.services import itc as itc_service
+
+logger = logging.getLogger(__name__)
 
 ZERO = Decimal("0.00")
 
@@ -677,6 +680,18 @@ def record_filing(
         db.add(record)
     db.commit()
     db.refresh(record)
+    logger.info(
+        "Filing recorded",
+        extra={
+            "business_id": business.id,
+            "period": period,
+            "return_type": return_type.value,
+            "arn": record.arn,
+            "filed_on": filed_on.isoformat(),
+            "is_update": existing is not None,
+            "invoice_count": record.invoice_count,
+        },
+    )
     return record
 
 
