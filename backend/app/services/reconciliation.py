@@ -1030,7 +1030,10 @@ def run_reconciliation(
             },
         )
     except Exception as exc:  # noqa: BLE001 - the run row is the error channel
-        logger.exception("Reconciliation failed for business %s period %s", business_id, period)
+        logger.exception(
+            "Reconciliation failed",
+            extra={"business_id": business_id, "period": period},
+        )
         # Throw away everything the half-finished run wrote. By the time this
         # is reached ``_apply_statuses`` has already rewritten every matched
         # invoice's status, and ``_score_suppliers`` may have rewritten some

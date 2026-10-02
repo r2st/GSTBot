@@ -526,7 +526,8 @@ def sweep_filing_deadlines(db: Session, *, today: date | None = None) -> SweepRe
         except Exception:  # noqa: BLE001 - one tenant must not end the sweep
             db.rollback()
             logger.exception(
-                "Filing deadline sweep failed for business %s", business.id
+                "Filing deadline sweep failed for business %s", business.id,
+                extra={"business_id": business.id},
             )
             total = SweepResult(
                 businesses=total.businesses + 1,
@@ -546,11 +547,14 @@ def sweep_filing_deadlines(db: Session, *, today: date | None = None) -> SweepRe
         )
 
     logger.info(
-        "Filing deadline sweep for %s: raised=%s reopened=%s resolved=%s failed=%s",
-        today.isoformat(),
-        total.raised,
-        total.reopened,
-        total.resolved,
-        total.failed,
+        "Filing deadline sweep completed",
+        extra={
+            "date": today.isoformat(),
+            "businesses": total.businesses,
+            "raised": total.raised,
+            "reopened": total.reopened,
+            "resolved": total.resolved,
+            "failed": total.failed,
+        },
     )
     return total

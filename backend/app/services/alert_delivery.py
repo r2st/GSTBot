@@ -166,10 +166,9 @@ def _send_to_all(recipients: list[str], subject: str, body: str, *, business_id:
             reached = True
         except EmailSendError:
             logger.warning(
-                "Alert email failed for business %s recipient %s",
-                business_id,
-                address,
+                "Alert email failed for recipient",
                 exc_info=True,
+                extra={"business_id": business_id},
             )
     return reached
 
@@ -313,7 +312,10 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
             db.commit()
         except Exception:  # noqa: BLE001 - one tenant must not end the run
             db.rollback()
-            logger.exception("Could not send/record alert delivery for business %s", business_id)
+            logger.exception(
+                "Could not send/record alert delivery",
+                extra={"business_id": business_id, "alert_count": len(alerts)},
+            )
             total = AlertEmailResult(
                 businesses=total.businesses + 1,
                 emails_sent=total.emails_sent,
@@ -331,5 +333,5 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
             skipped_no_recipient=total.skipped_no_recipient,
         )
 
-    logger.info("Alert email digest: %s", total.as_dict())
+    logger.info("Alert email digest completed", extra=total.as_dict())
     return total

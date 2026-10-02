@@ -55,7 +55,14 @@ def parse_invoice_task(self, invoice_id: int) -> dict:
             "confidence": invoice.extraction_confidence,
         }
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
-        logger.exception("parse_invoice_task failed for invoice %s", invoice_id)
+        logger.exception(
+            "parse_invoice_task failed",
+            extra={
+                "invoice_id": invoice_id,
+                "celery_task_id": self.request.id,
+                "retry": self.request.retries,
+            },
+        )
         raise self.retry(exc=exc) from exc
     finally:
         db.close()
@@ -85,7 +92,10 @@ def reap_stalled_parses_task(self) -> dict:
         job_health.record_heartbeat("stalled-parse-sweep")
         return {"reaped": reaped}
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
-        logger.exception("reap_stalled_parses_task failed")
+        logger.exception(
+            "reap_stalled_parses_task failed",
+            extra={"celery_task_id": self.request.id, "retry": self.request.retries},
+        )
         raise self.retry(exc=exc) from exc
     finally:
         db.close()

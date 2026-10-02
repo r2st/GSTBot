@@ -43,7 +43,10 @@ def sweep_filing_deadlines_task(self) -> dict:
         job_health.record_heartbeat("filing-deadline-sweep")
         return result
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
-        logger.exception("Filing deadline sweep failed")
+        logger.exception(
+            "Filing deadline sweep failed",
+            extra={"celery_task_id": self.request.id, "retry": self.request.retries},
+        )
         raise self.retry(exc=exc) from exc
     finally:
         db.close()
@@ -73,7 +76,10 @@ def send_pending_alert_emails_task(self) -> dict:
         job_health.record_heartbeat("filing-deadline-alert-emails")
         return result
     except Exception as exc:  # noqa: BLE001 - retried, then surfaced
-        logger.exception("Alert email digest failed")
+        logger.exception(
+            "Alert email digest failed",
+            extra={"celery_task_id": self.request.id, "retry": self.request.retries},
+        )
         raise self.retry(exc=exc) from exc
     finally:
         db.close()
