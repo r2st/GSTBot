@@ -22,7 +22,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
  */
 
 const SUFFIX = "DoAide GST";
-const DEFAULT_TITLE = "DoAide GST — GST compliance on autopilot";
+const DEFAULT_TITLE = "DoAide GST — GST filing made simple";
 
 function formatTitle(title) {
   return title ? `${title} · ${SUFFIX}` : DEFAULT_TITLE;

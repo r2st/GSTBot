@@ -231,7 +231,7 @@ export default function AuthForm() {
                     {fieldErrors.legal_name}
                   </p>
                 )}
-                <p className="field-hint">You can add these later from Settings.</p>
+                <p className="field-hint">Skip this to explore first — you can register your GSTIN anytime.</p>
               </>
             )}
           </>

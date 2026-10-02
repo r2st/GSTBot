@@ -188,7 +188,7 @@ function ParticleField() {
 }
 
 export default function LandingPage() {
-  usePageTitle("GST compliance on autopilot");
+  usePageTitle("GST filing made simple");
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
