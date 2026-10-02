@@ -754,10 +754,65 @@ select[aria-invalid="true"]:focus {
     padding: 16px 20px;
   }
 }
-@media (max-width: 600px) {
-  .landing-header { padding: 12px 16px; }
-  .landing-split { padding: 16px 16px 32px; }
-  .landing-headline { font-size: 28px; }
+/* Mobile landing — clutter-free: logo, headline, auth form */
+@media (max-width: 768px) {
+  .landing-root {
+    min-height: 100dvh;
+  }
+  .landing-hero-robot-wrap { display: none; }
+  .landing-pipeline { display: none; }
+  .landing-typewriter-wrap { display: none; }
+  .landing-subtitle { display: none; }
+  .landing-particles { display: none; }
+  .landing-header { padding: 10px 16px; }
+  .landing-headline {
+    font-size: 1.5rem;
+    margin-bottom: 12px;
+    text-align: left;
+  }
+  .landing-left {
+    align-items: stretch;
+    text-align: left;
+  }
+  .landing-split {
+    padding: 8px 16px;
+    gap: 10px;
+    align-items: stretch;
+  }
+  .landing-right {
+    max-width: 100%;
+  }
+  .auth-card {
+    padding: 16px;
+    border-radius: 16px;
+  }
+  .auth-tabs {
+    margin-bottom: 14px;
+  }
+  .auth-tab {
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+  .auth-form label {
+    margin-top: 8px;
+  }
+  .auth-submit {
+    margin-top: 12px;
+  }
+  .landing-footer {
+    padding: 10px 16px;
+  }
+  .landing-footer-link {
+    font-size: 10px;
+  }
+  .landing-footer-home,
+  .landing-footer-copy {
+    font-size: 10px;
+  }
+  .landing-footer-products {
+    gap: 4px 10px;
+    margin-bottom: 6px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .landing-particle,
