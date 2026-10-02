@@ -10,6 +10,7 @@ as.
 """
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import event
 
 from app.models.business import Business
@@ -463,6 +464,13 @@ class TestSwitchingBusinessWithTheHeader:
 
         invoice = db_session.query(Invoice).filter_by(invoice_number="SW-1").one()
         assert invoice.business_id == linked_id
+
+    @pytest.mark.parametrize("bad_id", ["0", "-1", "2147483648", "99999999999"])
+    def test_an_x_business_id_outside_the_row_range_is_refused(self, auth_client, bad_id):
+        response = auth_client.get(
+            "/api/v1/dashboard", headers={"X-Business-Id": bad_id}
+        )
+        assert response.status_code == 422
 
     def test_a_deactivated_business_is_refused_even_with_a_valid_membership(
         self, auth_client, client, db_session

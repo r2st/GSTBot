@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.services import gst_calendar
 
@@ -74,6 +74,16 @@ class RecordFilingIn(BaseModel):
             "re-record, omitting it keeps the date already recorded."
         ),
     )
+
+    @field_validator("filed_on")
+    @classmethod
+    def _filed_on_not_before_gst(cls, v: date | None) -> date | None:
+        if v is not None and v < gst_calendar.GST_COMMENCEMENT:
+            raise ValueError(
+                f"A filing date of {v.isoformat()} predates GST commencement "
+                f"({gst_calendar.GST_COMMENCEMENT.isoformat()})."
+            )
+        return v
 
 
 class FiledReturnOut(BaseModel):

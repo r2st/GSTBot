@@ -68,7 +68,7 @@ class PeriodSummary(BaseModel):
 
 
 class DashboardOut(BaseModel):
-    business_gstin: str
+    business_gstin: str | None = None
     business_name: str
     period: str
     counts: InvoiceCounts

@@ -313,7 +313,10 @@ def create_app() -> FastAPI:
         # Named rather than "*": with credentials allowed a wildcard is
         # rejected by browsers anyway, and the list documents what a client is
         # expected to send.
-        allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Correlation-ID"],
+        allow_headers=[
+            "Authorization", "Content-Type",
+            "X-Request-ID", "X-Correlation-ID", "X-Business-Id",
+        ],
         # Without this a browser client cannot read the id it needs to report a
         # problem, nor the rate-limit budget it should back off against, nor
         # the filename on an export.

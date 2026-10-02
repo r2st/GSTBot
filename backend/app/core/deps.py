@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.params import MAX_ID, MIN_ID
 from app.core.security import decode_access_token
 from app.models.business import Business
 from app.models.business_membership import BusinessMembership
@@ -104,6 +105,12 @@ def get_active_tenant(
     That is why the role is returned from here rather than from a second
     dependency that would repeat the lookup.
     """
+    if x_business_id is not None and not (MIN_ID <= x_business_id <= MAX_ID):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"X-Business-Id must be between {MIN_ID} and {MAX_ID}.",
+        )
+
     business_id = current_user.business_id
     # Acting as one's own tenant: the role on the login is the role, and there
     # is no membership row to read — the caller's own business is not linked to

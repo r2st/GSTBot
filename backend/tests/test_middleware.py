@@ -429,6 +429,19 @@ class TestCorsReachesTheResponsesMiddlewareProduces:
         )
         assert self._allow_origin(response) is None
 
+    def test_a_preflight_for_the_business_switcher_header_is_accepted(self, client):
+        preflight = client.options(
+            "/api/v1/dashboard",
+            headers={
+                "Origin": self.ORIGIN,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,x-business-id",
+            },
+        )
+        assert preflight.status_code == 200
+        allowed = preflight.headers.get("access-control-allow-headers", "").lower()
+        assert "x-business-id" in allowed
+
     def test_a_preflight_is_answered_above_the_limiter(self, client, tight_limit):
         """CORS being outermost is now what keeps a preflight off the limiter.
 

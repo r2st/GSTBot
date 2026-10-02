@@ -302,6 +302,24 @@ class TestFilingsThatCouldNotHaveHappened:
                 db_session, business, PERIOD, ReturnType.GSTR2B
             )
 
+    def test_a_filing_date_before_gst_commencement_is_refused(
+        self, auth_client, business, frozen_today
+    ):
+        response = record(auth_client, filed_on="2017-06-30")
+        assert response.status_code == 422
+        assert "predates GST commencement" in response.text
+
+    def test_the_day_gst_commenced_is_accepted_as_a_filing_date(
+        self, auth_client, db_session, business, frozen_today
+    ):
+        sale(db_session, business.id, period="2017-07")
+        response = record(
+            auth_client, period="2017-07", filed_on="2017-07-01"
+        )
+        # The period validator or service may still reject this for other
+        # reasons, but the filed_on date itself is not the cause.
+        assert response.status_code != 422 or "predates GST" not in response.text
+
     def test_a_malformed_period_is_refused(self, auth_client, business, frozen_today):
         assert record(auth_client, period="April").status_code == 422
 

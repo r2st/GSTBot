@@ -49,6 +49,25 @@ def test_empty_dashboard_is_all_zeroes(auth_client):
     assert Decimal(body["net_liability"]["total"]) == Decimal("0.00")
 
 
+def test_a_business_without_a_gstin_has_null_in_the_dashboard(client):
+    response = client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": "nogstin@example.com",
+            "password": "supersecret123",
+            "legal_name": "Bare Books LLP",
+            "full_name": "Bare Books",
+        },
+    )
+    assert response.status_code == 201
+    token = response.json()["access_token"]
+    body = client.get(
+        "/api/v1/dashboard", headers={"Authorization": f"Bearer {token}"}
+    ).json()
+    assert body["business_gstin"] is None
+    assert body["business_name"] == "Bare Books LLP"
+
+
 def test_counts_split_by_type_and_status(auth_client, db_session, business):
     make_invoice(db_session, business.id, invoice_type=InvoiceType.SALES, invoice_number="S-1")
     make_invoice(db_session, business.id, invoice_type=InvoiceType.SALES, invoice_number="S-2")
