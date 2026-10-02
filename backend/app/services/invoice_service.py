@@ -144,7 +144,7 @@ class TenantSnapshot:
     """
 
     id: int
-    gstin: str
+    gstin: str | None
     plan: str
     monthly_limit: int
 
