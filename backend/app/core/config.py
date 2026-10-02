@@ -366,6 +366,11 @@ class Settings(BaseSettings):
             try:
                 limits[name] = int(raw)
             except ValueError:
+                warnings.warn(
+                    f"Ignoring PLAN_MONTHLY_INVOICE_LIMITS entry '{chunk.strip()}': "
+                    f"value is not an integer",
+                    stacklevel=2,
+                )
                 continue
         return limits
 
