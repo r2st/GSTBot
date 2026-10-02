@@ -285,7 +285,10 @@ def login(
         forget(account_key, account_rate)
 
     if not user.is_active:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Inactive user")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account has been deactivated. Contact support to reactivate it.",
+        )
 
     logger.info("Login", extra={"user_id": user.id, "business_id": user.business_id})
     return Token(access_token=create_access_token(user.id))

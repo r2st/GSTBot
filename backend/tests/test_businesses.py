@@ -295,7 +295,7 @@ class TestLinkingABusiness:
         This used to answer 201. The caller was told the link succeeded, the
         business then never appeared in ``GET /businesses/mine`` because that
         filters soft deletes, and every request carrying its id came back
-        "Business is inactive" — three surfaces disagreeing about one row.
+        "This business has been deactivated" — three surfaces disagreeing about one row.
         """
         second = register_second_business(client)
         closed = db_session.get(Business, second["business"]["id"])

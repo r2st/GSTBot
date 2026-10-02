@@ -410,7 +410,10 @@ def parse_json(payload: dict | str | bytes) -> list[GSTR2BRecord]:
         try:
             payload = json.loads(payload)
         except ValueError as exc:
-            raise GSTR2BParseError(f"File is not valid JSON: {exc}") from exc
+            raise GSTR2BParseError(
+                "This file is not valid JSON. Upload the unmodified download "
+                "from the GST portal."
+            ) from exc
     if not isinstance(payload, dict):
         raise GSTR2BParseError("GSTR-2B JSON must be an object")
 

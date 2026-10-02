@@ -334,7 +334,7 @@ describe("a business selection that outlives the membership behind it", () => {
       ok: false,
       status: 403,
       statusText: "",
-      text: async () => JSON.stringify({ detail: "Business is inactive" }),
+      text: async () => JSON.stringify({ detail: "This business has been deactivated. Contact support to reactivate it." }),
     }));
     renderWithProvider();
 
@@ -354,7 +354,7 @@ describe("a business selection that outlives the membership behind it", () => {
         ok: false,
         status: 403,
         statusText: "",
-        text: async () => JSON.stringify({ detail: "Business is inactive" }),
+        text: async () => JSON.stringify({ detail: "This business has been deactivated. Contact support to reactivate it." }),
       };
     });
     renderWithProvider();

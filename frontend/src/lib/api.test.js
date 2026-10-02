@@ -641,10 +641,10 @@ describe("api", () => {
 
     it("still prefers the server's own detail over the generic message", async () => {
       global.fetch.mockResolvedValueOnce(
-        jsonResponse({ detail: "Business is inactive" }, { status: 403 }),
+        jsonResponse({ detail: "This business has been deactivated. Contact support to reactivate it." }, { status: 403 }),
       );
 
-      await expect(api.me()).rejects.toThrow("Business is inactive");
+      await expect(api.me()).rejects.toThrow("This business has been deactivated. Contact support to reactivate it.");
     });
 
     it("names a rate limit as one", async () => {

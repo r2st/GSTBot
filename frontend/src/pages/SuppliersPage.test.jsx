@@ -696,10 +696,10 @@ describe("SuppliersPage", () => {
   });
 
   it("surfaces an API failure", async () => {
-    mockApi({ fail: { status: 403, message: "Business is inactive" } });
+    mockApi({ fail: { status: 403, message: "This business has been deactivated. Contact support to reactivate it." } });
     renderPage();
 
-    expect(await screen.findByText("Business is inactive")).toBeInTheDocument();
+    expect(await screen.findByText("This business has been deactivated. Contact support to reactivate it.")).toBeInTheDocument();
   });
 
   /**

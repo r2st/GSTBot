@@ -137,7 +137,8 @@ def get_active_tenant(
     business = db.get(Business, business_id)
     if business is None or not business.is_reachable:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Business is inactive"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This business has been deactivated. Contact support to reactivate it.",
         )
     # The business *acted for* and the role acted *with*, not the login's own.
     # A linked accountant recording a client's filing is the case the access
