@@ -26,14 +26,14 @@ describe("LandingPage", () => {
   it("shows the headline in serif font", () => {
     renderLanding();
 
-    expect(screen.getByText("GST compliance, automated.")).toBeInTheDocument();
+    expect(screen.getByText("GST filing made simple.")).toBeInTheDocument();
   });
 
   it("shows the monospace subtitle", () => {
     renderLanding();
 
     expect(
-      screen.getByText(/AI-powered GST filing, invoice matching/),
+      screen.getByText(/Upload your invoices/),
     ).toBeInTheDocument();
   });
 
@@ -46,22 +46,27 @@ describe("LandingPage", () => {
     expect(screen.getByText("File")).toBeInTheDocument();
   });
 
-  it("renders the auth form with sign-in tab active by default", () => {
+  it("renders the auth form with create-account tab active by default", () => {
     renderLanding();
 
     const signIn = screen.getByRole("tab", { name: "Sign in" });
     const create = screen.getByRole("tab", { name: "Create account" });
-    expect(signIn).toHaveAttribute("aria-selected", "true");
-    expect(create).toHaveAttribute("aria-selected", "false");
+    expect(create).toHaveAttribute("aria-selected", "true");
+    expect(signIn).toHaveAttribute("aria-selected", "false");
   });
 
-  it("switches to the registration form on the Create account tab", async () => {
+  it("shows the registration fields by default", () => {
     renderLanding();
-
-    await userEvent.click(screen.getByRole("tab", { name: "Create account" }));
 
     expect(screen.getByLabelText(/GSTIN/)).toBeInTheDocument();
     expect(screen.getByLabelText("Legal name")).toBeInTheDocument();
+  });
+
+  it("shows pricing hints", () => {
+    renderLanding();
+
+    expect(screen.getByText("Free forever")).toBeInTheDocument();
+    expect(screen.getByText(/499/)).toBeInTheDocument();
   });
 
   it("renders the footer with all DoAide product links", () => {

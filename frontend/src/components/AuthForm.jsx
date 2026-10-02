@@ -15,7 +15,7 @@ const EMPTY = {
 };
 
 export default function AuthForm() {
-  const [mode, setMode] = useState("login");
+  const [mode, setMode] = useState("register");
   const [form, setForm] = useState(EMPTY);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);

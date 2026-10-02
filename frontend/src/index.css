@@ -254,7 +254,7 @@ a {
 }
 .btn-primary {
   background: var(--brand);
-  color: #fff;
+  color: #0A0A0B;
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--brand-dark);
@@ -645,6 +645,30 @@ select[aria-invalid="true"]:focus {
 .landing-pipeline svg {
   width: 100%;
   height: auto;
+}
+
+/* Pricing hints */
+.landing-features {
+  display: flex;
+  gap: 16px;
+  margin-top: 24px;
+}
+.landing-feature {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 14px;
+  border: 1px solid rgba(240, 180, 41, 0.2);
+  border-radius: 10px;
+  background: rgba(240, 180, 41, 0.04);
+  font-size: 13px;
+}
+.landing-feature strong {
+  color: var(--accent, #F0B429);
+  font-size: 14px;
+}
+.landing-feature span {
+  color: rgba(255, 255, 255, 0.5);
 }
 
 /* Auth tabs */

@@ -15,10 +15,10 @@ const DOAIDE_PRODUCTS = [
 ];
 
 const TYPEWRITER_PHRASES = [
-  "Smart invoice matching",
-  "Automated GST returns",
-  "Real-time reconciliation",
-  "AI-powered compliance",
+  "Upload invoices, get ITC",
+  "Never miss a filing deadline",
+  "Know which suppliers filed",
+  "GSTR-1 and 3B ready to file",
 ];
 
 function RobotFace({ size = 32, color }) {
@@ -215,14 +215,25 @@ export default function LandingPage() {
           <div className="landing-hero-robot-wrap">
             <HeroRobot color="#F0B429" />
           </div>
-          <h1 className="landing-headline">GST compliance, automated.</h1>
+          <h1 className="landing-headline">GST filing made simple.</h1>
           <p className="landing-subtitle">
-            AI-powered GST filing, invoice matching, and reconciliation for Indian businesses.
+            Upload your invoices. We match them with GSTR-2B, calculate your ITC,
+            and prepare your returns — so you file on time, every time.
           </p>
           <div className="landing-typewriter-wrap">
             <Typewriter phrases={TYPEWRITER_PHRASES} />
           </div>
           <PipelineGraphic />
+          <div className="landing-features">
+            <div className="landing-feature">
+              <strong>Free forever</strong>
+              <span>50 invoices/month, full features</span>
+            </div>
+            <div className="landing-feature">
+              <strong>From ₹499/mo</strong>
+              <span>500+ invoices, priority support</span>
+            </div>
+          </div>
         </div>
 
         <div className="landing-right">
