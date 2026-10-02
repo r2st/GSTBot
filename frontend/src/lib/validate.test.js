@@ -457,8 +457,12 @@ describe("registrationErrors", () => {
     expect(registrationErrors({ ...good, gstin: "27AAPFU" }).gstin).toContain("15 characters");
   });
 
-  it("requires a legal name, since it appears on the returns", () => {
+  it("requires a legal name when a GSTIN is provided", () => {
     expect(registrationErrors({ ...good, legal_name: "   " }).legal_name).toContain("required");
+  });
+
+  it("allows a blank legal name when no GSTIN is given", () => {
+    expect(registrationErrors({ ...good, gstin: "", legal_name: "" }).legal_name).toBeUndefined();
   });
 
   it("enforces the server's password minimum", () => {
@@ -474,7 +478,6 @@ describe("registrationErrors", () => {
     // it — which is 9 characters long, and would pass the password rule.
     expect(registrationErrors({})).toEqual({
       email: "Enter your email.",
-      legal_name: "Legal name is required — it is what appears on your returns.",
       password: "Use at least 8 characters.",
     });
   });

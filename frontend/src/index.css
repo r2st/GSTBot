@@ -443,6 +443,24 @@ select[aria-invalid="true"]:focus {
   margin-top: 16px;
   transition: background 150ms ease;
 }
+.auth-gstin-toggle {
+  background: none;
+  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.4);
+  cursor: pointer;
+  margin-top: 8px;
+  transition: border-color 150ms ease, color 150ms ease;
+  text-align: center;
+  width: 100%;
+}
+.auth-gstin-toggle:hover {
+  border-color: rgba(240, 180, 41, 0.4);
+  color: #F0B429;
+}
 .auth-submit:hover:not(:disabled) {
   background: #F7D070 !important;
 }

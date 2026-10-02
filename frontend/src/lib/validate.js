@@ -527,8 +527,8 @@ export function registrationErrors(form) {
   if (!email) errors.email = "Enter your email.";
   else if (!EMAIL_SHAPE.test(email)) errors.email = "That does not look like an email address.";
 
-  if (!String(form.legal_name ?? "").trim()) {
-    errors.legal_name = "Legal name is required — it is what appears on your returns.";
+  if (form.gstin && form.gstin.trim() && !String(form.legal_name ?? "").trim()) {
+    errors.legal_name = "Legal name is required when registering with a GSTIN.";
   }
   if (String(form.password ?? "").length < 8) {
     errors.password = "Use at least 8 characters.";

@@ -21,6 +21,7 @@ export default function AuthForm() {
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState({});
   const [gstinCheck, setGstinCheck] = useState(null);
+  const [showGstin, setShowGstin] = useState(false);
   const asked = useRef("");
 
   const { login, register } = useAuth();
@@ -32,6 +33,7 @@ export default function AuthForm() {
     setError("");
     setFieldErrors({});
     setGstinCheck(null);
+    setShowGstin(false);
     asked.current = "";
   }
 
@@ -94,7 +96,7 @@ export default function AuthForm() {
           email: form.email,
           password: form.password,
           gstin: form.gstin.trim() ? form.gstin.replace(/\s/g, "").toUpperCase() : null,
-          legal_name: form.legal_name,
+          legal_name: form.legal_name || null,
           trade_name: form.trade_name || null,
           full_name: form.full_name || null,
         });
@@ -135,71 +137,6 @@ export default function AuthForm() {
       <ErrorBanner message={error} onDismiss={() => setError("")} />
 
       <form onSubmit={handleSubmit} className="auth-form" noValidate>
-        {registering && (
-          <>
-            <label htmlFor="gstin">GSTIN (optional)</label>
-            <input
-              id="gstin"
-              name="gstin"
-              autoComplete="off"
-              spellCheck="false"
-              placeholder="27AAPFU0939F1ZV"
-              value={form.gstin}
-              aria-invalid={fieldErrors.gstin ? true : undefined}
-              aria-describedby={fieldErrors.gstin ? "gstin-error" : undefined}
-              onChange={(e) => {
-                update("gstin", e.target.value);
-                checkGstin(e.target.value);
-              }}
-            />
-            {fieldErrors.gstin ? (
-              <p className="field-error" id="gstin-error" role="alert">
-                {fieldErrors.gstin}
-              </p>
-            ) : (
-              gstinCheck && (
-                <p className={gstinCheck.valid ? "field-hint is-good" : "field-hint is-bad"}>
-                  {gstinCheck.valid
-                    ? `Valid — ${gstinCheck.state_name} (PAN ${gstinCheck.pan})`
-                    : gstinCheck.error}
-                </p>
-              )
-            )}
-
-            <label htmlFor="legal_name">Legal name</label>
-            <input
-              id="legal_name"
-              name="legal_name"
-              required
-              value={form.legal_name}
-              aria-invalid={fieldErrors.legal_name ? true : undefined}
-              aria-describedby={fieldErrors.legal_name ? "legal_name-error" : undefined}
-              onChange={(e) => update("legal_name", e.target.value)}
-            />
-            {fieldErrors.legal_name && (
-              <p className="field-error" id="legal_name-error" role="alert">
-                {fieldErrors.legal_name}
-              </p>
-            )}
-
-            <label htmlFor="trade_name">Trade name (optional)</label>
-            <input
-              id="trade_name"
-              name="trade_name"
-              value={form.trade_name}
-              onChange={(e) => update("trade_name", e.target.value)}
-            />
-
-            <label htmlFor="full_name">Your name (optional)</label>
-            <input
-              id="full_name"
-              name="full_name"
-              value={form.full_name}
-              onChange={(e) => update("full_name", e.target.value)}
-            />
-          </>
-        )}
-
         <label htmlFor="email">Email</label>
         <input
           id="email"
@@ -237,6 +174,67 @@ export default function AuthForm() {
           </p>
         ) : (
           registering && <p className="field-hint">At least 8 characters.</p>
+        )}
+
+        {registering && (
+          <>
+            {!showGstin ? (
+              <button
+                type="button"
+                className="auth-gstin-toggle"
+                onClick={() => setShowGstin(true)}
+              >
+                Have a GSTIN? Add it now
+              </button>
+            ) : (
+              <>
+                <label htmlFor="gstin">GSTIN (optional)</label>
+                <input
+                  id="gstin"
+                  name="gstin"
+                  autoComplete="off"
+                  spellCheck="false"
+                  placeholder="27AAPFU0939F1ZV"
+                  value={form.gstin}
+                  aria-invalid={fieldErrors.gstin ? true : undefined}
+                  aria-describedby={fieldErrors.gstin ? "gstin-error" : undefined}
+                  onChange={(e) => {
+                    update("gstin", e.target.value);
+                    checkGstin(e.target.value);
+                  }}
+                />
+                {fieldErrors.gstin ? (
+                  <p className="field-error" id="gstin-error" role="alert">
+                    {fieldErrors.gstin}
+                  </p>
+                ) : (
+                  gstinCheck && (
+                    <p className={gstinCheck.valid ? "field-hint is-good" : "field-hint is-bad"}>
+                      {gstinCheck.valid
+                        ? `Valid — ${gstinCheck.state_name} (PAN ${gstinCheck.pan})`
+                        : gstinCheck.error}
+                    </p>
+                  )
+                )}
+
+                <label htmlFor="legal_name">Legal name (optional)</label>
+                <input
+                  id="legal_name"
+                  name="legal_name"
+                  value={form.legal_name}
+                  aria-invalid={fieldErrors.legal_name ? true : undefined}
+                  aria-describedby={fieldErrors.legal_name ? "legal_name-error" : undefined}
+                  onChange={(e) => update("legal_name", e.target.value)}
+                />
+                {fieldErrors.legal_name && (
+                  <p className="field-error" id="legal_name-error" role="alert">
+                    {fieldErrors.legal_name}
+                  </p>
+                )}
+                <p className="field-hint">You can add these later from Settings.</p>
+              </>
+            )}
+          </>
         )}
 
         <button type="submit" className="auth-submit" disabled={busy}>

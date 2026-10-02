@@ -55,11 +55,20 @@ describe("LandingPage", () => {
     expect(signIn).toHaveAttribute("aria-selected", "false");
   });
 
-  it("shows the registration fields by default", () => {
+  it("shows a toggle to add GSTIN rather than fields upfront", () => {
     renderLanding();
 
+    expect(screen.getByText(/Have a GSTIN/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/GSTIN/)).not.toBeInTheDocument();
+  });
+
+  it("reveals GSTIN fields when the toggle is clicked", async () => {
+    renderLanding();
+
+    await userEvent.click(screen.getByText(/Have a GSTIN/));
+
     expect(screen.getByLabelText(/GSTIN/)).toBeInTheDocument();
-    expect(screen.getByLabelText("Legal name")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Legal name/)).toBeInTheDocument();
   });
 
   it("shows pricing hints", () => {
