@@ -205,7 +205,7 @@ export default function LandingPage() {
         <a href="https://doaide.com" className="landing-brand">
           <RobotFace size={28} color="#F0B429" />
           <span className="landing-brand-text">
-            Do<em>Aide</em> GST
+            DoAide <em>GST</em>
           </span>
         </a>
       </header>

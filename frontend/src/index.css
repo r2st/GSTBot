@@ -549,7 +549,10 @@ select[aria-invalid="true"]:focus {
   z-index: 10;
   display: flex;
   align-items: center;
-  padding: 20px 32px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 20px 24px;
   opacity: 0;
   animation: landing-fade-in 0.6s ease forwards;
 }
@@ -565,8 +568,9 @@ select[aria-invalid="true"]:focus {
   color: var(--ink);
 }
 .landing-brand-text {
-  font-size: 18px;
-  font-weight: 600;
+  font-family: 'Instrument Serif', Georgia, serif;
+  font-size: 24px;
+  font-weight: 400;
   letter-spacing: -0.3px;
 }
 .landing-brand-text em {
