@@ -1,10 +1,11 @@
 """Structured logging on error and summary paths carries correlation fields.
 
-GB003 rounds 2–3: every log line that names a business, an invoice or a task
+GB003 rounds 2–4: every log line that names a business, an invoice or a task
 must carry that id as a structured ``extra`` field so a log aggregator can
 filter on it without parsing the message string. Round 3 added success lines
 for filing and GSTR-2B import, and the recipient field on alert delivery
-failures.
+failures. Round 4 eliminated silent catch blocks and added structured fields
+to model-fallback warnings.
 """
 from __future__ import annotations
 
@@ -331,3 +332,84 @@ class TestTaskFailureLinesAreStructured:
         ]
         assert errors
         assert hasattr(errors[0], "celery_task_id")
+
+
+# ── Silent catch elimination ─────────────────────────────────────────
+
+class TestRateLimitResetLogsOnFailure:
+    def test_a_redis_error_is_logged_not_swallowed(self, monkeypatch, caplog):
+        from app.core import rate_limit, redis_client
+
+        class _BadClient:
+            def scan_iter(self, *a, **kw):
+                raise ConnectionError("Redis gone")
+
+        monkeypatch.setattr(redis_client, "get_redis", lambda: _BadClient())
+
+        with caplog.at_level(logging.WARNING, logger="app.core.rate_limit"):
+            rate_limit.reset()
+
+        warnings = [
+            r for r in caplog.records
+            if r.name == "app.core.rate_limit"
+            and r.levelno >= logging.WARNING
+            and "clear" in r.message.lower()
+        ]
+        assert warnings, "reset() must log on Redis failure"
+
+
+class TestPoolStatusLogsOnCounterFailure:
+    def test_an_unavailable_counter_is_logged_at_debug(self, monkeypatch, caplog):
+        from app.core import database
+
+        class _BadPool:
+            __name__ = "BadPool"
+            def size(self):
+                raise RuntimeError("counter unavailable")
+            def checkedin(self):
+                return 1
+            def checkedout(self):
+                return 0
+            def overflow(self):
+                return 0
+
+        monkeypatch.setattr(database.engine, "pool", _BadPool())
+
+        with caplog.at_level(logging.DEBUG, logger="app.core.database"):
+            database.pool_status()
+
+        debug_lines = [
+            r for r in caplog.records
+            if r.name == "app.core.database"
+            and r.levelno == logging.DEBUG
+            and "unavailable" in r.message.lower()
+        ]
+        assert debug_lines, "pool_status must log when a counter fails"
+
+
+# ── Model fallback carries structured fields ─────────────────────────
+
+class TestModelFallbackLogsCarryStructuredFields:
+    def test_the_fallback_warning_has_content_type_and_model(self, monkeypatch, caplog):
+        from app.services import invoice_parser
+        from app.services.openrouter_client import OpenRouterError
+
+        monkeypatch.setattr(invoice_parser, "is_configured", lambda: True)
+        monkeypatch.setattr(
+            invoice_parser,
+            "parse_with_model",
+            lambda **kw: (_ for _ in ()).throw(OpenRouterError("rate limited")),
+        )
+
+        with caplog.at_level(logging.WARNING, logger="app.services.invoice_parser"):
+            invoice_parser.parse_invoice(text="INV-001 GSTIN 07AAGCA1234B1ZK total 1000")
+
+        warnings = [
+            r for r in caplog.records
+            if r.name == "app.services.invoice_parser"
+            and r.levelno >= logging.WARNING
+            and "falling back" in r.message.lower()
+        ]
+        assert warnings, "No model-fallback warning emitted"
+        assert hasattr(warnings[0], "model"), "warning must carry model as extra"
+        assert hasattr(warnings[0], "content_type"), "warning must carry content_type as extra"

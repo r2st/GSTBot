@@ -1714,7 +1714,10 @@ def parse_invoice(
             elif body:
                 parsed = parse_with_model(text=body)
         except OpenRouterError as exc:
-            logger.warning("Model extraction failed, falling back: %s", exc)
+            logger.warning(
+                "Model extraction failed, falling back: %s", exc,
+                extra={"content_type": content_type, "model": settings.openrouter_model},
+            )
 
     if parsed is None and treat_as_image and content is not None:
         # No model, or the model failed: OCR the image so the heuristics have
@@ -1727,7 +1730,10 @@ def parse_invoice(
                     parsed = parse_with_model(text=body)
                     parsed.parsed_with = f"tesseract+{parsed.parsed_with}"
                 except OpenRouterError as exc:
-                    logger.warning("Model extraction after OCR failed: %s", exc)
+                    logger.warning(
+                        "Model extraction after OCR failed: %s", exc,
+                        extra={"content_type": content_type, "model": settings.openrouter_model},
+                    )
 
     heuristic = parse_heuristic(body)
     if parsed is None:

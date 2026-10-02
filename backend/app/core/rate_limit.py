@@ -344,5 +344,5 @@ def reset() -> None:
         keys = list(client.scan_iter("ratelimit:*", count=500))
         if keys:
             client.delete(*keys)
-    except Exception:  # noqa: BLE001 - best effort
-        pass
+    except Exception as exc:  # noqa: BLE001 - best effort
+        logger.warning("Could not clear rate-limit keys: %s", exc)

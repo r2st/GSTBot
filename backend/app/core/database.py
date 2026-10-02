@@ -147,6 +147,7 @@ def pool_status() -> dict[str, int | str]:
             continue
         try:
             status[name] = int(getter())  # type: ignore[call-overload]
-        except Exception:  # noqa: BLE001 - a counter must not break health
+        except Exception as exc:  # noqa: BLE001 - a counter must not break health
+            logger.debug("Pool counter %r unavailable: %s", name, exc)
             continue
     return status
