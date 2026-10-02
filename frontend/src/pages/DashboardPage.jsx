@@ -195,7 +195,8 @@ export default function DashboardPage() {
           <h1>Dashboard</h1>
           {data && (
             <p className="muted">
-              {data.business_name} · {data.business_gstin}
+              {data.business_name}
+              {data.business_gstin && ` · ${data.business_gstin}`}
             </p>
           )}
         </div>

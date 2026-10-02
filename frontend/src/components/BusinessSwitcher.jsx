@@ -175,7 +175,7 @@ export default function BusinessSwitcher() {
         <span className="shell-business-name">
           {current.trade_name || current.legal_name}
         </span>
-        <span className="shell-gstin">{current.gstin}</span>
+        {current.gstin && <span className="shell-gstin">{current.gstin}</span>}
         {/* Constant, because `aria-expanded` above is what announces open and
             closed. A label that changed with the state said it twice, and left
             the control with no stable name to refer to it by. */}
@@ -213,7 +213,7 @@ export default function BusinessSwitcher() {
                       {business.trade_name || business.legal_name}
                       {business.is_home && <span className="muted small"> · your own</span>}
                     </span>
-                    <span className="shell-gstin">{business.gstin}</span>
+                    {business.gstin && <span className="shell-gstin">{business.gstin}</span>}
                   </button>
                   {/* Never offered for the login's own tenant: there is no
                       membership behind it to revoke, and the server refuses it.
