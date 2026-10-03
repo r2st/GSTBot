@@ -172,7 +172,7 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> Registe
 
     logger.info(
         "Business registered",
-        extra={"business_id": business.id, "gstin": business.gstin, "user_id": user.id},
+        extra={"business_id": business.id, "user_id": user.id},
     )
 
     return RegisterResponse(
