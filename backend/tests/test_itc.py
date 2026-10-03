@@ -1811,6 +1811,74 @@ def test_turnover_split_ignores_a_sale_whose_extraction_failed(db_session, busin
     assert total == Decimal("100000.00")
 
 
+def test_combined_outward_tax_and_turnover_matches_the_separate_calls(db_session, business):
+    """The fused query must produce byte-identical results to the two it replaced."""
+    db_session.add_all(
+        [
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.PARSED,
+                invoice_number="S-1",
+                period=PERIOD,
+                taxable_value=Decimal("100000.00"),
+                igst=Decimal("18000.00"),
+                total_value=Decimal("118000.00"),
+            ),
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.PARSED,
+                invoice_number="S-2",
+                period=PERIOD,
+                taxable_value=Decimal("50000.00"),
+                cgst=Decimal("4500.00"),
+                sgst=Decimal("4500.00"),
+                cess=Decimal("100.00"),
+                total_value=Decimal("59100.00"),
+            ),
+            # Exempt supply: non-zero taxable, all tax heads zero.
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.PARSED,
+                invoice_number="S-3",
+                period=PERIOD,
+                taxable_value=Decimal("25000.00"),
+                total_value=Decimal("25000.00"),
+            ),
+            # Failed — should be excluded by both paths.
+            Invoice(
+                business_id=business.id,
+                invoice_type=InvoiceType.SALES,
+                status=InvoiceStatus.FAILED,
+                invoice_number="S-4",
+                period=PERIOD,
+                taxable_value=Decimal("999999.00"),
+                igst=Decimal("180000.00"),
+                total_value=Decimal("1179999.00"),
+            ),
+        ]
+    )
+    db_session.commit()
+
+    output_tax_separate = itc_service._outward_tax(db_session, business.id, PERIOD)
+    exempt_separate, total_separate = itc_service.turnover_split(
+        db_session, business.id, PERIOD
+    )
+
+    output_tax_combined, exempt_combined, total_combined = (
+        itc_service._outward_tax_and_turnover(db_session, business.id, PERIOD)
+    )
+
+    assert output_tax_combined.igst == output_tax_separate.igst
+    assert output_tax_combined.cgst == output_tax_separate.cgst
+    assert output_tax_combined.sgst == output_tax_separate.sgst
+    assert output_tax_combined.cess == output_tax_separate.cess
+    assert exempt_combined == exempt_separate
+    assert total_combined == total_separate
+
+
 def test_a_failed_sale_does_not_make_the_business_pay_cash(db_session, business):
     """The end of the chain: an inflated liability is cash out of the door."""
     save(db_session, business.id, invoice_number="A-1")  # ₹18,000 of credit.

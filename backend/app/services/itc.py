@@ -30,7 +30,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.models.invoice import UNCOUNTABLE_STATUSES, Invoice, InvoiceType
@@ -880,6 +880,52 @@ def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal,
     return exempt, total
 
 
+def _outward_tax_and_turnover(
+    db: Session, business_id: int, period: str
+) -> tuple[TaxHeads, Decimal, Decimal]:
+    """Output tax, exempt turnover and total turnover in one scan.
+
+    ``_outward_tax`` and ``turnover_split`` read the same rows with the same
+    predicate.  Called separately inside ``summarise``, every period's ITC
+    position cost two full scans of the sales register where one suffices.
+    """
+    tax_col = Invoice.igst + Invoice.cgst + Invoice.sgst + Invoice.cess
+
+    row = db.execute(
+        select(
+            func.coalesce(func.sum(Invoice.igst), 0),
+            func.coalesce(func.sum(Invoice.cgst), 0),
+            func.coalesce(func.sum(Invoice.sgst), 0),
+            func.coalesce(func.sum(Invoice.cess), 0),
+            func.coalesce(func.sum(Invoice.taxable_value), 0),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (and_(tax_col == 0, Invoice.taxable_value > 0), Invoice.taxable_value),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+        ).where(
+            Invoice.business_id == business_id,
+            Invoice.deleted_at.is_(None),
+            Invoice.invoice_type == InvoiceType.SALES,
+            Invoice.period == period,
+            Invoice.status.not_in(UNCOUNTABLE_STATUSES),
+        )
+    ).one()
+    output_tax = TaxHeads(
+        igst=Decimal(str(row[0])),
+        cgst=Decimal(str(row[1])),
+        sgst=Decimal(str(row[2])),
+        cess=Decimal(str(row[3])),
+    )
+    total_turnover = Decimal(str(row[4]))
+    exempt_turnover = Decimal(str(row[5]))
+    return output_tax, exempt_turnover, total_turnover
+
+
 def _input_eligible(run) -> Decimal:
     """A run's eligible credit with the capital-goods share taken out.
 
@@ -931,7 +977,14 @@ def summarise(
     instalment and then nothing — see :func:`capital_goods_in_service`.
     """
     period_purchases = _purchases(db, business_id, period)
-    all_purchases = _purchases(db, business_id)
+    # Rule 37, Rule 43 and rule_37_reavailment each check ``claims_credit``
+    # and skip every invoice that fails it, so loading non-credit purchases
+    # is pure waste.  Narrowing in SQL keeps those rows off the wire and out
+    # of the session entirely.
+    all_purchases = _purchases(
+        db, business_id,
+        narrowed_by=(Invoice.itc_eligible.is_(True), Invoice.reverse_charge.is_(False)),
+    )
 
     last_run = reconciliation.latest_completed_run(db, business_id, period)
 
@@ -987,7 +1040,7 @@ def summarise(
 
     rule_37_result = rule_37(all_purchases, as_of=as_of)
 
-    exempt, total = turnover_split(db, business_id, period)
+    output_tax, exempt, total = _outward_tax_and_turnover(db, business_id, period)
     if exempt_turnover is not None:
         exempt = exempt_turnover
     if total_turnover is not None:
@@ -1036,8 +1089,6 @@ def summarise(
         cess=max(ZERO, available.cess + proportionate.capital_credit_this_month.cess
                  + reverse_charge.credit.cess + reavailment.cess - reversal.cess),
     )
-
-    output_tax = _outward_tax(db, business_id, period)
 
     return ITCSummary(
         period=period,
