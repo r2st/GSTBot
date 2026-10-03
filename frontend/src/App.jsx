@@ -4,6 +4,10 @@ import Shell from "./components/Shell";
 import { SkeletonPanel } from "./components/Skeleton";
 import { useAuth } from "./hooks/useAuth";
 import AlertsPage from "./pages/AlertsPage";
+import BlogLayout, { BlogIndex } from "./pages/BlogLayout";
+import GstComplianceChecklist from "./pages/blog/GstComplianceChecklist";
+import GstFilingGuide from "./pages/blog/GstFilingGuide";
+import HsnCodeLookup from "./pages/blog/HsnCodeLookup";
 import DashboardPage from "./pages/DashboardPage";
 import FilingPage from "./pages/FilingPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
@@ -77,6 +81,12 @@ export default function App() {
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route path="/pricing" element={<PricingPage />} />
+      <Route path="/blog" element={<BlogLayout />}>
+        <Route index element={<BlogIndex />} />
+        <Route path="gst-filing-guide-india-2026" element={<GstFilingGuide />} />
+        <Route path="hsn-code-lookup" element={<HsnCodeLookup />} />
+        <Route path="gst-compliance-checklist-small-business" element={<GstComplianceChecklist />} />
+      </Route>
       <Route path="/" element={<Home />} />
       <Route
         path="/invoices"

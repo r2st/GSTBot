@@ -188,8 +188,151 @@ function ParticleField() {
   );
 }
 
+const FEATURES = [
+  {
+    title: "GSTR-2B Reconciliation",
+    desc: "Auto-match your purchase invoices against the GSTR-2B statement. Flag mismatches instantly.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="3" width="8" height="10" rx="1.5" />
+        <rect x="8" y="7" width="8" height="10" rx="1.5" />
+        <circle cx="19" cy="17" r="3.5" />
+        <line x1="21.5" y1="19.5" x2="23" y2="21" />
+      </svg>
+    ),
+  },
+  {
+    title: "ITC Calculator",
+    desc: "Calculate eligible Input Tax Credit automatically. Exclude blocked credits under Section 17(5).",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="4" y="2" width="16" height="20" rx="2" />
+        <line x1="8" y1="6" x2="16" y2="6" />
+        <line x1="8" y1="10" x2="16" y2="10" />
+        <line x1="8" y1="14" x2="12" y2="14" />
+        <path d="M14 16l2 2 4-4" />
+      </svg>
+    ),
+  },
+  {
+    title: "GST Return Filing",
+    desc: "Prepare GSTR-1 and GSTR-3B returns in minutes. Export-ready for the GST portal.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="8" y1="13" x2="16" y2="13" />
+        <line x1="8" y1="17" x2="13" y2="17" />
+      </svg>
+    ),
+  },
+  {
+    title: "Deadline Alerts",
+    desc: "Never miss a filing deadline. Get notified before GSTR-1 and GSTR-3B due dates.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M18 8A6 6 0 106 8c0 7-3 9-3 9h18s-3-2-3-9" />
+        <path d="M13.73 21a2 2 0 01-3.46 0" />
+      </svg>
+    ),
+  },
+  {
+    title: "Supplier Tracking",
+    desc: "Monitor supplier compliance scores. Know which suppliers file on time and which put your ITC at risk.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 00-3-3.87" />
+        <path d="M16 3.13a4 4 0 010 7.75" />
+      </svg>
+    ),
+  },
+  {
+    title: "AI Invoice Parsing",
+    desc: "Upload invoices in any format. AI extracts GSTIN, amounts, HSN codes, and tax breakup automatically.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+    ),
+  },
+];
+
+const HOW_IT_WORKS = [
+  { step: "1", title: "Upload invoices", desc: "Upload your sales and purchase invoices in any format — PDF, Excel, or structured data — or enter them manually." },
+  { step: "2", title: "Auto-reconcile", desc: "DoAide matches your invoices against GSTR-2B, flags mismatches, and calculates eligible ITC." },
+  { step: "3", title: "File returns", desc: "Download your prepared GSTR-1 and GSTR-3B, ready to submit on the GST portal." },
+];
+
+const TESTIMONIALS = [
+  { name: "Priya S.", role: "CA, Mumbai", quote: "DoAide GST cut our reconciliation time from 2 days to 20 minutes. The GSTR-2B matching is spot-on." },
+  { name: "Rahul M.", role: "Founder, textile exports", quote: "We were missing ITC on mismatched invoices every month. DoAide caught them all in the first run." },
+  { name: "Anita K.", role: "Accountant, retail chain", quote: "The free plan handles our monthly volume perfectly. Filing GSTR-3B used to be stressful — now it takes minutes." },
+];
+
+const FAQ_ITEMS = [
+  {
+    q: "What is GST and who needs to file GST returns?",
+    a: "GST is India’s indirect tax on goods and services. Every registered business must file GSTR-1 and GSTR-3B. Registration is mandatory above ₹40 lakhs turnover for goods.",
+  },
+  {
+    q: "How does GSTR-2B reconciliation work?",
+    a: "GSTR-2B lists your eligible ITC based on suppliers’ filings. Reconciliation matches your purchase invoices against it. DoAide automates this so you claim the right amount.",
+  },
+  {
+    q: "What is Input Tax Credit (ITC) and how is it calculated?",
+    a: "ITC lets you offset tax paid on purchases against your output liability. DoAide reconciles invoices with GSTR-2B and excludes blocked credits to calculate your eligible ITC.",
+  },
+  {
+    q: "Is DoAide GST really free?",
+    a: "Yes. All features are included free for up to 50 invoices per month — no credit card required. Paid plans start at ₹499/month for higher volumes.",
+  },
+  {
+    q: "What are HSN codes and why do they matter for GST?",
+    a: "HSN codes classify goods for tax purposes and determine the GST rate. Wrong codes cause tax and ITC mismatches. DoAide validates HSN codes on your invoices automatically.",
+  },
+  {
+    q: "What happens if I miss a GST filing deadline?",
+    a: "Late filing attracts ₹50/day penalty (capped at ₹5,000) plus 18% interest on unpaid tax. DoAide sends alerts before each deadline so you never miss one.",
+  },
+  {
+    q: "Can DoAide GST help with GST compliance for small businesses?",
+    a: "Yes. DoAide handles invoices, GSTR-2B reconciliation, ITC calculation, and return prep — built for Indian SMBs. The free plan covers most small businesses.",
+  },
+];
+
+function FaqSection() {
+  const [openIndex, setOpenIndex] = useState(null);
+
+  return (
+    <section className="landing-faq" aria-labelledby="faq-heading">
+      <h2 id="faq-heading" className="landing-section-title">Frequently Asked Questions</h2>
+      <dl className="landing-faq-list">
+        {FAQ_ITEMS.map((item, i) => (
+          <div key={i} className="landing-faq-item">
+            <dt>
+              <button
+                className="landing-faq-q"
+                aria-expanded={openIndex === i}
+                onClick={() => setOpenIndex(openIndex === i ? null : i)}
+              >
+                {item.q}
+                <span className="landing-faq-chevron" aria-hidden="true">{openIndex === i ? "−" : "+"}</span>
+              </button>
+            </dt>
+            {openIndex === i && <dd className="landing-faq-a">{item.a}</dd>}
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
 export default function LandingPage() {
-  usePageTitle("Free GST Filing Software India — GSTR-2B Reconciliation & ITC Calculator");
+  usePageTitle("Free AI-Powered GST Compliance Tool for Indian Businesses");
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -211,45 +354,112 @@ export default function LandingPage() {
         </a>
       </header>
 
-      <main className={`landing-split ${vis}`}>
-        <div className="landing-left">
-          <div className="landing-hero-robot-wrap">
-            <HeroRobot color="#F0B429" />
-          </div>
-          <h1 className="landing-headline">Free GST Filing Software for India</h1>
-          <p className="landing-subtitle">
-            Upload your invoices, auto-reconcile with GSTR-2B, and calculate your
-            Input Tax Credit — GSTR-1 and GSTR-3B returns prepared in minutes, not
-            hours. Free GST return filing online for Indian SMBs.
-          </p>
-          <div className="landing-typewriter-wrap">
-            <Typewriter phrases={TYPEWRITER_PHRASES} />
-          </div>
-          <PipelineGraphic />
-          <div className="landing-features">
-            <div className="landing-feature">
-              <strong>Free forever</strong>
-              <span>50 invoices/month, full GST compliance</span>
+      <main>
+        <div className={`landing-split ${vis}`}>
+          <div className="landing-left">
+            <div className="landing-hero-robot-wrap">
+              <HeroRobot color="#F0B429" />
             </div>
-            <div className="landing-feature">
-              <strong>From ₹499/mo</strong>
-              <span>500+ invoices, priority support</span>
+            <h1 className="landing-headline">Free AI-Powered GST Compliance for India</h1>
+            <p className="landing-subtitle">
+              Upload your invoices, auto-reconcile with GSTR-2B, and calculate your
+              Input Tax Credit — GSTR-1 and GSTR-3B returns prepared in minutes, not
+              hours. The free GST calculator and filing tool for Indian businesses.
+            </p>
+            <div className="landing-typewriter-wrap">
+              <Typewriter phrases={TYPEWRITER_PHRASES} />
             </div>
+            <PipelineGraphic />
+            <div className="landing-features">
+              <div className="landing-feature">
+                <strong>Free forever</strong>
+                <span>50 invoices/month, full GST compliance</span>
+              </div>
+              <div className="landing-feature">
+                <strong>From ₹499/mo</strong>
+                <span>500+ invoices, priority support</span>
+              </div>
+            </div>
+            <Link to="/pricing" className="landing-pricing-link">View all plans →</Link>
           </div>
-          <Link to="/pricing" className="landing-pricing-link">View all plans →</Link>
-          <p className="landing-seo-blurb">
-            Trusted by Indian SMBs for automated GST compliance — invoice
-            matching, supplier tracking, ITC reconciliation, and on-time return
-            filing.
-          </p>
+
+          <div className="landing-right">
+            <AuthForm />
+          </div>
         </div>
 
-        <div className="landing-right">
-          <AuthForm />
-        </div>
+        <section className="landing-section" aria-labelledby="features-heading">
+          <h2 id="features-heading" className="landing-section-title">Everything You Need for GST Compliance</h2>
+          <div className="landing-features-grid">
+            {FEATURES.map((f) => (
+              <div key={f.title} className="landing-feature-card">
+                <div className="landing-feature-icon">{f.icon}</div>
+                <h3>{f.title}</h3>
+                <p>{f.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="landing-section" aria-labelledby="how-heading">
+          <h2 id="how-heading" className="landing-section-title">How It Works</h2>
+          <div className="landing-steps">
+            {HOW_IT_WORKS.map((s) => (
+              <div key={s.step} className="landing-step">
+                <div className="landing-step-num">{s.step}</div>
+                <h3>{s.title}</h3>
+                <p>{s.desc}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="landing-section" aria-labelledby="testimonials-heading">
+          <h2 id="testimonials-heading" className="landing-section-title">Trusted by Indian Businesses</h2>
+          <div className="landing-testimonials">
+            {TESTIMONIALS.map((t) => (
+              <blockquote key={t.name} className="landing-testimonial">
+                <p>&ldquo;{t.quote}&rdquo;</p>
+                <footer>
+                  <strong>{t.name}</strong>
+                  <span>{t.role}</span>
+                </footer>
+              </blockquote>
+            ))}
+          </div>
+        </section>
+
+        <FaqSection />
+
+        <section className="landing-cta">
+          <h2>Start Filing GST Returns in Minutes</h2>
+          <p>Free forever for up to 50 invoices/month. No credit card required.</p>
+          <a href="#root" className="btn btn-primary landing-cta-btn" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+            Sign Up Free
+          </a>
+        </section>
       </main>
 
       <footer className="landing-footer">
+        <div className="landing-footer-nav">
+          <div className="landing-footer-col">
+            <h4>Product</h4>
+            <Link to="/pricing">Pricing</Link>
+            <a href="#features-heading" onClick={(e) => { e.preventDefault(); document.getElementById("features-heading")?.scrollIntoView({ behavior: "smooth" }); }}>Features</a>
+            <a href="#faq-heading" onClick={(e) => { e.preventDefault(); document.getElementById("faq-heading")?.scrollIntoView({ behavior: "smooth" }); }}>FAQ</a>
+          </div>
+          <div className="landing-footer-col">
+            <h4>Resources</h4>
+            <Link to="/blog">Blog</Link>
+            <Link to="/blog/gst-filing-guide-india-2026">GST Filing Guide</Link>
+            <Link to="/blog/hsn-code-lookup">HSN Code Lookup</Link>
+          </div>
+          <div className="landing-footer-col">
+            <h4>Company</h4>
+            <a href="https://doaide.com">About DoAide</a>
+            <a href="mailto:support@doaide.com">Contact</a>
+          </div>
+        </div>
         <div className="landing-footer-products">
           {DOAIDE_PRODUCTS.map((p) => (
             <a key={p.name} href={p.url} className="landing-footer-link">
