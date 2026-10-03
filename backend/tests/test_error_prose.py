@@ -59,6 +59,7 @@ JARGON = [
     "attributeerror", "serialization", "deserialization", "middleware",
     "endpoint", "payload", "stdout", "stderr", "regex", "utf-8", "mimetype",
     "internal server error", "bad request", "unprocessable entity",
+    "parse error", "must be an object", "must be an array",
 ]
 
 # A Python or SQL identifier that has escaped into prose: two lowercase words
@@ -283,6 +284,23 @@ class TestTheDomainExceptionsACallerActuallyReads:
         for message in parser_messages:
             assert "GST portal" in message, message
 
+    def test_every_parser_error_carries_guidance(self):
+        """A refusal with no next step is a dead end wearing an apology.
+
+        "The file is empty" and "No column headings found" passed the jargon
+        sweep but left the reader with nothing to do about them. Every message
+        the parser raises should suggest where to get a valid file or what
+        might have gone wrong — a bare observation is not enough.
+        """
+        messages = [
+            (where, message)
+            for where, message in _raised_messages({"GSTR2BParseError"})
+        ]
+        for where, message in messages:
+            assert len(message) >= 30, (
+                f"{where}: too terse to carry guidance — {message}"
+            )
+
 
 # ---------------------------------------------------------------------------
 # And the same standard, applied to what actually comes back over HTTP
@@ -406,6 +424,40 @@ class TestTheRefusalsARealSessionMeets:
         assert "reference" in message, message
         # The reference is only worth quoting if it is the one the log carries.
         assert response.json()["correlation_id"] in message
+
+    def test_unlinking_a_nonexistent_business_explains_the_problem(self, auth_client):
+        """A bare "Not linked." was the whole detail — two words and a stop.
+
+        It told the reader nothing they could act on: not which business, not
+        what "linked" meant, not what to do about it. The fix names the
+        relationship so the reader knows this is about linked businesses rather
+        than a general "not found".
+        """
+        response = auth_client.delete("/api/v1/businesses/mine/999999")
+        assert response.status_code == 404
+        for message in self._details(response):
+            assert_reads_as_prose(message, "DELETE /businesses/mine/{id}")
+            assert len(message) >= 20, f"too terse — {message}"
+
+    def test_a_malformed_gstr2b_upload_gives_guidance(self, auth_client):
+        """A message a user meets when the file has the wrong structure.
+
+        "GSTR-2B JSON must be an object" was jargon three times over — JSON,
+        "must be", and "an object" are all programming terms. The fix tells
+        the reader what to do (upload the portal download) rather than
+        describing the data shape.
+        """
+        import json as json_lib
+
+        content = json_lib.dumps([1, 2, 3]).encode()
+        response = auth_client.post(
+            "/api/v1/reconciliation/gstr2b/import",
+            files={"file": ("2b.json", content, "application/json")},
+        )
+        assert response.status_code == 422
+        for message in self._details(response):
+            assert_reads_as_prose(message, "GSTR-2B array upload")
+            assert "must be an object" not in message.lower(), message
 
     def test_the_gstin_lookup_explains_a_rejection_the_form_can_show(self, client):
         """Always a 200, so the sentence is in the body rather than a detail.

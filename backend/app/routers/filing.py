@@ -414,7 +414,7 @@ def export(
     if fmt not in ("json", "csv"):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Unknown format '{extension}'. Expected json or csv.",
+            detail=f"'{extension}' is not a supported export format. Use .json or .csv.",
         )
 
     filename = filing_service.filename_for(business, resolved, kind, fmt)

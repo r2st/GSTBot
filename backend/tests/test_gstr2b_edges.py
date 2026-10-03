@@ -213,7 +213,7 @@ class TestPeriodFormats:
 class TestMalformedJsonStructures:
     def test_a_json_array_is_rejected_with_a_readable_message(self):
         # A hand-built export sometimes ships just the b2b list.
-        with pytest.raises(GSTR2BParseError, match="must be an object"):
+        with pytest.raises(GSTR2BParseError, match="not a GSTR-2B download"):
             parse_json(json.dumps([{"ctin": SUPPLIER_GSTIN_OTHER_STATE}]))
 
     @pytest.mark.parametrize("junk", [None, "a string", 42, ["a", "list"]])

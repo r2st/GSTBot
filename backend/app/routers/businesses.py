@@ -221,6 +221,9 @@ def unlink_business(
         )
     )
     if membership is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not linked.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="That business is not linked to your account.",
+        )
     membership.soft_delete()
     db.commit()

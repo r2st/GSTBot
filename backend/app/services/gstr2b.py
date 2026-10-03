@@ -415,7 +415,10 @@ def parse_json(payload: dict | str | bytes) -> list[GSTR2BRecord]:
                 "from the GST portal."
             ) from exc
     if not isinstance(payload, dict):
-        raise GSTR2BParseError("GSTR-2B JSON must be an object")
+        raise GSTR2BParseError(
+            "This file is not a GSTR-2B download. Upload the unmodified "
+            "file from the GST portal."
+        )
 
     docdata = _unwrap_docdata(payload)
     fallback_period = _statement_period(payload)
@@ -551,12 +554,18 @@ def parse_csv(content: str | bytes) -> list[GSTR2BRecord]:
         content = content.decode("utf-8-sig", errors="replace")
     rows = [row for row in csv.reader(io.StringIO(content)) if any(cell.strip() for cell in row)]
     if not rows:
-        raise GSTR2BParseError("The file is empty")
+        raise GSTR2BParseError(
+            "The file has no data rows. It may still be downloading, or "
+            "it may be an empty export from the GST portal."
+        )
 
     header_index = _find_header_row(rows)
     headings = [_squash(cell) for cell in rows[header_index]]
     if not any(headings):
-        raise GSTR2BParseError("No column headings found")
+        raise GSTR2BParseError(
+            "No column headings found in the file. Expected a GSTR-2B "
+            "CSV export from the GST portal."
+        )
 
     mapped = {index: _CSV_COLUMNS[key] for index, key in enumerate(headings) if key in _CSV_COLUMNS}
     if "supplier_gstin" not in mapped.values():
@@ -766,7 +775,10 @@ def parse(content: bytes, filename: str | None = None) -> list[GSTR2BRecord]:
     they read, and this is the door every caller comes through.
     """
     if not content:
-        raise GSTR2BParseError("The uploaded file is empty")
+        raise GSTR2BParseError(
+            "The uploaded file is empty. It may still be downloading — "
+            "try again once the download finishes."
+        )
 
     text = content.decode("utf-8-sig", errors="replace")
     stripped = text.lstrip()
