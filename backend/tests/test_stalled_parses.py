@@ -174,6 +174,7 @@ class TestWhatIsLeftAlone:
             InvoiceStatus.MATCHED,
             InvoiceStatus.MISMATCHED,
             InvoiceStatus.MISSING_IN_2B,
+            InvoiceStatus.DUPLICATE,
         ],
     )
     def test_no_other_status_is_touched(self, db_session, business, status):
@@ -209,6 +210,30 @@ class TestWhatIsLeftAlone:
         _invoice(db_session, business, status=InvoiceStatus.PARSED, age_seconds=7200)
 
         assert reap_stalled_parses(db_session) == 0
+
+
+class TestConcurrencyGuard:
+    def test_a_row_parsed_between_select_and_update_keeps_its_status(
+        self, db_session, business
+    ):
+        """The UPDATE re-checks status=PROCESSING so a reparse that finishes
+        between the reaper's SELECT and UPDATE is not overwritten with FAILED."""
+        invoice = _invoice(db_session, business, status=InvoiceStatus.PARSED)
+
+        from sqlalchemy import update as sqla_update
+        db_session.execute(
+            sqla_update(Invoice)
+            .where(
+                Invoice.id.in_([invoice.id]),
+                Invoice.status == InvoiceStatus.PROCESSING,
+            )
+            .values(status=InvoiceStatus.FAILED, parse_error=STALLED_PARSE_MESSAGE)
+            .execution_options(synchronize_session=False)
+        )
+        db_session.commit()
+
+        db_session.refresh(invoice)
+        assert invoice.status is InvoiceStatus.PARSED
 
 
 class TestTheDeadline:

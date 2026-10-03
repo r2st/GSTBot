@@ -702,9 +702,16 @@ def reap_stalled_parses(
         db.scalars(select(Invoice.id).where(*stalled_filter)).all()
     )
     if stalled_ids:
+        # Re-check the status: a concurrent ``process_invoice`` or reparse
+        # may have moved the row out of PROCESSING between the SELECT above
+        # and this UPDATE.  Without the guard a successfully parsed invoice
+        # would be overwritten with FAILED.
         db.execute(
             update(Invoice)
-            .where(Invoice.id.in_(stalled_ids))
+            .where(
+                Invoice.id.in_(stalled_ids),
+                Invoice.status == InvoiceStatus.PROCESSING,
+            )
             .values(status=InvoiceStatus.FAILED, parse_error=STALLED_PARSE_MESSAGE)
             .execution_options(synchronize_session=False)
         )
