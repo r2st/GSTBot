@@ -17,6 +17,16 @@ def client():
 
 
 def test_google_login_redirects_when_configured(client):
+    from app.routers.oauth import oauth
+
+    if not hasattr(oauth, "_clients") or "google" not in oauth._clients:
+        oauth.register(
+            name="google",
+            client_id="test-id",
+            client_secret="test-secret",
+            server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+            client_kwargs={"scope": "openid email profile"},
+        )
     with patch.object(settings, "google_client_id", "test-id"):
         resp = client.get("/api/v1/auth/google", follow_redirects=False)
         assert resp.status_code in (302, 307, 200)
