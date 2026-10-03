@@ -133,6 +133,12 @@ class TestJsonFormatter:
         assert payload[key] == "[redacted]"
         assert "hunter2" not in json.dumps(payload)
 
+    @pytest.mark.parametrize("key", ["recipient", "email_address"])
+    def test_pii_fields_are_redacted_by_key_name(self, key):
+        payload = json.loads(JsonFormatter().format(_record(**{key: "owner@example.com"})))
+        assert payload[key] == "[redacted]"
+        assert "owner@example.com" not in json.dumps(payload)
+
     def test_redaction_is_case_insensitive(self):
         payload = json.loads(JsonFormatter().format(_record(Authorization="Bearer abc")))
         assert payload["Authorization"] == "[redacted]"

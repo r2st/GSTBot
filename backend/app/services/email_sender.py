@@ -170,7 +170,9 @@ def send_email(*, to: str, subject: str, body: str) -> None:
         try:
             _deliver(message)
         except (smtplib.SMTPException, OSError) as exc:
-            failure = EmailSendError(f"could not send to {to}: {exc}")
+            failure = EmailSendError(
+                f"email delivery failed after {attempt} attempt(s): {exc}"
+            )
             failure.__cause__ = exc
             if attempt == attempts or not _is_transient(exc):
                 raise failure from exc
@@ -182,14 +184,10 @@ def send_email(*, to: str, subject: str, body: str) -> None:
                 # recipient across every tenant. Failing now leaves the rows
                 # ``FAILED``, which tomorrow's run picks back up.
                 logger.warning(
-                    "SMTP retry for %s would exceed the %ss budget, giving up "
-                    "after attempt %s of %s",
-                    to,
-                    budget,
+                    "SMTP retry budget exceeded, giving up after attempt %s of %s",
                     attempt,
                     attempts,
                     extra={
-                        "recipient": to,
                         "attempt": attempt,
                         "attempts": attempts,
                         "waited_seconds": round(waited, 2),
@@ -199,13 +197,12 @@ def send_email(*, to: str, subject: str, body: str) -> None:
                 raise failure from exc
 
             logger.info(
-                "SMTP attempt %s of %s for %s failed, retrying in %.1fs: %s",
+                "SMTP attempt %s of %s failed, retrying in %.1fs: %s",
                 attempt,
                 attempts,
-                to,
                 delay,
                 exc,
-                extra={"recipient": to, "attempt": attempt, "attempts": attempts},
+                extra={"attempt": attempt, "attempts": attempts},
             )
             _sleep(delay)
             waited += delay
