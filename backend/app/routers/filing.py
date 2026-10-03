@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
@@ -27,6 +28,8 @@ from app.schemas.filing import (
 from app.services import filing as filing_service
 from app.services import gst_calendar, invoice_service
 from app.services import late_fee as late_fee_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/filing", tags=["filing"])
 
@@ -418,6 +421,16 @@ def export(
         )
 
     filename = filing_service.filename_for(business, resolved, kind, fmt)
+    logger.info(
+        "Filing export",
+        extra={
+            "business_id": business.id,
+            "period": resolved,
+            "return_type": kind,
+            "format": fmt,
+            "filename": filename,
+        },
+    )
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
 
     if fmt == "csv":
