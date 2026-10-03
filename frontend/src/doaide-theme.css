@@ -15,7 +15,6 @@
   --doaide-radius-sm: 6px; --doaide-radius-md: 8px; --doaide-radius-lg: 12px; --doaide-radius-xl: 16px;
   --doaide-transition: 150ms ease;
 }
-html { color-scheme: dark !important; }
 body { background-color: var(--doaide-bg) !important; color: var(--doaide-text) !important; font-family: var(--doaide-font) !important; -webkit-font-smoothing: antialiased; }
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--doaide-bg); }
@@ -43,3 +42,14 @@ nav, [class*="sidebar"], [class*="nav-"] { background-color: var(--doaide-bg) !i
 [class*="badge"] { background-color: var(--doaide-gold-bg) !important; color: var(--doaide-gold) !important; }
 ::selection { background-color: var(--doaide-gold) !important; color: var(--doaide-text-on-gold) !important; }
 [class*="backdrop"], [class*="overlay"] { background-color: rgba(0,0,0,0.7) !important; }
+
+[data-theme="light"] {
+  --doaide-bg: #FAFAFA; --doaide-bg-alt: #F4F4F5; --doaide-surface: #FFFFFF;
+  --doaide-surface-hover: #F0F0F1; --doaide-border: #E4E4E7; --doaide-border-light: #D4D4D8;
+  --doaide-gold-dim: #B8860B;
+  --doaide-text: #1A1A1D; --doaide-text-secondary: #52525B; --doaide-text-muted: #71717A;
+  --doaide-text-on-gold: #fff;
+  --doaide-success: #059669; --doaide-error: #DC2626; --doaide-warning: #D97706; --doaide-info: #2563EB;
+  --doaide-shadow-sm: 0 1px 2px rgba(0,0,0,0.06); --doaide-shadow-md: 0 4px 6px rgba(0,0,0,0.08);
+  --doaide-shadow-lg: 0 10px 15px rgba(0,0,0,0.1); --doaide-shadow-gold: 0 0 20px rgba(240,180,41,0.1);
+}

@@ -6,6 +6,7 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthProvider } from "./hooks/useAuth";
 import { PageTitleProvider } from "./hooks/usePageTitle";
 import { StateCodesProvider } from "./hooks/useStateCodes";
+import { ThemeProvider } from "./hooks/useTheme";
 import "./index.css";
 
 // Two boundaries, deliberately. This outer one is the last resort — it catches
@@ -22,16 +23,18 @@ import "./index.css";
 // keeping across a crash. It requests nothing until a screen asks it to.
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <PageTitleProvider>
-        <ErrorBoundary>
-          <StateCodesProvider>
-            <AuthProvider>
-              <App />
-            </AuthProvider>
-          </StateCodesProvider>
-        </ErrorBoundary>
-      </PageTitleProvider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <BrowserRouter>
+        <PageTitleProvider>
+          <ErrorBoundary>
+            <StateCodesProvider>
+              <AuthProvider>
+                <App />
+              </AuthProvider>
+            </StateCodesProvider>
+          </ErrorBoundary>
+        </PageTitleProvider>
+      </BrowserRouter>
+    </ThemeProvider>
   </React.StrictMode>,
 );

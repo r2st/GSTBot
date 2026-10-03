@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { useTheme } from "../hooks/useTheme";
 import { api } from "../lib/api";
 import BusinessSwitcher from "./BusinessSwitcher";
+import ThemeToggle from "./ThemeToggle";
 
 const LINKS = [
   { to: "/", label: "Dashboard", end: true },
@@ -129,11 +131,8 @@ export default function Shell({ children }) {
         </nav>
 
         <div className="shell-user">
-          {/* Was a static caption of the one business a login could ever act
-              for. It is the natural home for the switcher, because "which GSTIN
-              am I looking at" and "take me to the other one" are the same
-              question asked half a second apart. */}
           <BusinessSwitcher />
+          <ThemeToggle />
           <button type="button" className="btn btn-ghost" onClick={handleLogout}>
             Sign out
           </button>

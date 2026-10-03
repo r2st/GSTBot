@@ -7,19 +7,66 @@
 :root {
   --ink: #E5E7EB;
   --ink-soft: #9CA3AF;
+  --ink-strong: #fff;
+  --ink-faint: rgba(255, 255, 255, 0.35);
+  --ink-muted: rgba(255, 255, 255, 0.45);
   --line: #2A2A2D;
   --surface: #1A1A1D;
   --canvas: #0A0A0B;
   --brand: #F0B429;
   --brand-dark: #D4A017;
+  --brand-text: #0A0A0B;
+  --brand-hover: #F7D070;
   --good: #34D399;
   --warn: #FBBF24;
   --bad: #F87171;
   --good-bg: rgba(52, 211, 153, 0.12);
   --warn-bg: rgba(251, 191, 36, 0.12);
   --bad-bg: rgba(248, 113, 113, 0.12);
+  --glass: rgba(16, 16, 18, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-inset: rgba(255, 255, 255, 0.04);
+  --glass-input: rgba(10, 10, 11, 0.6);
+  --glass-input-border: rgba(255, 255, 255, 0.12);
+  --glass-input-placeholder: rgba(255, 255, 255, 0.25);
+  --glass-tab-border: rgba(255, 255, 255, 0.08);
+  --glass-feature-border: rgba(240, 180, 41, 0.2);
+  --glass-feature-bg: rgba(240, 180, 41, 0.04);
+  --scrim: rgba(16, 24, 42, 0.25);
+  --skeleton-mid: #2A2A2D;
   --radius: 10px;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] {
+  --ink: #1A1A1D;
+  --ink-soft: #52525B;
+  --ink-strong: #0A0A0B;
+  --ink-faint: rgba(0, 0, 0, 0.4);
+  --ink-muted: rgba(0, 0, 0, 0.5);
+  --line: #E4E4E7;
+  --surface: #F4F4F5;
+  --canvas: #FAFAFA;
+  --brand-text: #fff;
+  --brand-hover: #D4A017;
+  --good: #059669;
+  --warn: #D97706;
+  --bad: #DC2626;
+  --good-bg: rgba(5, 150, 105, 0.08);
+  --warn-bg: rgba(217, 119, 6, 0.08);
+  --bad-bg: rgba(220, 38, 38, 0.08);
+  --glass: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.08);
+  --glass-inset: rgba(0, 0, 0, 0.03);
+  --glass-input: rgba(255, 255, 255, 0.7);
+  --glass-input-border: rgba(0, 0, 0, 0.15);
+  --glass-input-placeholder: rgba(0, 0, 0, 0.35);
+  --glass-tab-border: rgba(0, 0, 0, 0.1);
+  --glass-feature-border: rgba(180, 130, 10, 0.25);
+  --glass-feature-bg: rgba(240, 180, 41, 0.06);
+  --scrim: rgba(0, 0, 0, 0.15);
+  --skeleton-mid: #E4E4E7;
+  --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 * {
@@ -32,6 +79,7 @@ body {
   color: var(--ink);
   font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
     sans-serif;
+  transition: background-color 200ms ease, color 200ms ease;
 }
 
 h1 {
@@ -98,11 +146,11 @@ a {
   font-family: var(--doaide-font-display, "Instrument Serif", Georgia, serif);
   font-size: 1.2rem;
   font-weight: 400;
-  color: #fff;
+  color: var(--ink-strong);
 }
 .brand-accent {
   font-style: italic;
-  color: #F0B429;
+  color: var(--brand);
 }
 .shell-nav {
   display: flex;
@@ -117,7 +165,7 @@ a {
 }
 .nav-link.is-active {
   background: rgba(240, 180, 41, 0.12);
-  color: #F0B429;
+  color: var(--brand);
   font-weight: 600;
 }
 .nav-badge {
@@ -129,7 +177,7 @@ a {
   padding: 0 0.35rem;
   margin-left: 0.35rem;
   border-radius: 9999px;
-  background: var(--red, #e53e3e);
+  background: var(--bad);
   color: #fff;
   font-size: 0.65rem;
   font-weight: 700;
@@ -139,6 +187,14 @@ a {
   display: flex;
   align-items: center;
   gap: 1rem;
+}
+.theme-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.4rem;
+  min-width: 34px;
+  min-height: 34px;
 }
 .shell-business {
   display: flex;
@@ -269,7 +325,7 @@ a {
 }
 .btn-primary {
   background: var(--brand);
-  color: #0A0A0B;
+  color: var(--brand-text);
 }
 .btn-primary:hover:not(:disabled) {
   background: var(--brand-dark);
@@ -360,7 +416,7 @@ select[aria-invalid="true"]:focus {
   display: grid;
   place-items: center;
   padding: 1.5rem;
-  background: #0A0A0B;
+  background: var(--canvas);
 }
 .auth-container {
   width: 100%;
@@ -378,7 +434,7 @@ select[aria-invalid="true"]:focus {
   font-family: var(--doaide-font-display, "Instrument Serif", Georgia, serif);
   font-size: 42px;
   font-weight: 400;
-  color: #fff;
+  color: var(--ink-strong);
   margin: 0;
   line-height: 1.1;
 }
@@ -388,19 +444,19 @@ select[aria-invalid="true"]:focus {
 }
 .auth-subtitle {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--ink-muted);
   margin: 8px 0 24px;
 }
 .auth-card {
   width: 100%;
-  background: rgba(16, 16, 18, 0.8);
+  background: var(--glass);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
-  border: 1px solid rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--glass-border);
   border-radius: 24px;
   padding: 28px;
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
-              0 8px 24px -12px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 1px 0 0 var(--glass-inset) inset,
+              0 8px 24px -12px rgba(0, 0, 0, 0.4);
   text-align: left;
 }
 .auth-form {
@@ -413,17 +469,17 @@ select[aria-invalid="true"]:focus {
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.18em;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--ink-faint);
   margin-top: 12px;
 }
 .auth-form input {
-  background: rgba(10, 10, 11, 0.6) !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  background: var(--glass-input) !important;
+  border: 1px solid var(--glass-input-border) !important;
   border-radius: 8px !important;
   padding: 10px 14px !important;
   font-size: 14px !important;
   font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace) !important;
-  color: #fff !important;
+  color: var(--ink-strong) !important;
   width: 100%;
   box-sizing: border-box;
   transition: border-color 150ms ease;
@@ -434,7 +490,7 @@ select[aria-invalid="true"]:focus {
   box-shadow: none !important;
 }
 .auth-form input::placeholder {
-  color: rgba(255, 255, 255, 0.25) !important;
+  color: var(--glass-input-placeholder) !important;
 }
 .auth-form .field-error {
   font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
@@ -445,8 +501,8 @@ select[aria-invalid="true"]:focus {
   font-size: 11px;
 }
 .auth-submit {
-  background: #F0B429 !important;
-  color: #0A0A0B !important;
+  background: var(--brand) !important;
+  color: var(--brand-text) !important;
   border: none !important;
   border-radius: 8px;
   padding: 10px 16px;
@@ -460,12 +516,12 @@ select[aria-invalid="true"]:focus {
 }
 .auth-gstin-toggle {
   background: none;
-  border: 1px dashed rgba(255, 255, 255, 0.12);
+  border: 1px dashed var(--glass-input-border);
   border-radius: 8px;
   padding: 8px 14px;
   font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--ink-faint);
   cursor: pointer;
   margin-top: 8px;
   transition: border-color 150ms ease, color 150ms ease;
@@ -477,7 +533,7 @@ select[aria-invalid="true"]:focus {
   color: #F0B429;
 }
 .auth-submit:hover:not(:disabled) {
-  background: #F7D070 !important;
+  background: var(--brand-hover) !important;
 }
 .auth-submit:disabled {
   opacity: 0.6;
@@ -485,7 +541,7 @@ select[aria-invalid="true"]:focus {
 }
 .auth-switch {
   font-size: 14px;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--ink-faint);
   margin-top: 20px;
 }
 .auth-switch button {
@@ -498,7 +554,7 @@ select[aria-invalid="true"]:focus {
   padding: 0;
 }
 .auth-switch button:hover {
-  color: #F7D070;
+  color: var(--brand-hover);
 }
 
 /* Auth form inputs (shared between landing and standalone login) */
@@ -512,7 +568,7 @@ select[aria-invalid="true"]:focus {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: rgb(10, 10, 11);
+  background: var(--canvas);
   color: var(--ink);
   overflow-x: hidden;
   position: relative;
@@ -638,7 +694,7 @@ select[aria-invalid="true"]:focus {
   font-style: normal;
   letter-spacing: -0.5px;
   line-height: 1.1;
-  color: #fff;
+  color: var(--ink-strong);
   margin: 0 0 16px;
 }
 
@@ -647,7 +703,7 @@ select[aria-invalid="true"]:focus {
   font-family: var(--doaide-font-mono, "IBM Plex Mono", ui-monospace, monospace);
   font-size: 14px;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--ink-muted);
   line-height: 1.6;
   margin: 0 0 24px;
   max-width: 480px;
@@ -695,9 +751,9 @@ select[aria-invalid="true"]:focus {
   flex-direction: column;
   gap: 2px;
   padding: 10px 14px;
-  border: 1px solid rgba(240, 180, 41, 0.2);
+  border: 1px solid var(--glass-feature-border);
   border-radius: 10px;
-  background: rgba(240, 180, 41, 0.04);
+  background: var(--glass-feature-bg);
   font-size: 13px;
 }
 .landing-feature strong {
@@ -705,13 +761,13 @@ select[aria-invalid="true"]:focus {
   font-size: 14px;
 }
 .landing-feature span {
-  color: rgba(255, 255, 255, 0.5);
+  color: var(--ink-muted);
 }
 .landing-seo-blurb {
   margin-top: 16px;
   font-size: 13px;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--ink-faint);
   max-width: 420px;
 }
 
@@ -720,7 +776,7 @@ select[aria-invalid="true"]:focus {
   display: flex;
   gap: 0;
   margin-bottom: 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--glass-tab-border);
 }
 .auth-tab {
   flex: 1;
@@ -731,15 +787,15 @@ select[aria-invalid="true"]:focus {
   font-family: var(--doaide-font, "Schibsted Grotesk", system-ui, sans-serif);
   font-size: 14px;
   font-weight: 500;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--ink-faint);
   cursor: pointer;
   transition: color 150ms ease, border-color 150ms ease;
 }
 .auth-tab:hover {
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--ink-soft);
 }
 .auth-tab.is-active {
-  color: #fff;
+  color: var(--ink-strong);
   border-bottom-color: var(--accent);
 }
 .auth-tab:focus-visible {
@@ -753,7 +809,7 @@ select[aria-invalid="true"]:focus {
   z-index: 5;
   margin-top: auto;
   padding: 40px 24px 24px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--glass-tab-border);
 }
 .landing-footer-products {
   display: flex;
@@ -1447,7 +1503,7 @@ button.chip.is-active {
    Placeholders shaped like the content they stand in for, so the page does not
    jump when the data lands. */
 .skeleton {
-  background: linear-gradient(90deg, var(--surface) 25%, #2A2A2D 37%, var(--surface) 63%);
+  background: linear-gradient(90deg, var(--surface) 25%, var(--skeleton-mid) 37%, var(--surface) 63%);
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.4s ease-in-out infinite;
   border-radius: 6px;
@@ -1721,7 +1777,7 @@ a:focus-visible {
     display: block;
     position: fixed;
     inset: 0;
-    background: rgba(16, 24, 42, 0.25);
+    background: var(--scrim);
     z-index: 5;
   }
   .shell-header {
