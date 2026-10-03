@@ -178,6 +178,15 @@ export default function AuthForm() {
 
         {registering && (
           <>
+            <label htmlFor="full_name">Your name (optional)</label>
+            <input
+              id="full_name"
+              name="full_name"
+              autoComplete="name"
+              value={form.full_name}
+              onChange={(e) => update("full_name", e.target.value)}
+            />
+
             {!showGstin ? (
               <button
                 type="button"

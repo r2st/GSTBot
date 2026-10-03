@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import LandingPage from "./LandingPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
@@ -97,5 +97,50 @@ describe("LandingPage", () => {
 
     const brand = screen.getByText("doaide.com").closest("a");
     expect(brand).toHaveAttribute("href", "https://doaide.com");
+  });
+
+  describe("the typewriter effect", () => {
+    afterEach(() => vi.useRealTimers());
+
+    function tick(n = 1) {
+      for (let i = 0; i < n; i++) act(() => vi.runOnlyPendingTimers());
+    }
+
+    it("types the first phrase one character at a time", () => {
+      vi.useFakeTimers();
+      renderLanding();
+
+      // Each character is one tick; the first phrase is 30 chars.
+      tick(30);
+
+      expect(screen.getByText("Free GST return filing online")).toBeInTheDocument();
+    });
+
+    it("pauses when a phrase is fully typed then starts deleting", () => {
+      vi.useFakeTimers();
+      renderLanding();
+
+      tick(30); // Type the full phrase.
+      tick(1);  // The 2s pause fires → setDeleting(true).
+      tick(1);  // A deletion tick removes a character.
+
+      const el = screen.getByLabelText("Free GST return filing online");
+      // The text is shorter than the full phrase — deletion is underway.
+      expect(el.textContent.length).toBeLessThan("Free GST return filing online".length + 1);
+      expect(el.textContent).toMatch(/Free GST return filing onli/);
+    });
+
+    it("advances to the next phrase after fully deleting the current one", () => {
+      vi.useFakeTimers();
+      renderLanding();
+
+      tick(30); // Type full phrase.
+      tick(1);  // Pause fires → deleting.
+      tick(30); // Delete all 30 chars.
+      tick(1);  // text="" and deleting → resets to next phrase.
+      tick(1);  // First char of the second phrase.
+
+      expect(screen.getByLabelText("Automated GSTR-2B reconciliation")).toBeInTheDocument();
+    });
   });
 });

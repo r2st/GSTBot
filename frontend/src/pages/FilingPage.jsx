@@ -9,7 +9,7 @@ import ValidationIssues from "../components/ValidationIssues";
 import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
-import { currentPeriod, dateLabel, periodLabel, rupees } from "../lib/format";
+import { currentPeriod, dateLabel, periodLabel, previousPeriod, rupees } from "../lib/format";
 import { arnError, normalizeArn } from "../lib/validate";
 
 /** The last 12 filing periods, newest first. */
@@ -115,7 +115,7 @@ function latenessLine(owed) {
 export default function FilingPage() {
   usePageTitle("Filing");
   const { canWrite } = useAuth();
-  const [period, setPeriod] = useState(currentPeriod());
+  const [period, setPeriod] = useState(previousPeriod());
   const [returnType, setReturnType] = useState("gstr1");
   const [preview, setPreview] = useState(null);
   const [error, setError] = useState("");

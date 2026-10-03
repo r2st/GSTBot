@@ -142,12 +142,71 @@ describe("Shell", () => {
   });
 
   it("offers a way to reach the alerts", () => {
-    // The three alert endpoints shipped with no link to them, so the sweep
-    // could raise an alert that no screen in the product mentioned and no
-    // click could close.
     renderShell();
 
     expect(screen.getByRole("link", { name: "Alerts" })).toHaveAttribute("href", "/alerts");
+  });
+
+  it("shows a badge when there are open alerts", async () => {
+    setToken("stored-token");
+    global.fetch = vi.fn((url) => {
+      if (String(url).includes("/alerts")) {
+        return Promise.resolve(jsonResponse({ items: [], total: 0, open_total: 5, limit: 1, offset: 0 }));
+      }
+      return Promise.resolve(
+        jsonResponse({ id: 1, email: "owner@acme.in", business: { id: 1, legal_name: "Acme" } }),
+      );
+    });
+    renderShell();
+
+    expect(await screen.findByText("5")).toBeInTheDocument();
+  });
+
+  it("keeps the alerts link name stable when the badge is shown", async () => {
+    setToken("stored-token");
+    global.fetch = vi.fn((url) => {
+      if (String(url).includes("/alerts")) {
+        return Promise.resolve(jsonResponse({ items: [], total: 0, open_total: 5, limit: 1, offset: 0 }));
+      }
+      return Promise.resolve(
+        jsonResponse({ id: 1, email: "owner@acme.in", business: { id: 1, legal_name: "Acme" } }),
+      );
+    });
+    renderShell();
+
+    await screen.findByText("5");
+    expect(screen.getByRole("link", { name: "Alerts" })).toBeInTheDocument();
+  });
+
+  it("hides the badge when there are no open alerts", async () => {
+    setToken("stored-token");
+    global.fetch = vi.fn((url) => {
+      if (String(url).includes("/alerts")) {
+        return Promise.resolve(jsonResponse({ items: [], total: 0, open_total: 0, limit: 1, offset: 0 }));
+      }
+      return Promise.resolve(
+        jsonResponse({ id: 1, email: "owner@acme.in", business: { id: 1, legal_name: "Acme" } }),
+      );
+    });
+    renderShell();
+
+    await waitFor(() => expect(global.fetch).toHaveBeenCalled());
+    expect(screen.queryByText(/nav-badge/)).not.toBeInTheDocument();
+  });
+
+  it("caps the badge at 99+ for large counts", async () => {
+    setToken("stored-token");
+    global.fetch = vi.fn((url) => {
+      if (String(url).includes("/alerts")) {
+        return Promise.resolve(jsonResponse({ items: [], total: 0, open_total: 150, limit: 1, offset: 0 }));
+      }
+      return Promise.resolve(
+        jsonResponse({ id: 1, email: "owner@acme.in", business: { id: 1, legal_name: "Acme" } }),
+      );
+    });
+    renderShell();
+
+    expect(await screen.findByText("99+")).toBeInTheDocument();
   });
 
   it("marks the current route as current", () => {

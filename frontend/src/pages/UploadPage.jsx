@@ -104,7 +104,10 @@ function ResultRow({ result }) {
 export default function UploadPage() {
   usePageTitle("Upload");
   const { canWrite } = useAuth();
-  const [invoiceType, setInvoiceType] = useState("purchase");
+  const [invoiceType, setInvoiceType] = useState(() => {
+    try { return localStorage.getItem("upload_type") || "purchase"; }
+    catch { return "purchase"; }
+  });
   const [results, setResults] = useState([]);
   const [error, setError] = useState("");
   const [dragging, setDragging] = useState(false);
@@ -292,7 +295,11 @@ export default function UploadPage() {
                   name="invoice_type"
                   value={option.value}
                   checked={invoiceType === option.value}
-                  onChange={(e) => setInvoiceType(e.target.value)}
+                  onChange={(e) => {
+                    setInvoiceType(e.target.value);
+                    try { localStorage.setItem("upload_type", e.target.value); }
+                    catch { /* quota or private browsing */ }
+                  }}
                 />
                 {option.label}
               </label>
@@ -351,6 +358,23 @@ export default function UploadPage() {
               <ResultRow key={`${result.filename}-${index}`} result={result} />
             ))}
           </ul>
+          {!busy && (
+            <div className="button-row" style={{ marginTop: "1rem" }}>
+              <Link to="/invoices?status=parsed" className="btn btn-primary">
+                Review uploaded invoices
+              </Link>
+              {invoiceType === "purchase" && (
+                <Link to="/reconcile" className="btn btn-ghost">
+                  Reconcile with GSTR-2B
+                </Link>
+              )}
+              {invoiceType === "sales" && (
+                <Link to="/filing" className="btn btn-ghost">
+                  Prepare GSTR-1
+                </Link>
+              )}
+            </div>
+          )}
         </section>
       )}
     </div>

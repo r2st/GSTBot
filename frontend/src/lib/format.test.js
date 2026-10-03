@@ -4,6 +4,7 @@ import {
   dateLabel,
   daysUntil,
   periodLabel,
+  previousPeriod,
   rupees,
   rupeesShort,
   statusLabel,
@@ -95,6 +96,20 @@ describe("currentPeriod", () => {
   it("zero-pads the month", () => {
     expect(currentPeriod(new Date(2026, 0, 15))).toBe("2026-01");
     expect(currentPeriod(new Date(2026, 11, 1))).toBe("2026-12");
+  });
+});
+
+describe("previousPeriod", () => {
+  it("returns the month before the given date", () => {
+    expect(previousPeriod(new Date(2026, 4, 15))).toBe("2026-04");
+  });
+
+  it("wraps around the year boundary", () => {
+    expect(previousPeriod(new Date(2026, 0, 1))).toBe("2025-12");
+  });
+
+  it("zero-pads the month", () => {
+    expect(previousPeriod(new Date(2026, 1, 28))).toBe("2026-01");
   });
 });
 

@@ -2,17 +2,11 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { currentPeriod, periodLabel } from "../lib/format";
+import { periodLabel, previousPeriod as prevPeriod } from "../lib/format";
 import { StubAuth } from "../test/auth";
 import FilingPage from "./FilingPage";
 
 const PERIOD = "2026-04";
-
-/** The month before this one, which is the newest period that can be filed. */
-function previousPeriod(now = new Date()) {
-  const date = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
 
 function validation(overrides = {}) {
   const issues = overrides.issues ?? [];
@@ -206,18 +200,28 @@ function mockApi({
 }
 
 /**
- * Step the picker back to the month before this one and return it.
+ * Step the picker to a completed period that differs from the default.
  *
- * The picker opens on the current month, and a return for a month that has not
- * ended cannot be recorded — the portal does not open it until the month is
- * over, and the server refuses the record. So every test about recording a
- * filing has to be on a completed period first.
+ * The picker opens on the previous month (already completed). This selects one
+ * month further back so tests that need a period change see a real transition.
  */
 async function selectCompletedPeriod(user) {
   const select = await screen.findByLabelText("Period");
-  const previous = select.options[1].value;
-  await user.selectOptions(select, previous);
-  return previous;
+  const target = select.options[2].value;
+  await user.selectOptions(select, target);
+  return target;
+}
+
+/**
+ * Step the picker to the current month, which has not ended yet.
+ *
+ * The page now defaults to the previous month. Tests about the "period not
+ * ended" guard need to move forward to the current month explicitly.
+ */
+async function selectCurrentPeriod(user) {
+  const select = await screen.findByLabelText("Period");
+  await user.selectOptions(select, select.options[0].value);
+  return select.options[0].value;
 }
 
 function renderPage({ role } = {}) {
@@ -525,7 +529,7 @@ describe("FilingPage", () => {
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent("Period is not yet complete");
     expect(banner).toHaveTextContent(
-      `Could not download the GSTR-1 for ${periodLabel(currentPeriod())}`,
+      `Could not download the GSTR-1 for ${periodLabel(prevPeriod())}`,
     );
     // Nothing was handed to the browser to save.
     expect(URL.createObjectURL).not.toHaveBeenCalled();
@@ -572,12 +576,12 @@ describe("FilingPage", () => {
 
     await loaded();
     const select = screen.getByLabelText("Period");
-    // The month before the default, whenever the suite happens to run.
-    const previous = select.options[1].value;
-    await user.selectOptions(select, previous);
+    // A month different from the default (previous month), to trigger a reload.
+    const other = select.options[2].value;
+    await user.selectOptions(select, other);
 
     await waitFor(() =>
-      expect(global.fetch.mock.calls.at(-1)[0]).toContain(`period=${previous}`),
+      expect(global.fetch.mock.calls.at(-1)[0]).toContain(`period=${other}`),
     );
   });
 
@@ -694,13 +698,11 @@ describe("FilingPage", () => {
       // sentence, without a dangling "(ARN )".
       mockApi({
         filingStatus: filingStatus([
-          standing({ period: previousPeriod(), filed: true, filed_on: "2026-05-09", arn: null }),
+          standing({ period: prevPeriod(), filed: true, filed_on: "2026-05-09", arn: null }),
         ]),
       });
-      const user = userEvent.setup();
       renderPage();
 
-      await selectCompletedPeriod(user);
       const note = await screen.findByText(/Already recorded as filed on/i);
       expect(note).not.toHaveTextContent("ARN");
       expect(note).toHaveTextContent(/corrects the reference rather than filing twice/);
@@ -758,13 +760,15 @@ describe("FilingPage", () => {
     });
 
     it("does not offer to record a month that has not ended", async () => {
-      // The picker opens on the current month, and the server refuses a record
-      // for a period the portal has not opened yet. Left enabled, the first
-      // thing anyone met on this panel was a 422 for doing the obvious thing.
+      // The picker defaults to the previous month (completed), so switch to
+      // the current month to test the guard.
+      const user = userEvent.setup();
       mockApi();
       renderPage();
 
       await loaded();
+      await selectCurrentPeriod(user);
+
       expect(await markFiled()).toBeDisabled();
       expect(screen.getByLabelText(/ARN/i)).toBeDisabled();
       expect(screen.getByText(/has not ended yet, so there is nothing to record/i))
@@ -777,6 +781,7 @@ describe("FilingPage", () => {
       renderPage();
 
       await loaded();
+      await selectCurrentPeriod(user);
       await selectCompletedPeriod(user);
 
       expect(await markFiled()).toBeEnabled();
@@ -872,17 +877,15 @@ describe("FilingPage", () => {
       mockApi({
         filingStatus: filingStatus([
           standing({
-            period: previousPeriod(),
+            period: prevPeriod(),
             filed: true,
             filed_on: "2026-05-09",
             arn: "AA270426000000X",
           }),
         ]),
       });
-      const user = userEvent.setup();
       renderPage();
 
-      await selectCompletedPeriod(user);
       expect(
         await screen.findByText(/Already recorded as filed on/i),
       ).toHaveTextContent("AA270426000000X");
@@ -1090,7 +1093,7 @@ describe("FilingPage", () => {
       renderPage();
 
       await loaded();
-      const started = currentPeriod();
+      const started = prevPeriod();
       await user.click(screen.getByRole("button", { name: /Download GSTR-1 JSON/i }));
       await waitFor(() => expect(exports).toHaveLength(1));
 
@@ -1294,7 +1297,7 @@ describe("FilingPage", () => {
       const user = userEvent.setup();
       // Pinned to the month the page opens on, whatever is asked for — which is
       // what a superseded response that resolved anyway looks like.
-      const stuck = currentPeriod();
+      const stuck = prevPeriod();
       mockApi({ lateFee: () => lateFee({ period: stuck, days_late: 34, total_payable: "2883.00" }) });
       renderPage();
 

@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
+import { api } from "../lib/api";
 import BusinessSwitcher from "./BusinessSwitcher";
 
 const LINKS = [
@@ -11,15 +12,32 @@ const LINKS = [
   { to: "/itc", label: "ITC" },
   { to: "/filing", label: "Filing" },
   { to: "/suppliers", label: "Suppliers" },
-  { to: "/alerts", label: "Alerts" },
+  { to: "/alerts", label: "Alerts", badge: true },
 ];
 
 export default function Shell({ children }) {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [navOpen, setNavOpen] = useState(false);
+  const [alertCount, setAlertCount] = useState(0);
   const toggleRef = useRef(null);
+
+  const businessId = user?.business?.id;
+  const fetchAlertCount = useCallback(() => {
+    if (!businessId) return;
+    const ctrl = new AbortController();
+    api.listAlerts({ limit: 1 }, { signal: ctrl.signal })
+      .then((res) => setAlertCount(res.open_total ?? 0))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [businessId]);
+
+  useEffect(() => fetchAlertCount(), [fetchAlertCount]);
+  // Re-fetch when navigating away from alerts (user may have dismissed some).
+  useEffect(() => {
+    if (location.pathname !== "/alerts") fetchAlertCount();
+  }, [location.pathname, fetchAlertCount]);
 
   // Eight links do not fit on a phone, so below 860px they collapse behind a
   // button. The menu stays in the DOM either way — CSS decides whether it is a
@@ -101,6 +119,11 @@ export default function Shell({ children }) {
               className={({ isActive }) => (isActive ? "nav-link is-active" : "nav-link")}
             >
               {link.label}
+              {link.badge && alertCount > 0 && (
+                <span className="nav-badge" aria-hidden="true">
+                  {alertCount > 99 ? "99+" : alertCount}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

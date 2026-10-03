@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StubAuth } from "../test/auth";
 import DashboardPage from "./DashboardPage";
 
 const BUCKET = {
@@ -59,10 +60,12 @@ function mockDashboard(body) {
   });
 }
 
-function renderPage() {
+function renderPage({ role } = {}) {
   return render(
     <MemoryRouter>
-      <DashboardPage />
+      <StubAuth role={role}>
+        <DashboardPage />
+      </StubAuth>
     </MemoryRouter>,
   );
 }
@@ -720,6 +723,245 @@ describe("DashboardPage", () => {
         name: "Tax breakdown for April 2026",
       });
       expect(region).toHaveAttribute("tabindex", "0");
+    });
+  });
+
+  describe("the quick actions panel", () => {
+    it("offers upload when the user can write", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+
+      expect(await screen.findByRole("link", { name: "Upload invoices" })).toHaveAttribute(
+        "href",
+        "/upload",
+      );
+    });
+
+    it("hides upload from a viewer", async () => {
+      mockDashboard(dashboard());
+      renderPage({ role: "viewer" });
+
+      await screen.findByText("Quick actions");
+      expect(screen.queryByRole("link", { name: "Upload invoices" })).not.toBeInTheDocument();
+    });
+
+    it("offers review when invoices need it", async () => {
+      mockDashboard(dashboard({ counts: { total: 5, sales: 2, purchase: 3, by_status: { parsed: 5 }, needs_review: 3 } }));
+      renderPage();
+
+      expect(await screen.findByRole("link", { name: /Review 3 invoices/ })).toHaveAttribute(
+        "href",
+        "/invoices?status=parsed",
+      );
+    });
+
+    it("offers first reconciliation when invoices exist but no recon has run", async () => {
+      mockDashboard(dashboard({ last_reconciliation: null }));
+      renderPage();
+
+      expect(await screen.findByRole("link", { name: "Run first reconciliation" })).toHaveAttribute(
+        "href",
+        "/reconcile",
+      );
+    });
+
+    it("hides first reconciliation once one has run", async () => {
+      mockDashboard(dashboard({ last_reconciliation: { matched: 2, mismatched: 0, missing_in_2b: 0, missing_in_books: 0 } }));
+      renderPage();
+
+      await screen.findByText("Quick actions");
+      expect(screen.queryByRole("link", { name: "Run first reconciliation" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the onboarding checklist", () => {
+    it("appears for a new user with no GSTIN and no invoices", async () => {
+      mockDashboard(dashboard({
+        business_gstin: null,
+        counts: { total: 0, sales: 0, purchase: 0, by_status: {}, needs_review: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText("Get started")).toBeInTheDocument();
+      expect(screen.getByText(/0 of 4 steps done/)).toBeInTheDocument();
+    });
+
+    it("disappears once the user has a GSTIN and invoices", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+
+      await screen.findByText("Quick actions");
+      expect(screen.queryByText("Get started")).not.toBeInTheDocument();
+    });
+
+    it("marks the GSTIN step as done when one is registered", async () => {
+      mockDashboard(dashboard({
+        counts: { total: 0, sales: 0, purchase: 0, by_status: {}, needs_review: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText("Get started")).toBeInTheDocument();
+      expect(screen.getByText(/1 of 4 steps done/)).toBeInTheDocument();
+    });
+
+    it("hides action links from a viewer who cannot write", async () => {
+      mockDashboard(dashboard({
+        business_gstin: null,
+        counts: { total: 0, sales: 0, purchase: 0, by_status: {}, needs_review: 0 },
+      }));
+      renderPage({ role: "viewer" });
+
+      expect(await screen.findByText("Get started")).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: /Start/ })).not.toBeInTheDocument();
+    });
+
+    it("offers reconciliation once purchase invoices exist", async () => {
+      mockDashboard(dashboard({
+        business_gstin: null,
+        counts: { total: 2, sales: 0, purchase: 2, by_status: { parsed: 2 }, needs_review: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText("Get started")).toBeInTheDocument();
+      const links = screen.getAllByRole("link", { name: /Start/ });
+      const hrefs = links.map((l) => l.getAttribute("href"));
+      expect(hrefs).toContain("/reconcile");
+    });
+
+    it("offers filing once any invoices exist", async () => {
+      mockDashboard(dashboard({
+        business_gstin: null,
+        counts: { total: 1, sales: 1, purchase: 0, by_status: { parsed: 1 }, needs_review: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText("Get started")).toBeInTheDocument();
+      const links = screen.getAllByRole("link", { name: /Start/ });
+      const hrefs = links.map((l) => l.getAttribute("href"));
+      expect(hrefs).toContain("/filing");
+    });
+  });
+
+  describe("the late fee warning", () => {
+    it("shows the late fee estimate when GSTR-3B is overdue", async () => {
+      mockDashboard(dashboard({
+        late_fee_estimate: { days_late: 5, late_fee_total: "500.00", interest: "0.00" },
+      }));
+      renderPage();
+
+      const banner = await screen.findByText(/5 days overdue/);
+      expect(banner).toBeInTheDocument();
+      expect(screen.getByText(/₹500.00/)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "File now" })).toHaveAttribute("href", "/filing");
+    });
+
+    it("includes interest when there is some", async () => {
+      mockDashboard(dashboard({
+        late_fee_estimate: { days_late: 12, late_fee_total: "1200.00", interest: "350.00" },
+      }));
+      renderPage();
+
+      expect(await screen.findByText(/interest/)).toBeInTheDocument();
+      expect(screen.getByText(/₹350.00/)).toBeInTheDocument();
+    });
+
+    it("uses the singular when exactly one day overdue", async () => {
+      mockDashboard(dashboard({
+        late_fee_estimate: { days_late: 1, late_fee_total: "100.00", interest: "0.00" },
+      }));
+      renderPage();
+
+      expect(await screen.findByText(/1 day overdue/)).toBeInTheDocument();
+      expect(screen.queryByText(/1 days/)).not.toBeInTheDocument();
+    });
+
+    it("stays hidden when there is no late fee", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+
+      await screen.findByText(/Umang Traders/);
+      expect(screen.queryByText(/overdue.*late fee/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe("the reconciliation summary", () => {
+    it("shows the match rate from the last reconciliation", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: 8, mismatched: 1, missing_in_2b: 1, missing_in_books: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText(/80%/)).toBeInTheDocument();
+      expect(screen.getByText(/8 of 10/)).toBeInTheDocument();
+    });
+
+    it("shows mismatched and missing counts", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: 5, mismatched: 2, missing_in_2b: 3, missing_in_books: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText("Mismatched")).toBeInTheDocument();
+      expect(screen.getByText("Missing in 2B")).toBeInTheDocument();
+    });
+
+    it("links to the full reconciliation page", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: 5, mismatched: 0, missing_in_2b: 0, missing_in_books: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByRole("link", { name: "View full reconciliation" })).toHaveAttribute(
+        "href",
+        "/reconcile",
+      );
+    });
+
+    it("shows invoices missing from the books", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: 4, mismatched: 0, missing_in_2b: 0, missing_in_books: 2 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText("Missing in books")).toBeInTheDocument();
+    });
+
+    it("treats undefined fields as zero rather than crashing", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: 3 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText(/100%/)).toBeInTheDocument();
+      expect(screen.getByText(/3 of 3/)).toBeInTheDocument();
+    });
+
+    it("treats a null matched count as zero", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: null, mismatched: 2, missing_in_2b: 0, missing_in_books: 0 },
+      }));
+      renderPage();
+
+      expect(await screen.findByText(/0%/)).toBeInTheDocument();
+      expect(screen.getByText(/0 of 2/)).toBeInTheDocument();
+    });
+
+    it("hides when every count is zero", async () => {
+      mockDashboard(dashboard({
+        last_reconciliation: { matched: 0, mismatched: 0, missing_in_2b: 0, missing_in_books: 0 },
+      }));
+      renderPage();
+
+      await screen.findByText(/Umang Traders/);
+      expect(screen.queryByText("Last reconciliation")).not.toBeInTheDocument();
+    });
+
+    it("stays hidden when no reconciliation has run", async () => {
+      mockDashboard(dashboard());
+      renderPage();
+
+      await screen.findByText(/Umang Traders/);
+      expect(screen.queryByText("Last reconciliation")).not.toBeInTheDocument();
     });
   });
 });

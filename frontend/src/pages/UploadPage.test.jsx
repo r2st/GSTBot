@@ -939,4 +939,120 @@ describe("a viewer", () => {
     expect(screen.getByText(/Drag invoices here/)).toBeInTheDocument();
     expect(screen.queryByText(/read-only/)).toBeNull();
   });
+
+  describe("remembering the invoice type across visits", () => {
+    it("restores the last-used type from localStorage", () => {
+      localStorage.setItem("upload_type", "sales");
+      renderPage();
+
+      expect(screen.getByLabelText("Sales (feeds GSTR-1)")).toBeChecked();
+      expect(screen.getByLabelText("Purchase (claim ITC)")).not.toBeChecked();
+    });
+
+    it("persists the chosen type to localStorage", async () => {
+      const user = userEvent.setup();
+      renderPage();
+
+      await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
+      expect(localStorage.getItem("upload_type")).toBe("sales");
+    });
+
+    it("falls back to purchase when localStorage is empty", () => {
+      renderPage();
+
+      expect(screen.getByLabelText("Purchase (claim ITC)")).toBeChecked();
+    });
+
+    it("falls back to purchase when localStorage throws on read", () => {
+      vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw new Error("SecurityError");
+      });
+      renderPage();
+
+      expect(screen.getByLabelText("Purchase (claim ITC)")).toBeChecked();
+    });
+
+    it("survives localStorage throwing on write", async () => {
+      const user = userEvent.setup();
+      vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw new Error("QuotaExceeded");
+      });
+      renderPage();
+
+      await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
+      expect(screen.getByLabelText("Sales (feeds GSTR-1)")).toBeChecked();
+    });
+  });
+
+  describe("next steps after upload", () => {
+    it("shows a link to review uploaded invoices after a successful upload", async () => {
+      const user = userEvent.setup();
+      global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
+      renderPage();
+
+      await user.upload(screen.getByLabelText("Choose files"), file());
+      await screen.findByText("INV-2026-0042");
+
+      expect(screen.getByRole("link", { name: "Review uploaded invoices" })).toHaveAttribute(
+        "href",
+        "/invoices?status=parsed",
+      );
+    });
+
+    it("offers reconciliation as the next step for purchase invoices", async () => {
+      const user = userEvent.setup();
+      global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
+      renderPage();
+
+      await user.upload(screen.getByLabelText("Choose files"), file());
+      await screen.findByText("INV-2026-0042");
+
+      expect(screen.getByRole("link", { name: "Reconcile with GSTR-2B" })).toHaveAttribute(
+        "href",
+        "/reconcile",
+      );
+    });
+
+    it("offers GSTR-1 preparation as the next step for sales invoices", async () => {
+      const user = userEvent.setup();
+      global.fetch.mockResolvedValueOnce(jsonResponse(oneAccepted()));
+      renderPage();
+
+      await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
+      await user.upload(screen.getByLabelText("Choose files"), file());
+      await screen.findByText("INV-2026-0042");
+
+      expect(screen.getByRole("link", { name: "Prepare GSTR-1" })).toHaveAttribute(
+        "href",
+        "/filing",
+      );
+      expect(screen.queryByRole("link", { name: "Reconcile with GSTR-2B" })).not.toBeInTheDocument();
+    });
+  });
+
+  describe("localStorage unavailable", () => {
+    it("defaults to purchase when getItem throws", () => {
+      const orig = Storage.prototype.getItem;
+      Storage.prototype.getItem = () => { throw new Error("SecurityError"); };
+      try {
+        renderPage();
+        expect(screen.getByLabelText("Purchase (claim ITC)")).toBeChecked();
+      } finally {
+        Storage.prototype.getItem = orig;
+      }
+    });
+
+    it("swallows setItem errors in private browsing", async () => {
+      const orig = Storage.prototype.setItem;
+      Storage.prototype.setItem = () => { throw new Error("QuotaExceededError"); };
+      try {
+        renderPage();
+        const user = userEvent.setup();
+        await user.click(screen.getByLabelText("Sales (feeds GSTR-1)"));
+        expect(screen.getByLabelText("Sales (feeds GSTR-1)")).toBeChecked();
+      } finally {
+        Storage.prototype.setItem = orig;
+      }
+    });
+  });
 });

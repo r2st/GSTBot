@@ -66,6 +66,12 @@ export function currentPeriod(now = new Date()) {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** The previous filing period as YYYY-MM. */
+export function previousPeriod(now = new Date()) {
+  const date = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
 /** Days until a due date; negative once it has passed. */
 export function daysUntil(dueDate, now = new Date()) {
   if (!dueDate) return null;

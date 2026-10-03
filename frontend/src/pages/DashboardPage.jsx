@@ -8,6 +8,7 @@ import StatCard from "../components/StatCard";
 import TableScroll from "../components/TableScroll";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api, isAbortError } from "../lib/api";
+import { useAuth } from "../hooks/useAuth";
 import {
   currentPeriod,
   daysUntil,
@@ -73,6 +74,160 @@ function OpenAlertsNotice({ count }) {
   );
 }
 
+function QuickActions({ data, canWrite }) {
+  const hasInvoices = data.counts.total > 0;
+  const needsReview = data.counts.needs_review > 0;
+  const hasRecon = data.last_reconciliation !== null;
+  return (
+    <section className="panel">
+      <h2>Quick actions</h2>
+      <div className="button-row">
+        {canWrite && (
+          <Link to="/upload" className="btn btn-primary">
+            Upload invoices
+          </Link>
+        )}
+        {needsReview && (
+          <Link to="/invoices?status=parsed" className="btn btn-ghost">
+            Review {data.counts.needs_review} invoice{data.counts.needs_review !== 1 ? "s" : ""}
+          </Link>
+        )}
+        {hasInvoices && !hasRecon && (
+          <Link to="/reconcile" className="btn btn-ghost">
+            Run first reconciliation
+          </Link>
+        )}
+        {hasInvoices && (
+          <Link to="/filing" className="btn btn-ghost">
+            Prepare filing
+          </Link>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function OnboardingChecklist({ data, canWrite }) {
+  if (data.counts.total > 0 && data.business_gstin) return null;
+
+  const steps = [
+    {
+      done: Boolean(data.business_gstin),
+      label: "Register your GSTIN",
+      action: null,
+      hint: "Your business identity for GST filing.",
+    },
+    {
+      done: data.counts.total > 0,
+      label: "Upload your first invoice",
+      action: canWrite ? "/upload" : null,
+      hint: "PDF, photo, CSV or Excel — fields are extracted automatically.",
+    },
+    {
+      done: data.last_reconciliation !== null,
+      label: "Import GSTR-2B and reconcile",
+      action: data.counts.purchase > 0 && canWrite ? "/reconcile" : null,
+      hint: "Match your books against what suppliers declared.",
+    },
+    {
+      done: false,
+      label: "Prepare and file your return",
+      action: data.counts.total > 0 ? "/filing" : null,
+      hint: "Generate GSTR-1 or GSTR-3B for the portal.",
+    },
+  ];
+
+  const completed = steps.filter((s) => s.done).length;
+  return (
+    <section className="panel">
+      <h2>Get started</h2>
+      <p className="muted small">
+        {completed} of {steps.length} steps done — complete these to file your first return.
+      </p>
+      <ol className="onboarding-list">
+        {steps.map((step) => (
+          <li key={step.label} className={step.done ? "is-done" : ""}>
+            <span className="onboarding-check" aria-hidden="true">
+              {step.done ? "✓" : "○"}
+            </span>
+            <div>
+              <strong>{step.label}</strong>
+              <span className="muted small"> — {step.hint}</span>
+              {!step.done && step.action && (
+                <>
+                  {" "}
+                  <Link to={step.action} className="btn-link">
+                    Start →
+                  </Link>
+                </>
+              )}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+function LateFeeWarning({ estimate, period }) {
+  if (!estimate) return null;
+  return (
+    <div className="banner banner-bad" role="status">
+      GSTR-3B for {periodLabel(period)} is {estimate.days_late} day
+      {estimate.days_late !== 1 ? "s" : ""} overdue — late fee{" "}
+      {rupees(estimate.late_fee_total)}
+      {Number(estimate.interest) > 0 ? ` plus interest ${rupees(estimate.interest)}` : ""}.{" "}
+      <Link to="/filing">File now</Link>
+    </div>
+  );
+}
+
+function ReconSummary({ recon, period }) {
+  if (!recon) return null;
+  const total =
+    (recon.matched ?? 0) +
+    (recon.mismatched ?? 0) +
+    (recon.missing_in_2b ?? 0) +
+    (recon.missing_in_books ?? 0);
+  if (total === 0) return null;
+  const matchRate = total > 0 ? Math.round(((recon.matched ?? 0) / total) * 100) : 0;
+  return (
+    <section className="panel">
+      <h2>Last reconciliation — {periodLabel(period)}</h2>
+      <div className="kv">
+        <div>
+          <dt>Match rate</dt>
+          <dd>
+            <strong>{matchRate}%</strong>{" "}
+            <span className="muted">({recon.matched ?? 0} of {total})</span>
+          </dd>
+        </div>
+        {(recon.mismatched ?? 0) > 0 && (
+          <div>
+            <dt>Mismatched</dt>
+            <dd className="is-warn">{recon.mismatched}</dd>
+          </div>
+        )}
+        {(recon.missing_in_2b ?? 0) > 0 && (
+          <div>
+            <dt>Missing in 2B</dt>
+            <dd className="is-warn">{recon.missing_in_2b}</dd>
+          </div>
+        )}
+        {(recon.missing_in_books ?? 0) > 0 && (
+          <div>
+            <dt>Missing in books</dt>
+            <dd>{recon.missing_in_books}</dd>
+          </div>
+        )}
+      </div>
+      <Link to="/reconcile" className="btn btn-ghost">
+        View full reconciliation
+      </Link>
+    </section>
+  );
+}
+
 function TrendChart({ periods }) {
   const values = periods.map((p) => Number(p.net_liability.total));
   const peak = Math.max(...values, 1);
@@ -126,6 +281,7 @@ function TrendChart({ periods }) {
 
 export default function DashboardPage() {
   usePageTitle("Dashboard");
+  const { canWrite } = useAuth();
   const [period, setPeriod] = useState(currentPeriod());
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
@@ -217,7 +373,11 @@ export default function DashboardPage() {
       {data && (
         <>
           <DueDateNotice dueDate={data.next_due_date} />
+          <LateFeeWarning estimate={data.late_fee_estimate} period={data.period} />
           <OpenAlertsNotice count={data.open_alerts} />
+
+          <OnboardingChecklist data={data} canWrite={canWrite} />
+          <QuickActions data={data} canWrite={canWrite} />
 
           <section className="stat-grid">
             <StatCard
@@ -314,6 +474,8 @@ export default function DashboardPage() {
               </p>
             </div>
           </section>
+
+          <ReconSummary recon={data.last_reconciliation} period={data.period} />
 
           <section className="panel">
             <h2>Plan usage</h2>
