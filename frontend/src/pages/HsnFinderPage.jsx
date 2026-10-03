@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { categories, byCategory, searchHSN } from "../lib/hsnData";
 import { copyToClipboard } from "../lib/share";
+import { track } from "../lib/track";
 
 export default function HsnFinderPage() {
   usePageTitle("HSN Code Finder — Search GST Rates by Product Name");
@@ -11,6 +12,12 @@ export default function HsnFinderPage() {
 
   const results = searchHSN(query);
   const cats = categories();
+
+  useEffect(() => {
+    if (query.trim()) {
+      track("hsn_search", { query: query.trim() });
+    }
+  }, [query]);
 
   const handleCopy = async (text) => {
     const ok = await copyToClipboard(text);

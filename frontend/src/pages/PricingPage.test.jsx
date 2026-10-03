@@ -6,6 +6,9 @@ import { AuthContext } from "../hooks/useAuth";
 import { StubAuth } from "../test/auth";
 import PricingPage from "./PricingPage";
 
+const mockTrack = vi.fn();
+vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
+
 const PRICING_RESPONSE = {
   tiers: {
     free: {
@@ -150,6 +153,15 @@ describe("PricingPage", () => {
     renderPage();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Server error/);
+  });
+
+  it("fires pricing_view tracking event on mount", async () => {
+    mockFetch(PRICING_RESPONSE, SUBSCRIPTION_RESPONSE);
+    renderPage();
+
+    await screen.findByText("Free");
+
+    expect(mockTrack).toHaveBeenCalledWith("pricing_view");
   });
 
   it("disables subscribe buttons when not signed in", async () => {

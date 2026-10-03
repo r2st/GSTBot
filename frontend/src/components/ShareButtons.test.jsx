@@ -13,6 +13,9 @@ vi.mock("../lib/share", () => ({
   copyToClipboard: vi.fn(),
 }));
 
+const mockTrack = vi.fn();
+vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
+
 import { copyToClipboard } from "../lib/share";
 
 function renderShare(props = {}) {
@@ -63,6 +66,31 @@ describe("ShareButtons", () => {
     renderShare({ label: "Share GST result" });
 
     expect(screen.getByRole("group", { name: "Share GST result" })).toBeInTheDocument();
+  });
+
+  it("fires share_whatsapp tracking event when WhatsApp is clicked", async () => {
+    renderShare();
+
+    await userEvent.click(screen.getByLabelText("Share on WhatsApp"));
+
+    expect(mockTrack).toHaveBeenCalledWith("share_whatsapp");
+  });
+
+  it("fires share_twitter tracking event when Twitter is clicked", async () => {
+    renderShare();
+
+    await userEvent.click(screen.getByLabelText("Share on Twitter"));
+
+    expect(mockTrack).toHaveBeenCalledWith("share_twitter");
+  });
+
+  it("fires share_copy tracking event when link is copied", async () => {
+    copyToClipboard.mockResolvedValue(true);
+    renderShare();
+
+    await userEvent.click(screen.getByLabelText("Copy link"));
+
+    expect(mockTrack).toHaveBeenCalledWith("share_copy");
   });
 
   it("reverts copy text after timeout", async () => {

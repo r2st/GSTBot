@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import AuthForm from "../components/AuthForm";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { copyToClipboard, fullUrl } from "../lib/share";
+import { track } from "../lib/track";
 
 const DOAIDE_PRODUCTS = [
   { name: "Desk", url: "https://desk.doaide.com" },
@@ -558,7 +559,7 @@ export default function LandingPage() {
         <section className="landing-cta">
           <h2>Start Filing GST Returns in Minutes</h2>
           <p>Free forever for up to 50 invoices/month. No credit card required.</p>
-          <a href="#root" className="btn btn-primary landing-cta-btn" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+          <a href="#root" className="btn btn-primary landing-cta-btn" onClick={(e) => { e.preventDefault(); track("signup_click"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
             Sign Up Free
           </a>
         </section>

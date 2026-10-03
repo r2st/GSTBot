@@ -4,6 +4,7 @@ import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { calcUrl, calculate, formatINR, GST_SLABS, parseCalcParams, reverseCalculate } from "../lib/gstCalc";
+import { track } from "../lib/track";
 
 export default function CalculatorPage() {
   usePageTitle("Free GST Calculator — Calculate CGST, SGST, IGST Instantly");
@@ -33,6 +34,12 @@ export default function CalculatorPage() {
       }
     }
   }, [parsed, rate, interstate, valid, navigate, location.search]);
+
+  useEffect(() => {
+    if (result) {
+      track("gst_calculate", { amount: result.taxable, rate });
+    }
+  }, [result, rate]);
 
   return (
     <div className="tool-page">

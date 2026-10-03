@@ -2,6 +2,7 @@ import { useState } from "react";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { copyToClipboard, embedSnippet } from "../lib/share";
+import { track } from "../lib/track";
 
 const TOOLS = [
   { key: "calculator", label: "GST Calculator", desc: "Let visitors calculate GST on your website" },
@@ -19,6 +20,7 @@ export default function EmbedPage() {
   const handleCopy = async () => {
     const ok = await copyToClipboard(snippet);
     if (ok) {
+      track("embed_copy", { tool });
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }

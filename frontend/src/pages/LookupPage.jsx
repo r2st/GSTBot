@@ -4,6 +4,7 @@ import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
+import { track } from "../lib/track";
 import { normalizeGstin } from "../lib/validate";
 
 export default function LookupPage() {
@@ -38,6 +39,7 @@ export default function LookupPage() {
         const data = await api.validateGstin(cleaned);
         if (controller.signal.aborted) return;
         setResult(data);
+        track("gstin_lookup", { gstin: cleaned });
         if (data.valid) {
           navigate(`/gstin/${cleaned}`, { replace: true });
         }

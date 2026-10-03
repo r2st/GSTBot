@@ -12,6 +12,9 @@ vi.mock("../lib/share", () => ({
   copyToClipboard: vi.fn().mockResolvedValue(true),
 }));
 
+const mockTrack = vi.fn();
+vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
+
 function renderCalc(route = "/calculator") {
   return render(
     <MemoryRouter initialEntries={[route]}>
@@ -120,5 +123,13 @@ describe("CalculatorPage", () => {
 
     const result = document.querySelector(".calc-result");
     expect(result.textContent).toContain("5%");
+  });
+
+  it("fires gst_calculate tracking event when result is computed", async () => {
+    renderCalc();
+
+    await userEvent.type(screen.getByPlaceholderText("Enter amount in ₹"), "1000");
+
+    expect(mockTrack).toHaveBeenCalledWith("gst_calculate", expect.objectContaining({ amount: 1000, rate: 18 }));
   });
 });

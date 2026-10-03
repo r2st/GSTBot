@@ -11,6 +11,9 @@ vi.mock("../lib/share", () => ({
   copyToClipboard: (...args) => mockCopyToClipboard(...args),
 }));
 
+const mockTrack = vi.fn();
+vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
+
 function renderHsn() {
   return render(
     <MemoryRouter initialEntries={["/hsn"]}>
@@ -95,5 +98,13 @@ describe("HsnFinderPage", () => {
     renderHsn();
 
     expect(screen.getByText("What Are HSN and SAC Codes?")).toBeInTheDocument();
+  });
+
+  it("fires hsn_search tracking event when searching", async () => {
+    renderHsn();
+
+    await userEvent.type(screen.getByPlaceholderText(/laptop/), "cement");
+
+    expect(mockTrack).toHaveBeenCalledWith("hsn_search", { query: "cement" });
   });
 });

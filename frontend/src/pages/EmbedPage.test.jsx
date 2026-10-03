@@ -12,6 +12,9 @@ vi.mock("../lib/share", () => ({
   embedSnippet: (tool) => `<iframe src="http://localhost/embed/${tool}" width="100%" height="400"></iframe>`,
 }));
 
+const mockTrack = vi.fn();
+vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
+
 function renderEmbed() {
   return render(
     <MemoryRouter initialEntries={["/embed"]}>
@@ -73,5 +76,14 @@ describe("EmbedPage", () => {
     renderEmbed();
 
     expect(screen.getByText(/No sign-up required/)).toBeInTheDocument();
+  });
+
+  it("fires embed_copy tracking event when embed code is copied", async () => {
+    mockCopyToClipboard.mockResolvedValue(true);
+    renderEmbed();
+
+    await userEvent.click(screen.getByText("Copy embed code"));
+
+    expect(mockTrack).toHaveBeenCalledWith("embed_copy", { tool: "calculator" });
   });
 });

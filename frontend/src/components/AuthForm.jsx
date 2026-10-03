@@ -4,6 +4,7 @@ import ErrorBanner from "./ErrorBanner";
 import { useAuth } from "../hooks/useAuth";
 import { api } from "../lib/api";
 import { gstinShapeError, normalizeGstin, registrationErrors } from "../lib/validate";
+import { track } from "../lib/track";
 
 const EMPTY = {
   email: "",
@@ -29,6 +30,7 @@ export default function AuthForm() {
   const registering = mode === "register";
 
   function switchTo(next) {
+    if (next === "register") track("signup_click");
     setMode(next);
     setError("");
     setFieldErrors({});

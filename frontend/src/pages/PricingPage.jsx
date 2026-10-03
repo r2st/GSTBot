@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
+import { track } from "../lib/track";
 
 const TIER_ORDER = ["free", "pro", "enterprise"];
 const TIER_LABELS = { free: "Free", pro: "Pro", enterprise: "Enterprise" };
@@ -50,6 +51,10 @@ export default function PricingPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    track("pricing_view");
+  }, []);
 
   async function handleSubscribe(tier) {
     if (tier === "free") return;

@@ -12,6 +12,9 @@ vi.mock("../lib/share", () => ({
   copyToClipboard: vi.fn().mockResolvedValue(true),
 }));
 
+const mockTrack = vi.fn();
+vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
+
 const mockValidateGstin = vi.fn();
 vi.mock("../lib/api", () => ({
   api: { validateGstin: (...args) => mockValidateGstin(...args) },
@@ -87,5 +90,23 @@ describe("LookupPage", () => {
 
     expect(screen.getByText("What Is a GSTIN?")).toBeInTheDocument();
     expect(screen.getByText("GSTIN Format")).toBeInTheDocument();
+  });
+
+  it("fires gstin_lookup tracking event on verification", async () => {
+    mockValidateGstin.mockResolvedValue({
+      valid: true,
+      gstin: "27AAPFU0939F1ZV",
+      state_code: "27",
+      state_name: "Maharashtra",
+      pan: "AAPFU0939F",
+    });
+    renderLookup();
+
+    await userEvent.type(screen.getByPlaceholderText(/27AAPFU0939F1ZV/), "27AAPFU0939F1ZV");
+    await userEvent.click(screen.getByText("Verify GSTIN"));
+
+    await waitFor(() => {
+      expect(mockTrack).toHaveBeenCalledWith("gstin_lookup", { gstin: "27AAPFU0939F1ZV" });
+    });
   });
 });
