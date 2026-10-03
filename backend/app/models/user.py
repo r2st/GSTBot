@@ -38,9 +38,11 @@ class User(Base, TimestampMixin):
         ForeignKey("businesses.id", ondelete="CASCADE"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
+    hashed_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     phone: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    oauth_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     role: Mapped[UserRole] = mapped_column(
         SAEnum(UserRole, native_enum=False, length=20), default=UserRole.OWNER, nullable=False
     )

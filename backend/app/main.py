@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.sessions import SessionMiddleware
 
 import app.models  # noqa: F401  (registers every model on Base.metadata)
 from app.core.config import settings, validate_startup_config
@@ -34,6 +35,7 @@ from app.routers import (
     invoices,
     itc,
     misc,
+    oauth,
     reconciliation,
     subscriptions,
     suppliers,
@@ -339,9 +341,12 @@ def create_app() -> FastAPI:
         max_age=600,
     )
 
+    application.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret)
+
     prefix = settings.api_v1_prefix
     application.include_router(misc.router, prefix=prefix)
     application.include_router(auth.router, prefix=prefix)
+    application.include_router(oauth.router, prefix=prefix)
     application.include_router(businesses.router, prefix=prefix)
     application.include_router(invoices.router, prefix=prefix)
     application.include_router(dashboard.router, prefix=prefix)

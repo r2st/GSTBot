@@ -26,6 +26,7 @@ import StatusPage from "./pages/StatusPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import UploadPage from "./pages/UploadPage";
 import UsagePage from "./pages/UsagePage";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -86,6 +87,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/blog" element={<BlogLayout />}>
         <Route index element={<BlogIndex />} />

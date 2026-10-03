@@ -205,6 +205,15 @@ class Settings(BaseSettings):
     razorpay_plan_id_pro: str = ""
     razorpay_plan_id_enterprise: str = ""
 
+    # ---- OAuth / SSO ----
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+    oauth_redirect_base: str = "http://localhost:3008"
+
     # ---- Uploads ----
     upload_dir: str = "./data/invoices"
     max_upload_mb: int = 15

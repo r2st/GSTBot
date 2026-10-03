@@ -557,7 +557,49 @@ select[aria-invalid="true"]:focus {
   color: var(--brand-hover);
 }
 
-/* Auth form inputs (shared between landing and standalone login) */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 20px 0;
+  color: var(--ink-faint);
+  font-size: 13px;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.auth-sso-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.auth-sso-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  border: 1px solid var(--border);
+  background: var(--bg-card, #fff);
+  color: var(--ink, #1a1a1a);
+}
+.auth-sso-btn:hover {
+  border-color: var(--brand, #F0B429);
+}
+.auth-sso-google:hover { border-color: #4285F4; }
+.auth-sso-github { background: #24292e; color: #fff; border-color: #24292e; }
+.auth-sso-github:hover { background: #2f363d; }
+.auth-sso-microsoft:hover { border-color: #00a4ef; }
 
 /* ---- Landing page (DoAide 409A split template) ---- */
 .landing-root {
