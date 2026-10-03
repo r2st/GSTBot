@@ -4,7 +4,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -110,33 +110,36 @@ def get_dashboard(
     period = period or invoice_service.month_of()
     scope = [Invoice.business_id == business.id, Invoice.deleted_at.is_(None)]
 
-    # ---- Counts (lifetime, one grouped query per dimension) ----
-    by_type = dict(
-        db.execute(
-            select(Invoice.invoice_type, func.count(Invoice.id)).where(*scope)
-            .group_by(Invoice.invoice_type)
-        ).all()
-    )
-    by_status = dict(
-        db.execute(
-            select(Invoice.status, func.count(Invoice.id)).where(*scope).group_by(Invoice.status)
-        ).all()
-    )
+    # ---- Counts (lifetime, one scan for all three dimensions) ----
+    _count_rows = db.execute(
+        select(
+            Invoice.invoice_type,
+            Invoice.status,
+            func.count(Invoice.id),
+            func.sum(
+                case(
+                    (
+                        (Invoice.extraction_confidence.is_(None))
+                        | (Invoice.extraction_confidence < REVIEW_CONFIDENCE_THRESHOLD),
+                        1,
+                    ),
+                    else_=0,
+                )
+            ),
+        ).where(*scope).group_by(Invoice.invoice_type, Invoice.status)
+    ).all()
+
+    by_type: dict = {}
+    by_status: dict = {}
+    needs_review = 0
+    for _inv_type, _status, _cnt, _low_conf in _count_rows:
+        by_type[_inv_type] = by_type.get(_inv_type, 0) + _cnt
+        by_status[_status] = by_status.get(_status, 0) + _cnt
+        if _status in (InvoiceStatus.PARSED, InvoiceStatus.FAILED):
+            needs_review += int(_low_conf or 0)
 
     def _key(value) -> str:
         return value.value if hasattr(value, "value") else str(value)
-
-    needs_review = int(
-        db.scalar(
-            select(func.count(Invoice.id)).where(
-                *scope,
-                Invoice.status.in_((InvoiceStatus.PARSED, InvoiceStatus.FAILED)),
-                (Invoice.extraction_confidence.is_(None))
-                | (Invoice.extraction_confidence < REVIEW_CONFIDENCE_THRESHOLD),
-            )
-        )
-        or 0
-    )
 
     counts = InvoiceCounts(
         total=sum(by_type.values()),

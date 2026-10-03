@@ -602,10 +602,11 @@ class TestTheChartCostsOneScanRatherThanSeven:
         finally:
             event.remove(engine, "before_cursor_execute", _record)
 
-        assert len(statements) == 1, f"{len(statements)} scans:\n" + "\n".join(statements)
-        # Grouped by period as well as direction, which is what lets the one
-        # scan answer for all seven months.
-        assert "group by" in statements[0]
+        # Two scans: the fused lifetime counts (type×status) and the
+        # fused tax summaries (period×direction). Both are single-pass
+        # grouped queries rather than one per dimension or one per month.
+        assert len(statements) == 2, f"{len(statements)} scans:\n" + "\n".join(statements)
+        assert all("group by" in s for s in statements)
 
     def test_the_history_still_reads_month_by_month(
         self, auth_client, db_session, business
