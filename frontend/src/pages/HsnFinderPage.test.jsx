@@ -1,0 +1,99 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import HsnFinderPage from "./HsnFinderPage";
+
+vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+
+const mockCopyToClipboard = vi.fn();
+vi.mock("../lib/share", () => ({
+  copyToClipboard: (...args) => mockCopyToClipboard(...args),
+}));
+
+function renderHsn() {
+  return render(
+    <MemoryRouter initialEntries={["/hsn"]}>
+      <HsnFinderPage />
+    </MemoryRouter>,
+  );
+}
+
+describe("HsnFinderPage", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("renders the HSN finder title and search input", () => {
+    renderHsn();
+
+    expect(screen.getByText("HSN / SAC Code Finder")).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/laptop/)).toBeInTheDocument();
+  });
+
+  it("shows category cards when search is empty", () => {
+    renderHsn();
+
+    expect(screen.getByText("Browse by Category")).toBeInTheDocument();
+    expect(screen.getByText("Food")).toBeInTheDocument();
+    expect(screen.getByText("Electronics")).toBeInTheDocument();
+  });
+
+  it("shows results when searching by keyword", async () => {
+    renderHsn();
+
+    await userEvent.type(screen.getByPlaceholderText(/laptop/), "cement");
+
+    expect(screen.getByText(/cement/i)).toBeInTheDocument();
+    expect(screen.getByText("2523")).toBeInTheDocument();
+    expect(screen.getByText("28%")).toBeInTheDocument();
+  });
+
+  it("shows no-matching message for unknown search", async () => {
+    renderHsn();
+
+    await userEvent.type(screen.getByPlaceholderText(/laptop/), "xyznonexistent");
+
+    expect(screen.getByText(/No matching HSN\/SAC codes/)).toBeInTheDocument();
+  });
+
+  it("hides categories when a query is active", async () => {
+    renderHsn();
+
+    await userEvent.type(screen.getByPlaceholderText(/laptop/), "rice");
+
+    expect(screen.queryByText("Browse by Category")).not.toBeInTheDocument();
+  });
+
+  it("shows a copy button per result row", async () => {
+    renderHsn();
+
+    await userEvent.type(screen.getByPlaceholderText(/laptop/), "cement");
+
+    const copyButtons = screen.getAllByText("Copy");
+    expect(copyButtons.length).toBeGreaterThan(0);
+  });
+
+  it("copy button shows Copied! on click", async () => {
+    mockCopyToClipboard.mockResolvedValue(true);
+    renderHsn();
+
+    await userEvent.type(screen.getByPlaceholderText(/laptop/), "cement");
+    const copyBtn = screen.getAllByText("Copy")[0];
+    await userEvent.click(copyBtn);
+
+    expect(screen.getByText("Copied!")).toBeInTheDocument();
+  });
+
+  it("clicking a category populates the search", async () => {
+    renderHsn();
+
+    await userEvent.click(screen.getByText("Food"));
+
+    expect(screen.getByPlaceholderText(/laptop/)).toHaveValue("Food");
+  });
+
+  it("renders the info section", () => {
+    renderHsn();
+
+    expect(screen.getByText("What Are HSN and SAC Codes?")).toBeInTheDocument();
+  });
+});

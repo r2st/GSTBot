@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import LandingPage from "./LandingPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+vi.mock("../lib/share", () => ({
+  copyToClipboard: vi.fn().mockResolvedValue(true),
+  fullUrl: (p) => `http://localhost${p}`,
+}));
 vi.mock("../hooks/useAuth", () => ({
   useAuth: () => ({
     user: null,
@@ -209,6 +213,81 @@ describe("LandingPage", () => {
 
       expect(screen.getByText("Start Filing GST Returns in Minutes")).toBeInTheDocument();
       expect(screen.getByText("Sign Up Free")).toBeInTheDocument();
+    });
+  });
+
+  describe("InstantLookup section", () => {
+    it("shows the GSTIN verification search box", () => {
+      renderLanding();
+
+      expect(
+        screen.getByPlaceholderText(/Enter any GSTIN to verify/),
+      ).toBeInTheDocument();
+    });
+
+    it("shows the business counter", () => {
+      renderLanding();
+
+      expect(screen.getByText("12,000+")).toBeInTheDocument();
+      expect(screen.getByText(/businesses across India/)).toBeInTheDocument();
+    });
+
+    it("renders three tool cards", () => {
+      renderLanding();
+
+      const section = document.querySelector(".landing-tool-cards");
+      expect(section).not.toBeNull();
+      expect(section.textContent).toContain("GST Calculator");
+      expect(section.textContent).toContain("GSTIN Lookup");
+      expect(section.textContent).toContain("HSN Code Finder");
+    });
+
+    it("submits a GSTIN-shaped query to the lookup route", async () => {
+      renderLanding();
+
+      const input = screen.getByPlaceholderText(/Enter any GSTIN/);
+      await userEvent.type(input, "27AAPFU0939F1ZV");
+      await userEvent.click(screen.getByText("Verify"));
+    });
+
+    it("submits a non-GSTIN query to the lookup route with q param", async () => {
+      renderLanding();
+
+      const input = screen.getByPlaceholderText(/Enter any GSTIN/);
+      await userEvent.type(input, "test query");
+      await userEvent.click(screen.getByText("Verify"));
+    });
+
+    it("does nothing on empty submit", async () => {
+      renderLanding();
+
+      await userEvent.click(screen.getByText("Verify"));
+    });
+  });
+
+  describe("ReferralBanner section", () => {
+    it("renders the invite heading", () => {
+      renderLanding();
+
+      expect(screen.getByText("Invite Your CA or Accountant")).toBeInTheDocument();
+    });
+
+    it("has a WhatsApp share link", () => {
+      renderLanding();
+
+      expect(screen.getByText("Share on WhatsApp")).toBeInTheDocument();
+    });
+
+    it("has a copy invite link button", () => {
+      renderLanding();
+
+      expect(screen.getByText("Copy invite link")).toBeInTheDocument();
+    });
+
+    it("copies the invite link when clicked", async () => {
+      renderLanding();
+
+      await userEvent.click(screen.getByText("Copy invite link"));
     });
   });
 

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import AuthForm from "../components/AuthForm";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { copyToClipboard, fullUrl } from "../lib/share";
 
 const DOAIDE_PRODUCTS = [
   { name: "Desk", url: "https://desk.doaide.com" },
@@ -331,6 +332,125 @@ function FaqSection() {
   );
 }
 
+const INSTANT_TOOLS = [
+  {
+    to: "/calculator",
+    title: "GST Calculator",
+    desc: "Calculate CGST, SGST, IGST breakdown instantly",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="4" y="2" width="16" height="20" rx="2" />
+        <line x1="8" y1="6" x2="16" y2="6" />
+        <line x1="8" y1="10" x2="10" y2="10" /><line x1="14" y1="10" x2="16" y2="10" />
+        <line x1="8" y1="14" x2="10" y2="14" /><line x1="14" y1="14" x2="16" y2="14" />
+        <line x1="8" y1="18" x2="16" y2="18" />
+      </svg>
+    ),
+  },
+  {
+    to: "/lookup",
+    title: "GSTIN Lookup",
+    desc: "Verify any GST number — check validity & state",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8" />
+        <line x1="21" y1="21" x2="16.65" y2="16.65" />
+      </svg>
+    ),
+  },
+  {
+    to: "/hsn",
+    title: "HSN Code Finder",
+    desc: "Search HSN/SAC codes & GST rates by product name",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="8" y1="13" x2="16" y2="13" />
+        <line x1="8" y1="17" x2="13" y2="17" />
+      </svg>
+    ),
+  },
+];
+
+function InstantLookup() {
+  const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    const q = query.trim().toUpperCase();
+    if (!q) return;
+    if (/^\d{2}[A-Z]{5}\d{4}[A-Z]\w/.test(q)) {
+      navigate(`/gstin/${q}`);
+    } else {
+      navigate(`/lookup?q=${encodeURIComponent(q)}`);
+    }
+  };
+
+  return (
+    <section className="landing-instant">
+      <form onSubmit={handleSubmit} className="landing-search-box">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Enter any GSTIN to verify instantly — no sign-up needed"
+          className="landing-search-input"
+          spellCheck={false}
+          autoComplete="off"
+        />
+        <button type="submit" className="btn btn-primary landing-search-btn">
+          Verify
+        </button>
+      </form>
+      <p className="landing-instant-stat">
+        Used by <strong>12,000+</strong> businesses across India
+      </p>
+      <div className="landing-tool-cards">
+        {INSTANT_TOOLS.map((t) => (
+          <Link key={t.to} to={t.to} className="landing-tool-card">
+            <div className="landing-tool-icon">{t.icon}</div>
+            <strong>{t.title}</strong>
+            <span>{t.desc}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReferralBanner() {
+  const [copied, setCopied] = useState(false);
+  const url = fullUrl("/?ref=invite");
+  const handleCopy = async () => {
+    const ok = await copyToClipboard(url);
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+  return (
+    <section className="landing-referral">
+      <h2>Invite Your CA or Accountant</h2>
+      <p>Share DoAide GST with your chartered accountant — they can manage all your GST filings in one place.</p>
+      <div className="landing-referral-actions">
+        <a
+          href={`https://wa.me/?text=${encodeURIComponent("Check out DoAide GST — free GST compliance tool for Indian businesses: " + url)}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="btn btn-primary"
+        >
+          Share on WhatsApp
+        </a>
+        <button onClick={handleCopy} className="btn landing-copy-btn">
+          {copied ? "Link copied!" : "Copy invite link"}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export default function LandingPage() {
   usePageTitle("Free AI-Powered GST Compliance Tool for Indian Businesses");
   const [visible, setVisible] = useState(false);
@@ -355,6 +475,8 @@ export default function LandingPage() {
       </header>
 
       <main>
+        <InstantLookup />
+
         <div className={`landing-split ${vis}`}>
           <div className="landing-left">
             <div className="landing-hero-robot-wrap">
@@ -431,6 +553,8 @@ export default function LandingPage() {
 
         <FaqSection />
 
+        <ReferralBanner />
+
         <section className="landing-cta">
           <h2>Start Filing GST Returns in Minutes</h2>
           <p>Free forever for up to 50 invoices/month. No credit card required.</p>
@@ -442,6 +566,13 @@ export default function LandingPage() {
 
       <footer className="landing-footer">
         <div className="landing-footer-nav">
+          <div className="landing-footer-col">
+            <h4>Free Tools</h4>
+            <Link to="/calculator">GST Calculator</Link>
+            <Link to="/lookup">GSTIN Lookup</Link>
+            <Link to="/hsn">HSN Code Finder</Link>
+            <Link to="/embed">Embed Widget</Link>
+          </div>
           <div className="landing-footer-col">
             <h4>Product</h4>
             <Link to="/pricing">Pricing</Link>

@@ -32,6 +32,12 @@ vi.mock("./pages/ITCPage", () => ({ default: () => <div>ITC page</div> }));
 vi.mock("./pages/FilingPage", () => ({ default: () => <div>Filing page</div> }));
 vi.mock("./pages/SuppliersPage", () => ({ default: () => <div>Suppliers page</div> }));
 vi.mock("./pages/AlertsPage", () => ({ default: () => <div>Alerts page</div> }));
+vi.mock("./pages/CalculatorPage", () => ({ default: () => <div>Calculator page</div> }));
+vi.mock("./pages/LookupPage", () => ({ default: () => <div>Lookup page</div> }));
+vi.mock("./pages/HsnFinderPage", () => ({ default: () => <div>HSN page</div> }));
+vi.mock("./pages/GstinPage", () => ({ default: () => <div>GSTIN page</div> }));
+vi.mock("./pages/GstRatePage", () => ({ default: () => <div>GST rate page</div> }));
+vi.mock("./pages/EmbedPage", () => ({ default: () => <div>Embed page</div> }));
 
 const USER = { id: 1, email: "owner@acme.in", business: { legal_name: "Acme Traders" } };
 
@@ -106,6 +112,21 @@ describe("App routing", () => {
       renderAt("/nope/not/a/page", { user: null, loading: false });
 
       expect(screen.getByText("Landing page")).toBeInTheDocument();
+    });
+  });
+
+  describe("public tool routes (no auth needed)", () => {
+    it.each([
+      ["/calculator", "Calculator page"],
+      ["/lookup", "Lookup page"],
+      ["/hsn", "HSN page"],
+      ["/gstin/27AAPFU0939F1ZV", "GSTIN page"],
+      ["/gst-rate/laptop", "GST rate page"],
+      ["/embed", "Embed page"],
+    ])("renders %s without auth", (route, expected) => {
+      renderAt(route, { user: null, loading: false });
+
+      expect(screen.getByText(expected)).toBeInTheDocument();
     });
   });
 

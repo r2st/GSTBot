@@ -2463,3 +2463,606 @@ a:focus-visible {
     min-height: 44px;
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Free tools: /calculator, /lookup, /hsn, /gstin/:id, /gst-rate/:id  */
+/* ------------------------------------------------------------------ */
+
+.tool-page {
+  min-height: 100vh;
+  background: var(--canvas);
+}
+
+.tools-nav {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--glass);
+  backdrop-filter: blur(12px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  flex-wrap: wrap;
+}
+.tools-nav-brand {
+  font-weight: 700;
+  font-size: 1.1rem;
+  text-decoration: none;
+  color: var(--ink-strong) !important;
+  margin-right: auto;
+}
+.tools-nav-brand em {
+  color: var(--brand);
+  font-style: normal;
+}
+.tools-nav-links {
+  display: flex;
+  gap: 0.25rem;
+}
+.tools-nav-link {
+  padding: 0.35rem 0.75rem;
+  border-radius: var(--radius);
+  font-size: 0.85rem;
+  text-decoration: none;
+  color: var(--ink-soft) !important;
+  transition: background var(--doaide-transition, 150ms ease);
+}
+.tools-nav-link:hover,
+.tools-nav-link.active {
+  background: var(--glass-feature-bg);
+  color: var(--brand) !important;
+}
+.tools-nav-cta {
+  font-size: 0.85rem;
+  padding: 0.4rem 1rem;
+  border-radius: var(--radius);
+  background: var(--brand);
+  color: var(--brand-text) !important;
+  text-decoration: none;
+  font-weight: 600;
+  transition: background var(--doaide-transition, 150ms ease);
+}
+.tools-nav-cta:hover { background: var(--brand-hover); }
+
+.tool-main {
+  padding: 2rem 1.5rem 4rem;
+}
+.tool-container {
+  max-width: 640px;
+  margin: 0 auto;
+}
+.tool-title {
+  font-size: 1.8rem;
+  margin: 0 0 0.25rem;
+  color: var(--ink-strong);
+}
+.tool-subtitle {
+  color: var(--ink-soft);
+  margin: 0 0 1.5rem;
+}
+
+/* Shared card for calculator, lookup, HSN */
+.calc-card {
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  box-shadow: var(--shadow);
+}
+.calc-label {
+  display: block;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin-bottom: 1rem;
+}
+.calc-input {
+  display: block;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 1.05rem;
+  border: 1px solid var(--glass-input-border);
+  border-radius: 6px;
+  background: var(--glass-input);
+  color: var(--ink);
+  transition: border-color var(--doaide-transition, 150ms ease);
+}
+.calc-input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 2px rgba(240, 180, 41, 0.15);
+}
+.calc-select {
+  display: block;
+  width: 100%;
+  margin-top: 0.4rem;
+  padding: 0.65rem 0.75rem;
+  font-size: 1.05rem;
+  border: 1px solid var(--glass-input-border);
+  border-radius: 6px;
+  background: var(--glass-input);
+  color: var(--ink);
+  cursor: pointer;
+}
+.calc-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--ink);
+  margin-bottom: 1rem;
+  cursor: pointer;
+}
+.calc-checkbox-label input[type="checkbox"] {
+  accent-color: var(--brand);
+  width: 16px;
+  height: 16px;
+}
+
+/* Calculator mode toggle */
+.calc-mode-toggle {
+  display: flex;
+  gap: 0;
+  margin-bottom: 1.25rem;
+  border: 1px solid var(--glass-input-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.calc-mode-btn {
+  flex: 1;
+  padding: 0.5rem;
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.calc-mode-btn.active {
+  background: var(--brand);
+  color: var(--brand-text);
+}
+
+/* Calculator results */
+.calc-result {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+.calc-result-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.4rem 0;
+  font-size: 0.95rem;
+}
+.calc-result-row span { color: var(--ink-soft); }
+.calc-result-row strong { color: var(--ink-strong); }
+.calc-total {
+  border-top: 1px solid var(--line);
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  font-size: 1.1rem;
+}
+.calc-total strong { color: var(--brand); }
+
+/* GSTIN Lookup */
+.lookup-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.lookup-btn {
+  align-self: flex-start;
+  min-width: 140px;
+}
+.lookup-error {
+  color: var(--bad);
+  margin: 0.75rem 0 0;
+  font-size: 0.9rem;
+}
+.lookup-result {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--line);
+}
+.lookup-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 99px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+.lookup-valid {
+  background: var(--good-bg);
+  color: var(--good);
+}
+.lookup-invalid {
+  background: var(--bad-bg);
+  color: var(--bad);
+}
+.lookup-details {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  font-size: 0.9rem;
+  margin-bottom: 1rem;
+}
+.lookup-details dt {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.lookup-details dd {
+  margin: 0;
+  color: var(--ink);
+}
+.lookup-gstin-value {
+  font-family: var(--doaide-font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.95rem;
+  letter-spacing: 0.03em;
+}
+.lookup-reason {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+}
+
+/* HSN Finder */
+.hsn-results { margin-top: 1rem; }
+.hsn-empty {
+  color: var(--ink-soft);
+  font-style: italic;
+  text-align: center;
+  padding: 1.5rem 0;
+}
+.hsn-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.hsn-table th {
+  text-align: left;
+  padding: 0.5rem 0.75rem;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--line);
+}
+.hsn-table td {
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+}
+.hsn-code {
+  font-family: var(--doaide-font-mono, 'IBM Plex Mono', monospace);
+  font-weight: 600;
+  color: var(--brand);
+}
+.hsn-rate {
+  font-weight: 600;
+  text-align: right;
+}
+.hsn-sac-badge {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1rem 0.4rem;
+  font-size: 0.7rem;
+  border-radius: 4px;
+  background: var(--glass-feature-bg);
+  color: var(--brand);
+  font-weight: 600;
+  vertical-align: middle;
+}
+.hsn-copy-btn {
+  border: 1px solid var(--glass-input-border);
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.hsn-copy-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+.hsn-categories { margin-top: 2rem; }
+.hsn-categories h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1rem;
+  color: var(--ink-strong);
+}
+.hsn-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+}
+.hsn-cat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--glass-feature-border);
+  border-radius: var(--radius);
+  background: var(--glass-feature-bg);
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.9rem;
+  color: var(--ink);
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.hsn-cat-card:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow);
+}
+.hsn-cat-card strong { color: var(--ink-strong); }
+.hsn-cat-count {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
+/* Share buttons */
+.share-buttons {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+.share-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-decoration: none;
+  border: 1px solid var(--glass-input-border);
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.share-btn:hover {
+  border-color: var(--brand);
+}
+.share-whatsapp:hover { color: #25D366 !important; border-color: #25D366; }
+.share-twitter:hover { color: var(--ink-strong) !important; }
+
+/* GST Rate page */
+.rate-hero {
+  text-align: center;
+  padding: 1.5rem 0;
+}
+.rate-big {
+  font-size: 3rem;
+  font-weight: 800;
+  color: var(--brand);
+  line-height: 1;
+}
+.rate-label {
+  color: var(--ink-soft);
+  font-size: 0.9rem;
+  margin: 0.25rem 0 0;
+}
+.rate-calc-link {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+}
+
+/* Embed page */
+.embed-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.embed-tool-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  text-align: left;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--glass-input-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.embed-tool-btn.active {
+  border-color: var(--brand);
+  background: var(--glass-feature-bg);
+}
+.embed-tool-btn strong { font-size: 0.9rem; }
+.embed-tool-btn span {
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+}
+.embed-code {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: var(--glass-input);
+  border: 1px solid var(--glass-input-border);
+  border-radius: 6px;
+  font-family: var(--doaide-font-mono, 'IBM Plex Mono', monospace);
+  font-size: 0.8rem;
+  color: var(--ink);
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+/* Tool info sections (below the card) */
+.tool-info {
+  margin-top: 2.5rem;
+  max-width: 640px;
+}
+.tool-info h2 {
+  font-size: 1.15rem;
+  margin: 0 0 0.75rem;
+  color: var(--ink-strong);
+}
+.tool-info h3 {
+  font-size: 0.95rem;
+  margin: 1.25rem 0 0.5rem;
+  color: var(--ink-strong);
+}
+.tool-info p {
+  color: var(--ink-soft);
+  line-height: 1.6;
+  margin: 0 0 0.75rem;
+}
+.tool-info ul, .tool-info ol {
+  padding-left: 1.25rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+}
+.tool-info li {
+  margin-bottom: 0.35rem;
+  line-height: 1.5;
+}
+
+/* Landing page: instant lookup hero */
+.landing-instant {
+  text-align: center;
+  padding: 0 1.5rem;
+  margin-bottom: 2rem;
+}
+.landing-search-box {
+  display: flex;
+  max-width: 600px;
+  margin: 0 auto 0.75rem;
+  border: 2px solid var(--glass-feature-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: var(--glass);
+  box-shadow: var(--doaide-shadow-gold, 0 0 20px rgba(240,180,41,0.15));
+  transition: border-color var(--doaide-transition, 150ms ease);
+}
+.landing-search-box:focus-within {
+  border-color: var(--brand);
+}
+.landing-search-input {
+  flex: 1;
+  padding: 0.85rem 1rem;
+  border: none;
+  background: transparent;
+  font-size: 0.95rem;
+  color: var(--ink);
+  outline: none;
+}
+.landing-search-input::placeholder {
+  color: var(--glass-input-placeholder);
+}
+.landing-search-btn {
+  padding: 0.85rem 1.25rem;
+  border: none;
+  border-radius: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.landing-instant-stat {
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin: 0 0 1.5rem;
+}
+.landing-tool-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  max-width: 720px;
+  margin: 0 auto;
+}
+.landing-tool-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1rem 0.75rem;
+  border: 1px solid var(--glass-feature-border);
+  border-radius: var(--radius);
+  background: var(--glass-feature-bg);
+  text-decoration: none;
+  color: var(--ink) !important;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.landing-tool-card:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow);
+  transform: translateY(-2px);
+}
+.landing-tool-icon { margin-bottom: 0.25rem; }
+.landing-tool-card strong {
+  font-size: 0.9rem;
+  color: var(--ink-strong);
+}
+.landing-tool-card span {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+/* Referral banner */
+.landing-referral {
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  margin: 0 1.5rem 2rem;
+  background: var(--glass-feature-bg);
+  border: 1px solid var(--glass-feature-border);
+  border-radius: var(--radius);
+}
+.landing-referral h2 {
+  font-size: 1.3rem;
+  margin: 0 0 0.5rem;
+  color: var(--ink-strong);
+}
+.landing-referral p {
+  color: var(--ink-soft);
+  margin: 0 0 1.25rem;
+  max-width: 500px;
+  margin-left: auto;
+  margin-right: auto;
+}
+.landing-referral-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.landing-copy-btn {
+  background: transparent;
+  border: 1px solid var(--glass-input-border);
+  color: var(--ink);
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.landing-copy-btn:hover {
+  border-color: var(--brand);
+}
+
+/* Responsive: tool pages */
+@media (max-width: 600px) {
+  .tools-nav { gap: 0.5rem; padding: 0.5rem 1rem; }
+  .tools-nav-links { display: none; }
+  .tool-main { padding: 1.5rem 1rem 3rem; }
+  .tool-title { font-size: 1.4rem; }
+  .calc-card { padding: 1rem; }
+  .landing-tool-cards { grid-template-columns: 1fr; max-width: 300px; }
+  .hsn-cat-grid { grid-template-columns: repeat(2, 1fr); }
+  .landing-search-box { flex-direction: column; }
+  .landing-search-btn { border-radius: 0; }
+  .share-buttons { justify-content: center; }
+}

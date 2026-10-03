@@ -8,12 +8,18 @@ import BlogLayout, { BlogIndex } from "./pages/BlogLayout";
 import GstComplianceChecklist from "./pages/blog/GstComplianceChecklist";
 import GstFilingGuide from "./pages/blog/GstFilingGuide";
 import HsnCodeLookup from "./pages/blog/HsnCodeLookup";
+import CalculatorPage from "./pages/CalculatorPage";
 import DashboardPage from "./pages/DashboardPage";
+import EmbedPage from "./pages/EmbedPage";
 import FilingPage from "./pages/FilingPage";
+import GstinPage from "./pages/GstinPage";
+import GstRatePage from "./pages/GstRatePage";
+import HsnFinderPage from "./pages/HsnFinderPage";
 import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ITCPage from "./pages/ITCPage";
 import LandingPage from "./pages/LandingPage";
+import LookupPage from "./pages/LookupPage";
 import PricingPage from "./pages/PricingPage";
 import ReconcilePage from "./pages/ReconcilePage";
 import StatusPage from "./pages/StatusPage";
@@ -87,6 +93,12 @@ export default function App() {
         <Route path="hsn-code-lookup" element={<HsnCodeLookup />} />
         <Route path="gst-compliance-checklist-small-business" element={<GstComplianceChecklist />} />
       </Route>
+      <Route path="/calculator" element={<CalculatorPage />} />
+      <Route path="/lookup" element={<LookupPage />} />
+      <Route path="/hsn" element={<HsnFinderPage />} />
+      <Route path="/gstin/:gstin" element={<GstinPage />} />
+      <Route path="/gst-rate/:product" element={<GstRatePage />} />
+      <Route path="/embed" element={<EmbedPage />} />
       <Route path="/" element={<Home />} />
       <Route
         path="/invoices"
