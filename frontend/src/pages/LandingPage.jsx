@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import AuthForm from "../components/AuthForm";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -235,6 +236,7 @@ export default function LandingPage() {
               <span>500+ invoices, priority support</span>
             </div>
           </div>
+          <Link to="/pricing" className="landing-pricing-link">View all plans →</Link>
           <p className="landing-seo-blurb">
             Trusted by Indian SMBs for automated GST compliance — invoice
             matching, supplier tracking, ITC reconciliation, and on-time return

@@ -13,7 +13,9 @@ from app.models.reconciliation_run import (
     ReconciliationRun,
     ReconciliationStatus,
 )
+from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.supplier import RiskLevel, Supplier
+from app.models.usage import UsageRecord
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -37,6 +39,10 @@ __all__ = [
     "ReturnType",
     "RiskLevel",
     "Supplier",
+    "Subscription",
+    "SubscriptionStatus",
+    "SubscriptionTier",
+    "UsageRecord",
     "User",
     "UserRole",
 ]

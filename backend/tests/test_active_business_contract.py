@@ -301,6 +301,9 @@ class TestTheSweepCoversEveryBusinessScopedRoute:
             ("POST", "/api/v1/itc/set-off"),
             ("POST", "/api/v1/filing/{return_type}/filed"),
             ("POST", "/api/v1/suppliers/rescore"),
+            ("POST", "/api/v1/subscriptions/cancel"),
+            ("POST", "/api/v1/subscriptions/create-order"),
+            ("POST", "/api/v1/subscriptions/verify-payment"),
         }
 
 

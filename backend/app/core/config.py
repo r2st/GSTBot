@@ -196,6 +196,15 @@ class Settings(BaseSettings):
     # the run in minutes, not hold a worker for the afternoon.
     smtp_retry_max_wait_seconds: float = Field(default=15.0, ge=0, le=120)
 
+    # ---- Razorpay ----
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    # Razorpay plan IDs created via the dashboard or API, keyed by tier name.
+    # Set at deploy time once plans exist; empty disables subscription creation.
+    razorpay_plan_id_pro: str = ""
+    razorpay_plan_id_enterprise: str = ""
+
     # ---- Uploads ----
     upload_dir: str = "./data/invoices"
     max_upload_mb: int = 15

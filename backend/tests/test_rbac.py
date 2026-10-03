@@ -496,6 +496,9 @@ UNGATED_MUTATIONS = {
     # the verb is the only thing about it that resembles a write; see
     # ``TestAViewerCanStillRead.test_the_set_off_calculator_is_still_open_to_them``.
     "/api/v1/itc/set-off",
+    # Called by Razorpay's servers, not by users — authenticated by webhook
+    # signature, not by a bearer token.
+    "/api/v1/subscriptions/webhook",
 }
 
 

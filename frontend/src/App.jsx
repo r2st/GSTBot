@@ -10,10 +10,12 @@ import InvoiceDetailPage from "./pages/InvoiceDetailPage";
 import InvoicesPage from "./pages/InvoicesPage";
 import ITCPage from "./pages/ITCPage";
 import LandingPage from "./pages/LandingPage";
+import PricingPage from "./pages/PricingPage";
 import ReconcilePage from "./pages/ReconcilePage";
 import StatusPage from "./pages/StatusPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import UploadPage from "./pages/UploadPage";
+import UsagePage from "./pages/UsagePage";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -74,6 +76,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
+      <Route path="/pricing" element={<PricingPage />} />
       <Route path="/" element={<Home />} />
       <Route
         path="/invoices"
@@ -136,6 +139,14 @@ export default function App() {
         element={
           <Protected>
             <AlertsPage />
+          </Protected>
+        }
+      />
+      <Route
+        path="/usage"
+        element={
+          <Protected>
+            <UsagePage />
           </Protected>
         }
       />

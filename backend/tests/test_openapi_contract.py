@@ -122,6 +122,8 @@ class TestUnauthorizedIsDocumentedWhereItCanHappen:
             "/api/v1/health/ready",
             "/api/v1/meta/gstin/{gstin}",
             "/api/v1/meta/states",
+            "/api/v1/subscriptions/pricing",
+            "/api/v1/subscriptions/webhook",
         ]
 
 

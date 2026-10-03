@@ -668,6 +668,18 @@ export const api = {
   /** Revokes access gained through `linkBusiness`. Never removes your own tenant. */
   unlinkBusiness: (id) => request(`/businesses/mine/${id}`, { method: "DELETE" }),
 
+  // ---- Subscriptions & Payments ----
+  pricing: () => request("/subscriptions/pricing", { auth: false }),
+  currentSubscription: () => request("/subscriptions/current"),
+  createOrder: (tier) =>
+    request("/subscriptions/create-order", { method: "POST", body: { tier } }),
+  verifyPayment: (payload) =>
+    request("/subscriptions/verify-payment", { method: "POST", body: payload }),
+  cancelSubscription: () =>
+    request("/subscriptions/cancel", { method: "POST" }),
+  usage: (period) =>
+    request(`/subscriptions/usage${period ? `?period=${encodeURIComponent(period)}` : ""}`),
+
   // ---- Background jobs (operational, not tenant data) ----
   /**
    * Worker reachability, broker queue depth, and scheduled-job heartbeats.

@@ -1,0 +1,416 @@
+"""Tests for subscription management, payment flow, and usage tracking."""
+from __future__ import annotations
+
+from unittest.mock import patch
+
+from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
+from app.services import razorpay_client
+from app.services import usage as usage_service
+
+# --------------------------------------------------------------------------
+# Pricing (public endpoint)
+# --------------------------------------------------------------------------
+
+class TestPricing:
+    def test_pricing_returns_all_tiers(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        assert response.status_code == 200
+        data = response.json()
+        assert "tiers" in data
+        assert "free" in data["tiers"]
+        assert "pro" in data["tiers"]
+        assert "enterprise" in data["tiers"]
+
+    def test_pricing_includes_razorpay_key(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        assert response.status_code == 200
+        assert "razorpay_key_id" in response.json()
+
+    def test_free_tier_has_zero_price(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        data = response.json()
+        assert data["tiers"]["free"]["price_monthly"] == 0
+
+    def test_pro_tier_costs_499(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        data = response.json()
+        assert data["tiers"]["pro"]["price_monthly"] == 499_00
+
+    def test_enterprise_tier_costs_1999(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        data = response.json()
+        assert data["tiers"]["enterprise"]["price_monthly"] == 1999_00
+
+    def test_each_tier_has_features(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        data = response.json()
+        for tier in data["tiers"].values():
+            assert len(tier["features"]) > 0
+
+    def test_pricing_is_accessible_without_a_token(self, client):
+        response = client.get("/api/v1/subscriptions/pricing")
+        assert response.status_code == 200
+
+
+# --------------------------------------------------------------------------
+# Current subscription
+# --------------------------------------------------------------------------
+
+class TestCurrentSubscription:
+    def test_no_subscription_returns_null(self, auth_client):
+        response = auth_client.get("/api/v1/subscriptions/current")
+        assert response.status_code == 200
+        assert response.json() is None
+
+    def test_returns_subscription_after_creation(self, auth_client, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+        response = auth_client.get("/api/v1/subscriptions/current")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] == "pro"
+        assert data["status"] == "active"
+
+    def test_requires_authentication(self, client):
+        response = client.get("/api/v1/subscriptions/current")
+        assert response.status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Create order
+# --------------------------------------------------------------------------
+
+class TestCreateOrder:
+    def test_free_tier_order_is_refused(self, auth_client):
+        response = auth_client.post(
+            "/api/v1/subscriptions/create-order",
+            json={"tier": "free"},
+        )
+        assert response.status_code == 400
+
+    def test_razorpay_not_configured_returns_503(self, auth_client):
+        with patch.object(razorpay_client, "is_configured", return_value=False):
+            response = auth_client.post(
+                "/api/v1/subscriptions/create-order",
+                json={"tier": "pro"},
+            )
+        assert response.status_code == 503
+
+    def test_razorpay_failure_returns_502(self, auth_client):
+        with (
+            patch.object(razorpay_client, "is_configured", return_value=True),
+            patch.object(razorpay_client, "create_order", return_value=None),
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/create-order",
+                json={"tier": "pro"},
+            )
+        assert response.status_code == 502
+
+    def test_successful_order_returns_order_details(self, auth_client):
+        mock_order = {
+            "id": "order_test123",
+            "amount": 499_00,
+            "currency": "INR",
+        }
+        with (
+            patch.object(razorpay_client, "is_configured", return_value=True),
+            patch.object(razorpay_client, "create_order", return_value=mock_order),
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/create-order",
+                json={"tier": "pro"},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["order_id"] == "order_test123"
+        assert data["amount"] == 499_00
+        assert data["tier"] == "pro"
+
+    def test_requires_authentication(self, client):
+        response = client.post(
+            "/api/v1/subscriptions/create-order",
+            json={"tier": "pro"},
+        )
+        assert response.status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Verify payment
+# --------------------------------------------------------------------------
+
+class TestVerifyPayment:
+    def test_invalid_signature_is_refused(self, auth_client):
+        with patch.object(
+            razorpay_client, "verify_payment_signature", return_value=False
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_test",
+                    "razorpay_payment_id": "pay_test",
+                    "razorpay_signature": "bad_sig",
+                    "tier": "pro",
+                },
+            )
+        assert response.status_code == 400
+
+    def test_valid_payment_creates_subscription(self, auth_client, db_session, business):
+        with patch.object(
+            razorpay_client, "verify_payment_signature", return_value=True
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_test",
+                    "razorpay_payment_id": "pay_test",
+                    "razorpay_signature": "valid_sig",
+                    "tier": "pro",
+                },
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] == "pro"
+        assert data["status"] == "active"
+        assert data["business_id"] == business.id
+
+    def test_valid_payment_upgrades_existing_subscription(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.FREE,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.object(
+            razorpay_client, "verify_payment_signature", return_value=True
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_test",
+                    "razorpay_payment_id": "pay_test",
+                    "razorpay_signature": "valid_sig",
+                    "tier": "enterprise",
+                },
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] == "enterprise"
+
+    def test_requires_authentication(self, client):
+        response = client.post(
+            "/api/v1/subscriptions/verify-payment",
+            json={
+                "razorpay_order_id": "order_test",
+                "razorpay_payment_id": "pay_test",
+                "razorpay_signature": "sig",
+                "tier": "pro",
+            },
+        )
+        assert response.status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Cancel subscription
+# --------------------------------------------------------------------------
+
+class TestCancelSubscription:
+    def test_cancelling_free_tier_is_refused(self, auth_client):
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 400
+
+    def test_cancelling_paid_subscription_reverts_to_free(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] == "free"
+        assert data["status"] == "cancelled"
+
+    def test_requires_authentication(self, client):
+        response = client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Usage tracking
+# --------------------------------------------------------------------------
+
+class TestUsageSummary:
+    def test_empty_usage_returns_empty_list(self, auth_client):
+        response = auth_client.get("/api/v1/subscriptions/usage")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["usage"] == []
+        assert data["tier"] == "free"
+
+    def test_records_show_in_summary(self, auth_client, db_session, business):
+        usage_service.record_usage(db_session, business.id, "gst_lookup", 3)
+        db_session.commit()
+
+        response = auth_client.get("/api/v1/subscriptions/usage")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["usage"]) == 1
+        assert data["usage"][0]["endpoint"] == "gst_lookup"
+        assert data["usage"][0]["call_count"] == 3
+
+    def test_requires_authentication(self, client):
+        response = client.get("/api/v1/subscriptions/usage")
+        assert response.status_code == 401
+
+
+# --------------------------------------------------------------------------
+# Usage service unit tests
+# --------------------------------------------------------------------------
+
+class TestUsageService:
+    def test_record_usage_creates_new_row(self, db_session, business):
+        row = usage_service.record_usage(db_session, business.id, "gst_lookup")
+        assert row.call_count == 1
+
+    def test_record_usage_increments_existing(self, db_session, business):
+        usage_service.record_usage(db_session, business.id, "gst_lookup", 2)
+        row = usage_service.record_usage(db_session, business.id, "gst_lookup", 3)
+        assert row.call_count == 5
+
+    def test_check_limit_allows_when_under(self, db_session, business):
+        allowed, used, limit = usage_service.check_limit(
+            db_session, business.id, "gst_lookup"
+        )
+        assert allowed is True
+        assert used == 0
+        assert limit == 5
+
+    def test_check_limit_refuses_when_at_limit(self, db_session, business):
+        usage_service.record_usage(db_session, business.id, "gst_lookup", 5)
+        db_session.flush()
+        allowed, used, limit = usage_service.check_limit(
+            db_session, business.id, "gst_lookup"
+        )
+        assert allowed is False
+        assert used == 5
+        assert limit == 5
+
+    def test_unlimited_endpoint_always_allowed(self, db_session, business):
+        allowed, used, limit = usage_service.check_limit(
+            db_session, business.id, "some_unknown_endpoint"
+        )
+        assert allowed is True
+        assert limit == 0
+
+    def test_get_tier_defaults_to_free(self, db_session, business):
+        tier = usage_service.get_tier(db_session, business.id)
+        assert tier == SubscriptionTier.FREE
+
+    def test_get_tier_returns_subscription_tier(self, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.ENTERPRISE,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.flush()
+        tier = usage_service.get_tier(db_session, business.id)
+        assert tier == SubscriptionTier.ENTERPRISE
+
+    def test_pro_tier_has_unlimited_lookups(self, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.flush()
+        allowed, _, limit = usage_service.check_limit(
+            db_session, business.id, "gst_lookup"
+        )
+        assert allowed is True
+        assert limit == 0
+
+
+# --------------------------------------------------------------------------
+# Razorpay client unit tests
+# --------------------------------------------------------------------------
+
+class TestRazorpayClient:
+    def test_not_configured_when_keys_empty(self):
+        assert razorpay_client.is_configured() is False
+
+    def test_create_order_returns_none_when_not_configured(self):
+        result = razorpay_client.create_order(499_00)
+        assert result is None
+
+    def test_create_customer_returns_none_when_not_configured(self):
+        result = razorpay_client.create_customer("test@example.com")
+        assert result is None
+
+    def test_verify_payment_signature_fails_without_secret(self):
+        result = razorpay_client.verify_payment_signature(
+            "order_id", "payment_id", "signature"
+        )
+        assert result is False
+
+    def test_verify_webhook_signature_fails_without_secret(self):
+        result = razorpay_client.verify_webhook_signature(b"body", "signature")
+        assert result is False
+
+    def test_cancel_subscription_returns_none_when_not_configured(self):
+        result = razorpay_client.cancel_subscription("sub_test")
+        assert result is None
+
+    def test_fetch_subscription_returns_none_when_not_configured(self):
+        result = razorpay_client.fetch_subscription("sub_test")
+        assert result is None
+
+    def test_tier_pricing_has_all_tiers(self):
+        assert SubscriptionTier.FREE in razorpay_client.TIER_PRICING
+        assert SubscriptionTier.PRO in razorpay_client.TIER_PRICING
+        assert SubscriptionTier.ENTERPRISE in razorpay_client.TIER_PRICING
+
+
+# --------------------------------------------------------------------------
+# Webhook
+# --------------------------------------------------------------------------
+
+class TestWebhook:
+    def test_invalid_signature_is_refused(self, client):
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=False
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=b'{"event": "test"}',
+                headers={"X-Razorpay-Signature": "bad"},
+            )
+        assert response.status_code == 400
+
+    def test_valid_signature_acknowledged(self, client):
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=b'{"event": "test"}',
+                headers={"X-Razorpay-Signature": "good"},
+            )
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
