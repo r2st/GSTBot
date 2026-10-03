@@ -16,7 +16,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from sqlalchemy import and_, case, func, insert, select
+from sqlalchemy import and_, case, func, insert, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -693,29 +693,31 @@ def reap_stalled_parses(
     )
     cutoff = now - timedelta(seconds=seconds)
 
-    stalled = list(
-        db.scalars(
-            select(Invoice).where(
-                Invoice.status == InvoiceStatus.PROCESSING,
-                Invoice.deleted_at.is_(None),
-                Invoice.updated_at < cutoff,
-            )
-        ).all()
+    stalled_filter = [
+        Invoice.status == InvoiceStatus.PROCESSING,
+        Invoice.deleted_at.is_(None),
+        Invoice.updated_at < cutoff,
+    ]
+    stalled_ids = list(
+        db.scalars(select(Invoice.id).where(*stalled_filter)).all()
     )
-    for invoice in stalled:
-        invoice.status = InvoiceStatus.FAILED
-        invoice.parse_error = STALLED_PARSE_MESSAGE
-    if stalled:
+    if stalled_ids:
+        db.execute(
+            update(Invoice)
+            .where(Invoice.id.in_(stalled_ids))
+            .values(status=InvoiceStatus.FAILED, parse_error=STALLED_PARSE_MESSAGE)
+            .execution_options(synchronize_session=False)
+        )
         db.commit()
         logger.warning(
             "Reaped stalled invoices",
             extra={
-                "count": len(stalled),
+                "count": len(stalled_ids),
                 "stale_seconds": seconds,
-                "invoice_ids": [invoice.id for invoice in stalled],
+                "invoice_ids": stalled_ids,
             },
         )
-    return len(stalled)
+    return len(stalled_ids)
 
 
 def tax_summary(
