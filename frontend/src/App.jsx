@@ -10,6 +10,7 @@ import GstFilingGuide from "./pages/blog/GstFilingGuide";
 import HsnCodeLookup from "./pages/blog/HsnCodeLookup";
 import CalculatorPage from "./pages/CalculatorPage";
 import DashboardPage from "./pages/DashboardPage";
+import DueDatesPage from "./pages/DueDatesPage";
 import EmbedPage from "./pages/EmbedPage";
 import FilingPage from "./pages/FilingPage";
 import GstinPage from "./pages/GstinPage";
@@ -100,6 +101,7 @@ export default function App() {
       <Route path="/hsn" element={<HsnFinderPage />} />
       <Route path="/gstin/:gstin" element={<GstinPage />} />
       <Route path="/gst-rate/:product" element={<GstRatePage />} />
+      <Route path="/due-dates" element={<DueDatesPage />} />
       <Route path="/embed" element={<EmbedPage />} />
       <Route path="/" element={<Home />} />
       <Route

@@ -3095,6 +3095,53 @@ a:focus-visible {
   border-color: var(--brand);
 }
 
+/* Due Dates calendar page */
+.due-dates-container { max-width: 960px; }
+.due-dates-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  font-size: 0.85rem;
+}
+.due-dates-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--ink-soft);
+}
+.due-dates-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.due-dates-table-wrap { overflow-x: auto; margin: 0 -0.5rem; padding: 0 0.5rem; }
+.due-dates-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.due-dates-table th {
+  text-align: left;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 2px solid var(--glass-input-border);
+  color: var(--ink-soft);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.due-dates-table td {
+  padding: 0.5rem;
+  border-bottom: 1px solid var(--glass-input-border);
+  white-space: nowrap;
+}
+.due-dates-period { font-weight: 600; color: var(--ink); }
+.due-dates-filled { color: var(--ink); }
+.due-dates-empty { color: var(--ink-soft); opacity: 0.4; }
+.due-dates-annual-row { background: rgba(245, 158, 66, 0.08); }
+.due-dates-annual-row .due-dates-period { color: var(--brand); }
+
 /* Responsive: tool pages */
 @media (max-width: 600px) {
   .tools-nav { gap: 0.5rem; padding: 0.5rem 1rem; }

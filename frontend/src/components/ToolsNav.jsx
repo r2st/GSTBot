@@ -4,6 +4,7 @@ const TOOLS = [
   { path: "/calculator", label: "GST Calculator" },
   { path: "/lookup", label: "GSTIN Lookup" },
   { path: "/hsn", label: "HSN Finder" },
+  { path: "/due-dates", label: "Due Dates" },
 ];
 
 export default function ToolsNav() {
