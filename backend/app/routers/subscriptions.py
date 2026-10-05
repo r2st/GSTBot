@@ -1,9 +1,11 @@
 """Subscription management, pricing, and Razorpay payment flow."""
 from __future__ import annotations
 
+import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -224,6 +226,49 @@ async def razorpay_webhook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid webhook signature.",
         )
-    # Webhook events would update subscription status based on event type.
-    # For now, acknowledge receipt.
+
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, ValueError):
+        return {"status": "ok"}
+
+    event = payload.get("event", "")
+    entity = (payload.get("payload", {}).get("payment", {}).get("entity", {})
+              or payload.get("payload", {}).get("subscription", {}).get("entity", {}))
+    razorpay_id = entity.get("id") or entity.get("subscription_id")
+
+    if not razorpay_id:
+        return {"status": "ok"}
+
+    sub = db.scalar(
+        select(Subscription).where(
+            Subscription.razorpay_subscription_id == razorpay_id
+        )
+    )
+    if sub is None:
+        return {"status": "ok", "detail": "no matching subscription"}
+
+    _TRANSITION: dict[str, SubscriptionStatus] = {
+        "subscription.halted": SubscriptionStatus.PAST_DUE,
+        "subscription.cancelled": SubscriptionStatus.CANCELLED,
+        "subscription.expired": SubscriptionStatus.EXPIRED,
+        "subscription.activated": SubscriptionStatus.ACTIVE,
+        "subscription.charged": SubscriptionStatus.ACTIVE,
+        "payment.failed": SubscriptionStatus.PAST_DUE,
+    }
+
+    new_status = _TRANSITION.get(event)
+    if new_status is not None and sub.status != new_status:
+        old = sub.status
+        sub.status = new_status
+        db.commit()
+        logger.info(
+            "Webhook transitioned subscription %s → %s",
+            old.value, new_status.value,
+            extra={
+                "business_id": sub.business_id,
+                "razorpay_id": razorpay_id,
+                "event": event,
+            },
+        )
     return {"status": "ok"}

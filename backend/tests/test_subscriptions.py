@@ -414,3 +414,165 @@ class TestWebhook:
             )
         assert response.status_code == 200
         assert response.json()["status"] == "ok"
+
+    def test_payment_failed_transitions_to_past_due(self, client, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+            razorpay_subscription_id="pay_live123",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        import json
+        payload = {
+            "event": "payment.failed",
+            "payload": {
+                "payment": {"entity": {"id": "pay_live123"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.PAST_DUE
+
+    def test_past_due_subscription_degrades_tier_to_free(self, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.PAST_DUE,
+        )
+        db_session.add(sub)
+        db_session.flush()
+        tier = usage_service.get_tier(db_session, business.id)
+        assert tier == SubscriptionTier.FREE
+
+    def test_subscription_halted_transitions_to_past_due(
+        self, client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+            razorpay_subscription_id="sub_halt1",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        import json
+        payload = {
+            "event": "subscription.halted",
+            "payload": {
+                "subscription": {"entity": {"id": "sub_halt1"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.PAST_DUE
+
+    def test_subscription_charged_reactivates_past_due(
+        self, client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.PAST_DUE,
+            razorpay_subscription_id="sub_react1",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        import json
+        payload = {
+            "event": "subscription.charged",
+            "payload": {
+                "subscription": {"entity": {"id": "sub_react1"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.ACTIVE
+
+    def test_subscription_expired_transitions_to_expired(
+        self, client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+            razorpay_subscription_id="sub_exp1",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        import json
+        payload = {
+            "event": "subscription.expired",
+            "payload": {
+                "subscription": {"entity": {"id": "sub_exp1"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.EXPIRED
+
+    def test_unknown_razorpay_id_is_a_harmless_noop(self, client):
+        import json
+        payload = {
+            "event": "payment.failed",
+            "payload": {
+                "payment": {"entity": {"id": "pay_nonexistent"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+
+    def test_malformed_json_is_acknowledged_without_crashing(self, client):
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=b"not json at all",
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200

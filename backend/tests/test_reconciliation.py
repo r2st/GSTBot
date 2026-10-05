@@ -1469,3 +1469,49 @@ class TestADuplicateThroughAWholeRun:
         # the score is computed from never sees our double entry at all.
         assert supplier.missing_invoices == 0
         assert supplier.matched_invoices == 1
+
+
+class TestReconciliationRunAlwaysStartsRunning:
+    """``ReconciliationStatus.QUEUED`` exists in the enum but is never assigned.
+
+    A run enters the database as ``RUNNING`` — there is no queueing step before
+    it — and ends as ``COMPLETED`` or ``FAILED``. This test pins that contract:
+    if a queuing mechanism is added, the guard in ``latest_completed_run`` and
+    the ``QUEUED`` rows' interaction with the ITC screen need auditing.
+    """
+
+    def test_a_new_run_starts_at_running(self, db_session, business):
+        from app.models.gstr_return import GSTRReturn
+        from app.models.gstr_return import ReturnType as RT
+        g = GSTRReturn(
+            business_id=business.id, period="2026-04",
+            return_type=RT.GSTR2B, status="imported",
+            data={"invoices": []},
+        )
+        db_session.add(g)
+        db_session.commit()
+        run = reconciliation.run_reconciliation(db_session, business.id, "2026-04")
+        assert run.status in (
+            ReconciliationStatus.RUNNING,
+            ReconciliationStatus.COMPLETED,
+            ReconciliationStatus.FAILED,
+        )
+        assert run.status is not ReconciliationStatus.QUEUED
+
+    def test_queued_is_never_used_across_the_codebase(self):
+        import ast
+        import pathlib
+        app_dir = pathlib.Path(__file__).resolve().parent.parent / "app"
+        for py_file in app_dir.rglob("*.py"):
+            source = py_file.read_text()
+            if "QUEUED" not in source:
+                continue
+            tree = ast.parse(source)
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Attribute) and node.attr == "QUEUED"
+                        and isinstance(node.value, ast.Attribute)
+                        and node.value.attr == "ReconciliationStatus"):
+                    raise AssertionError(
+                        f"{py_file.relative_to(app_dir.parent)}:{node.lineno} "
+                        "assigns or reads ReconciliationStatus.QUEUED"
+                    )
