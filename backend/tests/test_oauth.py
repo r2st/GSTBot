@@ -195,7 +195,7 @@ def test_complete_oauth_login_logs_successful_login(db_session, caplog):
         response = _complete_oauth_login(user, "google")
 
     assert response.status_code == 307
-    assert "token=" in response.headers["location"]
+    assert "#token=" in response.headers["location"]
     assert any("OAuth login" in record.message for record in caplog.records)
 
 
@@ -231,3 +231,30 @@ def test_oauth_callback_routes_have_rate_limit_dependency():
         callables = list(dependency_calls(route.dependant))
         has_rate_limit = any(isinstance(c, RateLimit) for c in callables)
         assert has_rate_limit, f"{path} has no RateLimit dependency"
+
+
+# ── GB027: token must not appear in query string ────────────
+
+
+def test_oauth_token_uses_fragment_not_query_param(db_session):
+    """The access token must be delivered in a URL fragment, not a query
+    parameter. A query parameter is logged by proxies and servers and leaked
+    via the Referer header; a fragment never leaves the browser."""
+    business = Business(legal_name="Fragment Co", plan=BusinessPlan.FREE, is_active=True)
+    db_session.add(business)
+    db_session.flush()
+    user = User(
+        email="fragment@example.com",
+        business_id=business.id,
+        role=UserRole.OWNER,
+        oauth_provider="google",
+        oauth_id="frag-gid",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    response = _complete_oauth_login(user, "google")
+    location = response.headers["location"]
+    assert "#token=" in location, "token must be in a URL fragment"
+    assert "?token=" not in location, "token must NOT be in a query parameter"

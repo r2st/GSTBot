@@ -115,7 +115,8 @@ def _complete_oauth_login(user: User | None, provider: str) -> RedirectResponse:
         extra={"user_id": user.id, "business_id": user.business_id, "provider": provider},
     )
     access_token = create_access_token(user.id)
-    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
+    # Fragment (not query param) so the token never reaches server logs or Referer headers.
+    return RedirectResponse(f"{FRONTEND_URL}/auth/callback#token={access_token}")
 
 
 # ── Google ────────────────────────────────────────────────

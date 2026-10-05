@@ -373,3 +373,40 @@ class TestAccessTokens:
         expires_in = datetime.fromtimestamp(claims["exp"], UTC) - datetime.now(UTC)
 
         assert expires_in <= timedelta(minutes=settings.access_token_expire_minutes)
+
+
+# ── GB027: session key must be derived, not reused ──────────
+
+
+class TestSessionKeyDerivation:
+    def test_derived_key_differs_from_jwt_secret(self):
+        """SessionMiddleware must not use the raw JWT secret."""
+        from app.main import derive_session_key
+
+        derived = derive_session_key(settings.jwt_secret)
+        assert derived != settings.jwt_secret
+
+    def test_derived_key_is_deterministic(self):
+        from app.main import derive_session_key
+
+        assert derive_session_key("test-secret") == derive_session_key("test-secret")
+
+    def test_different_jwt_secrets_produce_different_session_keys(self):
+        from app.main import derive_session_key
+
+        assert derive_session_key("secret-a") != derive_session_key("secret-b")
+
+    def test_session_middleware_uses_derived_key(self):
+        """The app must wire the derived key, not the raw JWT secret."""
+        from starlette.middleware.sessions import SessionMiddleware
+
+        from app.main import create_app, derive_session_key
+
+        application = create_app()
+        expected = derive_session_key(settings.jwt_secret)
+        for mw in application.user_middleware:
+            if mw.cls is SessionMiddleware:
+                assert mw.kwargs["secret_key"] == expected
+                break
+        else:
+            pytest.fail("SessionMiddleware not found in middleware stack")

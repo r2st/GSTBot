@@ -1,6 +1,8 @@
 """DoAide GST FastAPI application entrypoint."""
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -246,6 +248,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     logger.info("Shutdown complete")
 
 
+def derive_session_key(jwt_secret: str) -> str:
+    """Derive a separate signing key for SessionMiddleware from the JWT secret."""
+    return hmac.new(
+        jwt_secret.encode(), b"starlette-session-signing", hashlib.sha256
+    ).hexdigest()
+
+
 def create_app() -> FastAPI:
     configure_logging(settings.log_level, settings.log_format)
 
@@ -341,7 +350,10 @@ def create_app() -> FastAPI:
         max_age=600,
     )
 
-    application.add_middleware(SessionMiddleware, secret_key=settings.jwt_secret)
+    application.add_middleware(
+        SessionMiddleware,
+        secret_key=derive_session_key(settings.jwt_secret),
+    )
 
     prefix = settings.api_v1_prefix
     application.include_router(misc.router, prefix=prefix)
