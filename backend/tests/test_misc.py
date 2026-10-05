@@ -324,3 +324,15 @@ class TestReminderSubscribe:
             json={"email": "anon@example.com"},
         )
         assert response.status_code == 200
+
+    def test_email_not_logged_as_pii(self, client, caplog):
+        """The subscriber's email must not appear in log output."""
+        import logging
+
+        with caplog.at_level(logging.DEBUG):
+            client.post(
+                "/api/v1/meta/reminder-subscribe",
+                json={"email": "secret-pii@example.com"},
+            )
+        for record in caplog.records:
+            assert "secret-pii@example.com" not in record.getMessage()

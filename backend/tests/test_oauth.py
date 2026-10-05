@@ -258,3 +258,109 @@ def test_oauth_token_uses_fragment_not_query_param(db_session):
     location = response.headers["location"]
     assert "#token=" in location, "token must be in a URL fragment"
     assert "?token=" not in location, "token must NOT be in a query parameter"
+
+
+# ── GB028: rate limiting on OAuth initiation ──────────────
+
+
+def test_oauth_initiation_routes_have_rate_limit_dependency():
+    """Every OAuth initiation route must declare a rate limit dependency."""
+    from app.core.routes import collect_api_routes, dependency_calls
+    from app.core.rate_limit import RateLimit
+    from app.main import app as main_app
+
+    initiation_paths = [
+        "/api/v1/auth/google",
+        "/api/v1/auth/github",
+        "/api/v1/auth/microsoft",
+    ]
+    all_routes = collect_api_routes(main_app)
+    for path in initiation_paths:
+        route = next(
+            (r for r in all_routes if getattr(r, "path", None) == path),
+            None,
+        )
+        assert route is not None, f"Route {path} not found"
+        callables = list(dependency_calls(route.dependant))
+        has_rate_limit = any(isinstance(c, RateLimit) for c in callables)
+        assert has_rate_limit, f"{path} has no RateLimit dependency"
+
+
+# ── GB028: email_verified gate on account linking ─────────
+
+
+def test_unverified_email_does_not_link_existing_account(db_session):
+    """An OAuth provider that has NOT verified the email must not be allowed
+    to link to an existing password-based account — doing so would let an
+    attacker who controls an OAuth identity with a victim's unverified email
+    take over that account."""
+    business = Business(legal_name="Victim Co", plan=BusinessPlan.FREE, is_active=True)
+    db_session.add(business)
+    db_session.flush()
+    user = User(
+        email="victim@example.com",
+        hashed_password="bcrypt-hash-here",
+        business_id=business.id,
+        role=UserRole.OWNER,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    result = _find_or_create_oauth_user(
+        db_session,
+        provider="google",
+        oauth_id="attacker-gid",
+        email="victim@example.com",
+        name="Attacker",
+        email_verified=False,
+    )
+    assert result is None
+    db_session.refresh(user)
+    assert user.oauth_provider is None
+
+
+def test_verified_email_links_existing_account(db_session):
+    """When the OAuth provider HAS verified the email, linking to an existing
+    password-based account is allowed."""
+    business = Business(legal_name="Link Co", plan=BusinessPlan.FREE, is_active=True)
+    db_session.add(business)
+    db_session.flush()
+    user = User(
+        email="linkme@example.com",
+        hashed_password="bcrypt-hash-here",
+        business_id=business.id,
+        role=UserRole.OWNER,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    result = _find_or_create_oauth_user(
+        db_session,
+        provider="google",
+        oauth_id="legit-gid",
+        email="linkme@example.com",
+        name="Legit",
+        email_verified=True,
+    )
+    assert result is not None
+    assert result.id == user.id
+    assert result.oauth_provider == "google"
+    assert result.oauth_id == "legit-gid"
+
+
+def test_unverified_email_creates_new_account_if_no_match(db_session):
+    """An unverified email that has no existing account should still create
+    a new user — the gate only blocks linking to someone else's account."""
+    result = _find_or_create_oauth_user(
+        db_session,
+        provider="github",
+        oauth_id="brand-new-id",
+        email="newuser@example.com",
+        name="New User",
+        email_verified=False,
+    )
+    assert result is not None
+    assert result.email == "newuser@example.com"
+    assert result.oauth_provider == "github"

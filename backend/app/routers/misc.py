@@ -327,5 +327,5 @@ _reminder_limit = RateLimit("reminder_subscribe", "10/minute", by="ip")
     dependencies=[Depends(_reminder_limit)],
 )
 def reminder_subscribe(body: ReminderSubscribeRequest) -> dict[str, Any]:
-    logger.info("Reminder subscription: %s", body.email)
+    logger.info("Reminder subscription received")
     return {"subscribed": True, "email": body.email}

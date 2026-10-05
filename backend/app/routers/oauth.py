@@ -55,6 +55,7 @@ if settings.microsoft_client_id:
 
 FRONTEND_URL = settings.cors_origins[0] if settings.cors_origins else "http://localhost:5173"
 
+_oauth_initiate_limit = RateLimit("oauth_initiate", "30/minute", by="ip")
 _oauth_callback_limit = RateLimit("oauth_callback", "30/minute", by="ip")
 
 
@@ -63,7 +64,13 @@ def _callback_url(provider: str) -> str:
 
 
 def _find_or_create_oauth_user(
-    db: Session, *, provider: str, oauth_id: str, email: str, name: str | None
+    db: Session,
+    *,
+    provider: str,
+    oauth_id: str,
+    email: str,
+    name: str | None,
+    email_verified: bool = False,
 ) -> User | None:
     user = db.scalar(
         select(User).where(User.oauth_provider == provider, User.oauth_id == oauth_id)
@@ -76,6 +83,12 @@ def _find_or_create_oauth_user(
     user = db.scalar(select(User).where(User.email == email))
     if user:
         if not user.is_active:
+            return None
+        if not email_verified:
+            logger.warning(
+                "OAuth link refused: provider did not verify email",
+                extra={"provider": provider, "user_id": user.id},
+            )
             return None
         if not user.oauth_provider:
             user.oauth_provider = provider
@@ -121,7 +134,7 @@ def _complete_oauth_login(user: User | None, provider: str) -> RedirectResponse:
 
 # ── Google ────────────────────────────────────────────────
 
-@router.get("/google")
+@router.get("/google", dependencies=[Depends(_oauth_initiate_limit)])
 async def google_login(request: Request):
     if not settings.google_client_id:
         raise HTTPException(status_code=501, detail="Google OAuth not configured")
@@ -153,13 +166,14 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
         oauth_id=userinfo.get("sub", ""),
         email=email.lower(),
         name=userinfo.get("name"),
+        email_verified=bool(userinfo.get("email_verified")),
     )
     return _complete_oauth_login(user, "google")
 
 
 # ── GitHub ────────────────────────────────────────────────
 
-@router.get("/github")
+@router.get("/github", dependencies=[Depends(_oauth_initiate_limit)])
 async def github_login(request: Request):
     if not settings.github_client_id:
         raise HTTPException(status_code=501, detail="GitHub OAuth not configured")
@@ -200,13 +214,14 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
         oauth_id=str(profile.get("id", "")),
         email=email.lower(),
         name=profile.get("name") or profile.get("login"),
+        email_verified=True,
     )
     return _complete_oauth_login(user, "github")
 
 
 # ── Microsoft ─────────────────────────────────────────────
 
-@router.get("/microsoft")
+@router.get("/microsoft", dependencies=[Depends(_oauth_initiate_limit)])
 async def microsoft_login(request: Request):
     if not settings.microsoft_client_id:
         raise HTTPException(status_code=501, detail="Microsoft OAuth not configured")
@@ -238,5 +253,6 @@ async def microsoft_callback(request: Request, db: Session = Depends(get_db)):
         oauth_id=userinfo.get("sub", ""),
         email=email.lower(),
         name=userinfo.get("name"),
+        email_verified=bool(userinfo.get("email_verified")),
     )
     return _complete_oauth_login(user, "microsoft")
