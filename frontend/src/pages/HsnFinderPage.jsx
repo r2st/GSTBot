@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Breadcrumb from "../components/Breadcrumb";
 import RelatedTools from "../components/RelatedTools";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -33,6 +34,7 @@ export default function HsnFinderPage() {
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">
+          <Breadcrumb />
           <h1 className="tool-title">HSN / SAC Code Finder</h1>
           <p className="tool-subtitle">
             Search by product name or HSN code number. Find the correct GST rate instantly.

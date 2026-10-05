@@ -20,6 +20,7 @@ free-tier rate limit.
 """
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 
@@ -31,9 +32,12 @@ from app.core.database import check_database, get_db, pool_status
 from app.core.rate_limit import RateLimit
 from app.core.redis_client import ping as redis_ping
 from app.core.storage import check_upload_dir
+from app.schemas.misc import ReminderSubscribeRequest
 from app.services import gstin as gstin_service
 from app.services import job_health
 from app.services.openrouter_client import is_configured
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["health"])
 
@@ -306,3 +310,22 @@ def validate_gstin(
         "state_name": parts.state_name,
         "pan": parts.pan,
     }
+
+
+_reminder_limit = RateLimit("reminder_subscribe", "10/minute", by="ip")
+
+
+@router.post(
+    "/meta/reminder-subscribe",
+    summary="Subscribe to GST filing deadline reminders",
+    description=(
+        "Captures an email address for GST filing deadline reminders. "
+        "Public — called from the landing page before sign-in. "
+        "The email is validated and logged; delivery integration is separate."
+    ),
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(_reminder_limit)],
+)
+def reminder_subscribe(body: ReminderSubscribeRequest) -> dict[str, Any]:
+    logger.info("Reminder subscription: %s", body.email)
+    return {"subscribed": True, "email": body.email}

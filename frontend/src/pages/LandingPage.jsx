@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AuthForm from "../components/AuthForm";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { api } from "../lib/api";
 import { copyToClipboard, fullUrl } from "../lib/share";
 import { track } from "../lib/track";
 
@@ -448,6 +449,132 @@ function InstantLookup() {
   );
 }
 
+const WHATS_NEW = [
+  {
+    date: "Oct 2026",
+    title: "GSTR-2B Auto-Reconciliation v2",
+    desc: "Smarter fuzzy matching — catches invoice-number typos and ₹1 rounding differences automatically.",
+  },
+  {
+    date: "Sep 2026",
+    title: "Bulk Invoice Upload",
+    desc: "Upload up to 50 invoices at once. Drag-and-drop PDFs, Excel, or CSV files.",
+  },
+  {
+    date: "Sep 2026",
+    title: "Supplier Compliance Scores",
+    desc: "See which suppliers file on time and which put your ITC at risk — scored from your own data.",
+  },
+  {
+    date: "Aug 2026",
+    title: "GST Filing Due Dates Calendar",
+    desc: "Full-year calendar of GSTR-1, GSTR-3B, and annual return deadlines at a glance.",
+  },
+];
+
+const POPULAR_SEARCHES = [
+  { label: "27AAPFU0939F1ZV", desc: "Sample GSTIN — Maharashtra", to: "/gstin/27AAPFU0939F1ZV" },
+  { label: "HSN 8471", desc: "Computers & laptops — 18% GST", to: "/hsn?q=8471" },
+  { label: "HSN 6109", desc: "T-shirts & vests — 5% GST", to: "/hsn?q=6109" },
+  { label: "SAC 9983", desc: "Professional services — 18% GST", to: "/hsn?q=9983" },
+  { label: "HSN 0402", desc: "Milk & cream — 5% GST", to: "/hsn?q=0402" },
+  { label: "SAC 9954", desc: "Construction services — 12% GST", to: "/hsn?q=9954" },
+];
+
+function WhatsNewSection() {
+  return (
+    <section className="landing-section landing-whats-new" aria-labelledby="whats-new-heading">
+      <h2 id="whats-new-heading" className="landing-section-title">What&apos;s New</h2>
+      <div className="landing-updates-list">
+        {WHATS_NEW.map((item) => (
+          <div key={item.title} className="landing-update-item">
+            <span className="landing-update-date">{item.date}</span>
+            <div>
+              <strong>{item.title}</strong>
+              <p>{item.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PopularSearches() {
+  return (
+    <section className="landing-section landing-popular" aria-labelledby="popular-heading">
+      <h2 id="popular-heading" className="landing-section-title">Popular GST Lookups</h2>
+      <p className="landing-section-subtitle">Common GSTIN verifications and HSN/SAC code searches — click to try instantly.</p>
+      <div className="landing-popular-grid">
+        {POPULAR_SEARCHES.map((s) => (
+          <Link key={s.label} to={s.to} className="landing-popular-card">
+            <code className="landing-popular-code">{s.label}</code>
+            <span className="landing-popular-desc">{s.desc}</span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ReminderSignup() {
+  const [email, setEmail] = useState("");
+  const [status, setStatus] = useState("idle");
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    setStatus("sending");
+    setError("");
+    try {
+      await api.reminderSubscribe(trimmed);
+      setStatus("done");
+      track("reminder_subscribe");
+    } catch (err) {
+      setStatus("idle");
+      setError(err.message || "Something went wrong. Please try again.");
+    }
+  };
+
+  if (status === "done") {
+    return (
+      <section className="landing-reminder" aria-labelledby="reminder-heading">
+        <div className="landing-reminder-success">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <p>You&apos;re subscribed! We&apos;ll send you reminders before each GST filing deadline.</p>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="landing-reminder" aria-labelledby="reminder-heading">
+      <h2 id="reminder-heading">Never Miss a GST Filing Deadline</h2>
+      <p>Get free email reminders before GSTR-1 and GSTR-3B due dates. No account needed.</p>
+      <form onSubmit={handleSubmit} className="landing-reminder-form">
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          placeholder="your@email.com"
+          className="landing-reminder-input"
+          required
+          disabled={status === "sending"}
+        />
+        <button type="submit" className="btn btn-primary" disabled={status === "sending"}>
+          {status === "sending" ? "Subscribing…" : "Get Reminders"}
+        </button>
+      </form>
+      {error && <p className="landing-reminder-error">{error}</p>}
+    </section>
+  );
+}
+
 function ReferralBanner() {
   const [copied, setCopied] = useState(false);
   const url = fullUrl("/?ref=invite");
@@ -579,7 +706,13 @@ export default function LandingPage() {
           </div>
         </section>
 
+        <WhatsNewSection />
+
+        <PopularSearches />
+
         <FaqSection />
+
+        <ReminderSignup />
 
         <ReferralBanner />
 
@@ -621,9 +754,37 @@ export default function LandingPage() {
             <Link to="/blog/hsn-code-lookup">HSN Code Lookup</Link>
           </div>
           <div className="landing-footer-col">
+            <h4>Blog Articles</h4>
+            <a href="https://doaide.com/blog-gst-filing-dates">GST Filing Dates Guide</a>
+            <a href="https://doaide.com/blog-gstin-verification">GSTIN Verification Guide</a>
+            <a href="https://doaide.com/blog-gst-rates-hsn-codes">GST Rates &amp; HSN Codes</a>
+          </div>
+          <div className="landing-footer-col">
             <h4>Company</h4>
             <a href="https://doaide.com">About DoAide</a>
             <a href="mailto:support@doaide.com">Contact</a>
+          </div>
+        </div>
+        <div className="landing-footer-trust">
+          <div className="landing-footer-trust-item">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+            <span>256-bit SSL encrypted</span>
+          </div>
+          <div className="landing-footer-trust-item">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+              <polyline points="22 4 12 14.01 9 11.01" />
+            </svg>
+            <span>GST-compliant calculations</span>
+          </div>
+          <div className="landing-footer-trust-item">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="11" rx="2" />
+              <path d="M7 11V7a5 5 0 0110 0v4" />
+            </svg>
+            <span>Your data stays private</span>
           </div>
         </div>
         <div className="landing-footer-products">

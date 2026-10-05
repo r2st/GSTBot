@@ -499,6 +499,8 @@ UNGATED_MUTATIONS = {
     # Called by Razorpay's servers, not by users — authenticated by webhook
     # signature, not by a bearer token.
     "/api/v1/subscriptions/webhook",
+    # Email capture from the landing page — no session exists yet.
+    "/api/v1/meta/reminder-subscribe",
 }
 
 

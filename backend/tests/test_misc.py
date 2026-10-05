@@ -289,3 +289,38 @@ class TestTheGstinLookupDoesNotEchoUnboundedInput:
         for length in range(1, len(BUSINESS_GSTIN) + 1):
             response = client.get(f"/api/v1/meta/gstin/{BUSINESS_GSTIN[:length]}")
             assert response.status_code == 200, BUSINESS_GSTIN[:length]
+
+
+class TestReminderSubscribe:
+    """Email capture for GST filing deadline reminders — public, no auth."""
+
+    def test_a_valid_email_is_accepted(self, client):
+        response = client.post(
+            "/api/v1/meta/reminder-subscribe",
+            json={"email": "user@example.com"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["subscribed"] is True
+        assert body["email"] == "user@example.com"
+
+    def test_an_invalid_email_is_rejected(self, client):
+        response = client.post(
+            "/api/v1/meta/reminder-subscribe",
+            json={"email": "not-an-email"},
+        )
+        assert response.status_code == 422
+
+    def test_a_missing_email_is_rejected(self, client):
+        response = client.post(
+            "/api/v1/meta/reminder-subscribe",
+            json={},
+        )
+        assert response.status_code == 422
+
+    def test_no_auth_required(self, client):
+        response = client.post(
+            "/api/v1/meta/reminder-subscribe",
+            json={"email": "anon@example.com"},
+        )
+        assert response.status_code == 200

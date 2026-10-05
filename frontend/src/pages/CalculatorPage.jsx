@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import Breadcrumb from "../components/Breadcrumb";
 import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -47,6 +48,7 @@ export default function CalculatorPage() {
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">
+          <Breadcrumb />
           <h1 className="tool-title">GST Calculator</h1>
           <p className="tool-subtitle">
             Calculate GST tax breakdown instantly. No sign-up required.

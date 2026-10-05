@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Breadcrumb from "../components/Breadcrumb";
 import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -155,6 +156,7 @@ export default function DueDatesPage() {
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container due-dates-container">
+          <Breadcrumb />
           <h1 className="tool-title">GST Filing Due Dates Calendar</h1>
           <p className="tool-subtitle">
             All GST return filing deadlines for {year.label} — GSTR-1, GSTR-3B, GSTR-9, GSTR-9C,

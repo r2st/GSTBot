@@ -98,6 +98,8 @@ class TestSetOffNeedsAToken:
             "/api/v1/subscriptions/pricing",
             # Razorpay webhook — called by Razorpay servers, not by users.
             "/api/v1/subscriptions/webhook",
+            # Email capture for GST filing reminders, from the landing page.
+            "/api/v1/meta/reminder-subscribe",
         }
 
         def calls(dependant):

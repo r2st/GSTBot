@@ -17,6 +17,11 @@ vi.mock("../hooks/useAuth", () => ({
     register: vi.fn(),
   }),
 }));
+vi.mock("../lib/api", () => ({
+  api: {
+    reminderSubscribe: vi.fn().mockResolvedValue({ subscribed: true, email: "a@b.com" }),
+  },
+}));
 
 function renderLanding() {
   return render(
@@ -306,6 +311,81 @@ describe("LandingPage", () => {
       expect(screen.getByText("HSN Code Lookup")).toBeInTheDocument();
       expect(screen.getByText("All GST Tools & Guides")).toBeInTheDocument();
       expect(screen.getAllByText("Due Dates Calendar").length).toBeGreaterThan(0);
+    });
+
+    it("has links to blog articles on doaide.com", () => {
+      renderLanding();
+
+      expect(screen.getByText("GST Filing Dates Guide")).toBeInTheDocument();
+      expect(screen.getByText("GSTIN Verification Guide")).toBeInTheDocument();
+      expect(screen.getByText("GST Rates & HSN Codes")).toBeInTheDocument();
+    });
+
+    it("shows trust signals", () => {
+      renderLanding();
+
+      expect(screen.getByText("256-bit SSL encrypted")).toBeInTheDocument();
+      expect(screen.getByText("GST-compliant calculations")).toBeInTheDocument();
+      expect(screen.getByText("Your data stays private")).toBeInTheDocument();
+    });
+  });
+
+  describe("What's New section", () => {
+    it("renders the section heading", () => {
+      renderLanding();
+
+      expect(screen.getByText("What's New")).toBeInTheDocument();
+    });
+
+    it("shows update items with dates and titles", () => {
+      renderLanding();
+
+      expect(screen.getByText("GSTR-2B Auto-Reconciliation v2")).toBeInTheDocument();
+      expect(screen.getByText("Bulk Invoice Upload")).toBeInTheDocument();
+      expect(screen.getByText("Supplier Compliance Scores")).toBeInTheDocument();
+      expect(screen.getByText("Oct 2026")).toBeInTheDocument();
+    });
+  });
+
+  describe("Popular Searches section", () => {
+    it("renders the section heading", () => {
+      renderLanding();
+
+      expect(screen.getByText("Popular GST Lookups")).toBeInTheDocument();
+    });
+
+    it("shows sample GSTIN and HSN codes as links", () => {
+      renderLanding();
+
+      expect(screen.getByText("27AAPFU0939F1ZV")).toBeInTheDocument();
+      expect(screen.getByText("HSN 8471")).toBeInTheDocument();
+      expect(screen.getByText("SAC 9983")).toBeInTheDocument();
+    });
+
+    it("links popular searches to the right pages", () => {
+      renderLanding();
+
+      const gstinLink = screen.getByText("27AAPFU0939F1ZV").closest("a");
+      expect(gstinLink).toHaveAttribute("href", "/gstin/27AAPFU0939F1ZV");
+    });
+  });
+
+  describe("Reminder signup section", () => {
+    it("renders the email capture form", () => {
+      renderLanding();
+
+      expect(screen.getByText("Never Miss a GST Filing Deadline")).toBeInTheDocument();
+      expect(screen.getByPlaceholderText("your@email.com")).toBeInTheDocument();
+      expect(screen.getByText("Get Reminders")).toBeInTheDocument();
+    });
+
+    it("submits the email and shows success", async () => {
+      renderLanding();
+
+      await userEvent.type(screen.getByPlaceholderText("your@email.com"), "test@example.com");
+      await userEvent.click(screen.getByText("Get Reminders"));
+
+      expect(await screen.findByText(/You're subscribed/)).toBeInTheDocument();
     });
   });
 

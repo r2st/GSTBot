@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import Breadcrumb from "../components/Breadcrumb";
 import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -69,6 +70,7 @@ export default function LookupPage() {
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">
+          <Breadcrumb />
           <h1 className="tool-title">GSTIN Lookup</h1>
           <p className="tool-subtitle">
             Verify any GST number instantly. Check validity, state, and PAN details.

@@ -412,6 +412,9 @@ export const api = {
    */
   health: ({ signal } = {}) => request("/health", { auth: false, signal }),
 
+  reminderSubscribe: (email) =>
+    request("/meta/reminder-subscribe", { method: "POST", body: { email }, auth: false }),
+
   // ---- Invoices ----
   uploadInvoice(file, invoiceType = "purchase") {
     const form = new FormData();
