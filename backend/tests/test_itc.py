@@ -1694,7 +1694,7 @@ def test_turnover_split_treats_untaxed_sales_as_exempt(db_session, business):
     )
     db_session.commit()
 
-    exempt, total = itc_service.turnover_split(db_session, business.id, PERIOD)
+    _, exempt, total = itc_service._outward_tax_and_turnover(db_session, business.id, PERIOD)
 
     assert exempt == Decimal("50000.00")
     assert total == Decimal("150000.00")
@@ -1733,7 +1733,7 @@ def test_output_tax_ignores_a_sale_whose_extraction_failed(db_session, business)
     )
     db_session.commit()
 
-    output = itc_service._outward_tax(db_session, business.id, PERIOD)
+    output, _, _ = itc_service._outward_tax_and_turnover(db_session, business.id, PERIOD)
 
     assert output.igst == Decimal("18000.00")
 
@@ -1766,7 +1766,7 @@ def test_output_tax_keeps_each_head_on_its_own_head(db_session, business):
     )
     db_session.commit()
 
-    output = itc_service._outward_tax(db_session, business.id, PERIOD)
+    output, _, _ = itc_service._outward_tax_and_turnover(db_session, business.id, PERIOD)
 
     assert output.igst == Decimal("0.00")
     assert output.cgst == Decimal("90.01")
@@ -1805,14 +1805,14 @@ def test_turnover_split_ignores_a_sale_whose_extraction_failed(db_session, busin
     )
     db_session.commit()
 
-    exempt, total = itc_service.turnover_split(db_session, business.id, PERIOD)
+    _, exempt, total = itc_service._outward_tax_and_turnover(db_session, business.id, PERIOD)
 
     assert exempt == Decimal("0.00")
     assert total == Decimal("100000.00")
 
 
-def test_combined_outward_tax_and_turnover_matches_the_separate_calls(db_session, business):
-    """The fused query must produce byte-identical results to the two it replaced."""
+def test_outward_tax_and_turnover_covers_all_dimensions(db_session, business):
+    """The single scan must produce correct output tax, exempt and total turnover."""
     db_session.add_all(
         [
             Invoice(
@@ -1847,7 +1847,7 @@ def test_combined_outward_tax_and_turnover_matches_the_separate_calls(db_session
                 taxable_value=Decimal("25000.00"),
                 total_value=Decimal("25000.00"),
             ),
-            # Failed — should be excluded by both paths.
+            # Failed — should be excluded.
             Invoice(
                 business_id=business.id,
                 invoice_type=InvoiceType.SALES,
@@ -1862,21 +1862,16 @@ def test_combined_outward_tax_and_turnover_matches_the_separate_calls(db_session
     )
     db_session.commit()
 
-    output_tax_separate = itc_service._outward_tax(db_session, business.id, PERIOD)
-    exempt_separate, total_separate = itc_service.turnover_split(
+    output_tax, exempt, total = itc_service._outward_tax_and_turnover(
         db_session, business.id, PERIOD
     )
 
-    output_tax_combined, exempt_combined, total_combined = (
-        itc_service._outward_tax_and_turnover(db_session, business.id, PERIOD)
-    )
-
-    assert output_tax_combined.igst == output_tax_separate.igst
-    assert output_tax_combined.cgst == output_tax_separate.cgst
-    assert output_tax_combined.sgst == output_tax_separate.sgst
-    assert output_tax_combined.cess == output_tax_separate.cess
-    assert exempt_combined == exempt_separate
-    assert total_combined == total_separate
+    assert output_tax.igst == Decimal("18000.00")
+    assert output_tax.cgst == Decimal("4500.00")
+    assert output_tax.sgst == Decimal("4500.00")
+    assert output_tax.cess == Decimal("100.00")
+    assert exempt == Decimal("25000.00")
+    assert total == Decimal("175000.00")
 
 
 def test_a_failed_sale_does_not_make_the_business_pay_cash(db_session, business):
@@ -2149,3 +2144,64 @@ class TestTheCapComparesInputsWithInputs:
         summary = itc_service.summarise(db_session, business.id, PERIOD)
 
         assert summary.available.igst == Decimal("10000.00")
+
+
+# ---------------------------------------------------------------------------
+# GB021 — purchase_invoices(credit_only=True) narrows in SQL
+# ---------------------------------------------------------------------------
+
+
+class TestCreditOnlyNarrowsInSQL:
+    """purchase_invoices(credit_only=True) must exclude non-credit rows in SQL."""
+
+    def test_credit_only_excludes_non_eligible_purchases(self, db_session, business):
+        save(db_session, business.id, invoice_number="ELIG-1")
+        save(db_session, business.id, invoice_number="BLOCKED-1", itc_eligible=False)
+        save(db_session, business.id, invoice_number="RC-1", reverse_charge=True)
+
+        result = itc_service.purchase_invoices(
+            db_session, business.id, credit_only=True
+        )
+
+        numbers = {inv.invoice_number for inv in result}
+        assert "ELIG-1" in numbers
+        assert "BLOCKED-1" not in numbers
+        assert "RC-1" not in numbers
+
+    def test_without_credit_only_returns_all(self, db_session, business):
+        save(db_session, business.id, invoice_number="ELIG-1")
+        save(db_session, business.id, invoice_number="BLOCKED-1", itc_eligible=False)
+        save(db_session, business.id, invoice_number="RC-1", reverse_charge=True)
+
+        result = itc_service.purchase_invoices(db_session, business.id)
+
+        numbers = {inv.invoice_number for inv in result}
+        assert numbers == {"ELIG-1", "BLOCKED-1", "RC-1"}
+
+    def test_rule37_result_is_identical_with_narrowing(self, db_session, business):
+        """Narrowing in SQL must not change the Rule 37 answer."""
+        save(
+            db_session, business.id,
+            invoice_number="OLD-1",
+            invoice_date=date(2025, 6, 1),
+            period="2025-06",
+        )
+        save(
+            db_session, business.id,
+            invoice_number="BLOCKED-OLD",
+            invoice_date=date(2025, 6, 1),
+            period="2025-06",
+            itc_eligible=False,
+        )
+
+        as_of = date(2026, 4, 30)
+        all_inv = itc_service.purchase_invoices(db_session, business.id)
+        narrowed = itc_service.purchase_invoices(
+            db_session, business.id, credit_only=True
+        )
+
+        full = itc_service.rule_37(all_inv, as_of=as_of)
+        narrow = itc_service.rule_37(narrowed, as_of=as_of)
+
+        assert full.reversal.igst == narrow.reversal.igst
+        assert len(full.overdue) == len(narrow.overdue)

@@ -760,14 +760,27 @@ def _purchases(
 
 
 def purchase_invoices(
-    db: Session, business_id: int, period: str | None = None
+    db: Session,
+    business_id: int,
+    period: str | None = None,
+    *,
+    credit_only: bool = False,
 ) -> list[Invoice]:
     """Purchase invoices that could carry credit, oldest first.
 
     Public because Rule 37 is asked of the whole register from the router, not
     just of the period under review.
+
+    *credit_only* narrows in SQL to invoices whose credit the buyer may
+    actually take — ``itc_eligible`` and not ``reverse_charge`` — so the caller
+    that only needs those does not hydrate rows it will skip.
     """
-    return _purchases(db, business_id, period)
+    narrowed_by = (
+        (Invoice.itc_eligible.is_(True), Invoice.reverse_charge.is_(False))
+        if credit_only
+        else ()
+    )
+    return _purchases(db, business_id, period, narrowed_by=narrowed_by)
 
 
 def purchases_outside_periods(
@@ -803,92 +816,10 @@ def purchases_outside_periods(
     return _purchases(db, business_id, narrowed_by=narrowing)
 
 
-def _outward_tax(db: Session, business_id: int, period: str) -> TaxHeads:
-    """Output tax declared on sales invoices for *period*.
-
-    Rows whose figures were never extracted or that duplicate another row are
-    excluded, because the returns exclude them: ``filing`` leaves anything in
-    :data:`~app.models.invoice.UNCOUNTABLE_STATUSES` out of the document
-    entirely. Counting one here and not there makes the ITC screen quote an
-    output tax the 3B it produces will not contain, and the difference lands on
-    the cash the business is told to pay. A re-parse is where this bites — the
-    figures from the first, successful read stay on the row after a later
-    attempt fails.
-    """
-    row = db.execute(
-        select(
-            func.coalesce(func.sum(Invoice.igst), 0),
-            func.coalesce(func.sum(Invoice.cgst), 0),
-            func.coalesce(func.sum(Invoice.sgst), 0),
-            func.coalesce(func.sum(Invoice.cess), 0),
-        ).where(
-            Invoice.business_id == business_id,
-            Invoice.deleted_at.is_(None),
-            Invoice.invoice_type == InvoiceType.SALES,
-            Invoice.period == period,
-            Invoice.status.not_in(UNCOUNTABLE_STATUSES),
-        )
-    ).one()
-    return TaxHeads(
-        igst=Decimal(str(row[0])),
-        cgst=Decimal(str(row[1])),
-        sgst=Decimal(str(row[2])),
-        cess=Decimal(str(row[3])),
-    )
-
-
-def turnover_split(db: Session, business_id: int, period: str) -> tuple[Decimal, Decimal]:
-    """``(exempt_turnover, total_turnover)`` for *period*, from sales invoices.
-
-    A sale is treated as exempt when it carries taxable value but no tax at
-    all. That is what a nil-rated or exempt supply looks like in the books, and
-    it is the best evidence the product has without asking a business to
-    classify every line by hand — the caller can override both figures when
-    they know better.
-
-    Unextracted rows are excluded for the same reason as ``_outward_tax``, and
-    one worse: a row whose tax fields were never read has no tax, so it would
-    be counted as an *exempt* supply and inflate the Rule 42 ratio — reversing
-    credit on the strength of an extraction that never happened.
-    """
-    rows = db.execute(
-        select(
-            Invoice.taxable_value,
-            Invoice.igst,
-            Invoice.cgst,
-            Invoice.sgst,
-            Invoice.cess,
-        ).where(
-            Invoice.business_id == business_id,
-            Invoice.deleted_at.is_(None),
-            Invoice.invoice_type == InvoiceType.SALES,
-            Invoice.period == period,
-            Invoice.status.not_in(UNCOUNTABLE_STATUSES),
-        )
-    ).all()
-
-    exempt = ZERO
-    total = ZERO
-    for taxable_value, igst, cgst, sgst, cess in rows:
-        taxable_value = Decimal(str(taxable_value or 0))
-        tax = sum(
-            (Decimal(str(value or 0)) for value in (igst, cgst, sgst, cess)), ZERO
-        )
-        total += taxable_value
-        if tax == ZERO and taxable_value > ZERO:
-            exempt += taxable_value
-    return exempt, total
-
-
 def _outward_tax_and_turnover(
     db: Session, business_id: int, period: str
 ) -> tuple[TaxHeads, Decimal, Decimal]:
-    """Output tax, exempt turnover and total turnover in one scan.
-
-    ``_outward_tax`` and ``turnover_split`` read the same rows with the same
-    predicate.  Called separately inside ``summarise``, every period's ITC
-    position cost two full scans of the sales register where one suffices.
-    """
+    """Output tax, exempt turnover and total turnover in one scan."""
     tax_col = Invoice.igst + Invoice.cgst + Invoice.sgst + Invoice.cess
 
     row = db.execute(

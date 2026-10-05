@@ -107,7 +107,7 @@ def get_rule_37(
     Deliberately not scoped to a period: the invoice that crosses 180 days is
     one from eight months ago, and a period filter would never surface it.
     """
-    invoices = itc_service.purchase_invoices(db, business.id)
+    invoices = itc_service.purchase_invoices(db, business.id, credit_only=True)
     return Rule37Out.model_validate(itc_service.rule_37(invoices, as_of=as_of).as_dict())
 
 

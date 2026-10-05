@@ -181,7 +181,7 @@ class TestTheOtherPeriodReadersShareTheIndex:
     ):
         _assert_searches_on_direction(
             db_session,
-            lambda: itc._outward_tax(db_session, register.id, "2026-04"),
+            lambda: itc._outward_tax_and_turnover(db_session, register.id, "2026-04"),
         )
 
 
