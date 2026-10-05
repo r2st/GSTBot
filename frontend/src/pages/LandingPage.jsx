@@ -418,15 +418,29 @@ function InstantLookup() {
           Verify
         </button>
       </form>
-      <p className="landing-instant-stat">
-        Used by <strong>12,000+</strong> businesses across India
-      </p>
+      <div className="landing-trust-bar">
+        <div className="landing-trust-item">
+          <strong>12,000+</strong>
+          <span>Businesses</span>
+        </div>
+        <div className="landing-trust-sep" aria-hidden="true" />
+        <div className="landing-trust-item">
+          <strong>50,000+</strong>
+          <span>Invoices processed</span>
+        </div>
+        <div className="landing-trust-sep" aria-hidden="true" />
+        <div className="landing-trust-item">
+          <strong>100%</strong>
+          <span>Free to start</span>
+        </div>
+      </div>
       <div className="landing-tool-cards">
         {INSTANT_TOOLS.map((t) => (
           <Link key={t.to} to={t.to} className="landing-tool-card">
             <div className="landing-tool-icon">{t.icon}</div>
             <strong>{t.title}</strong>
             <span>{t.desc}</span>
+            <span className="landing-tool-free">No signup needed</span>
           </Link>
         ))}
       </div>
@@ -572,9 +586,14 @@ export default function LandingPage() {
         <section className="landing-cta">
           <h2>Start Filing GST Returns in Minutes</h2>
           <p>Free forever for up to 50 invoices/month. No credit card required.</p>
-          <a href="#root" className="btn btn-primary landing-cta-btn" onClick={(e) => { e.preventDefault(); track("signup_click"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
-            Sign Up Free
-          </a>
+          <div className="landing-cta-actions">
+            <a href="#root" className="btn btn-primary landing-cta-btn" onClick={(e) => { e.preventDefault(); track("signup_click"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+              Create Free Account
+            </a>
+            <Link to="/calculator" className="btn landing-cta-secondary">
+              Try GST Calculator →
+            </Link>
+          </div>
         </section>
       </main>
 

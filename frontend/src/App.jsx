@@ -1,39 +1,48 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Shell from "./components/Shell";
 import { SkeletonPanel } from "./components/Skeleton";
 import { useAuth } from "./hooks/useAuth";
-import AlertsPage from "./pages/AlertsPage";
-import BlogLayout, { BlogIndex } from "./pages/BlogLayout";
-import GstComplianceChecklist from "./pages/blog/GstComplianceChecklist";
-import GstFilingGuide from "./pages/blog/GstFilingGuide";
-import HsnCodeLookup from "./pages/blog/HsnCodeLookup";
-import CalculatorPage from "./pages/CalculatorPage";
-import DashboardPage from "./pages/DashboardPage";
-import DueDatesPage from "./pages/DueDatesPage";
-import EmbedPage from "./pages/EmbedPage";
-import FilingPage from "./pages/FilingPage";
-import GstinPage from "./pages/GstinPage";
-import GstRatePage from "./pages/GstRatePage";
-import HsnFinderPage from "./pages/HsnFinderPage";
-import InvoiceDetailPage from "./pages/InvoiceDetailPage";
-import InvoicesPage from "./pages/InvoicesPage";
-import ITCPage from "./pages/ITCPage";
 import LandingPage from "./pages/LandingPage";
-import LookupPage from "./pages/LookupPage";
-import PricingPage from "./pages/PricingPage";
-import ReconcilePage from "./pages/ReconcilePage";
-import ResourcesPage from "./pages/ResourcesPage";
-import StatusPage from "./pages/StatusPage";
-import SuppliersPage from "./pages/SuppliersPage";
-import UploadPage from "./pages/UploadPage";
-import UsagePage from "./pages/UsagePage";
-import AuthCallbackPage from "./pages/AuthCallbackPage";
+
+const AlertsPage = lazy(() => import("./pages/AlertsPage"));
+const BlogLayout = lazy(() => import("./pages/BlogLayout"));
+const BlogIndex = lazy(() => import("./pages/BlogLayout").then(m => ({ default: m.BlogIndex })));
+const CalculatorPage = lazy(() => import("./pages/CalculatorPage"));
+const DashboardPage = lazy(() => import("./pages/DashboardPage"));
+const DueDatesPage = lazy(() => import("./pages/DueDatesPage"));
+const EmbedPage = lazy(() => import("./pages/EmbedPage"));
+const FilingPage = lazy(() => import("./pages/FilingPage"));
+const GstinPage = lazy(() => import("./pages/GstinPage"));
+const GstRatePage = lazy(() => import("./pages/GstRatePage"));
+const HsnFinderPage = lazy(() => import("./pages/HsnFinderPage"));
+const InvoiceDetailPage = lazy(() => import("./pages/InvoiceDetailPage"));
+const InvoicesPage = lazy(() => import("./pages/InvoicesPage"));
+const ITCPage = lazy(() => import("./pages/ITCPage"));
+const LookupPage = lazy(() => import("./pages/LookupPage"));
+const PricingPage = lazy(() => import("./pages/PricingPage"));
+const ReconcilePage = lazy(() => import("./pages/ReconcilePage"));
+const ResourcesPage = lazy(() => import("./pages/ResourcesPage"));
+const StatusPage = lazy(() => import("./pages/StatusPage"));
+const SuppliersPage = lazy(() => import("./pages/SuppliersPage"));
+const UploadPage = lazy(() => import("./pages/UploadPage"));
+const UsagePage = lazy(() => import("./pages/UsagePage"));
+const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
+const GstComplianceChecklist = lazy(() => import("./pages/blog/GstComplianceChecklist"));
+const GstFilingGuide = lazy(() => import("./pages/blog/GstFilingGuide"));
+const HsnCodeLookup = lazy(() => import("./pages/blog/HsnCodeLookup"));
+
+function LazyFallback() {
+  return (
+    <div className="shell-main">
+      <SkeletonPanel lines={5} label="Loading" />
+    </div>
+  );
+}
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
-  // Waiting on /auth/me — rendering the redirect now would bounce a signed-in
-  // user to the login page on every refresh.
   if (loading) {
     return (
       <div className="shell-main">
@@ -42,23 +51,8 @@ function Protected({ children }) {
     );
   }
   if (!user) return <Navigate to="/" replace />;
-  // The boundary sits inside the Shell rather than around it, so a page that
-  // crashes leaves the navigation intact and the user can click away from it.
-  //
-  // Keyed on the tenant, so switching GSTIN throws the page away and builds a
-  // new one rather than re-rendering the old one. Every page here loads on
-  // mount and holds what it loaded in state — invoices, findings, ITC, the
-  // filing preview — and none of them watch the business, because until now it
-  // could not change while they were mounted. Without the key a switch leaves
-  // all of it on screen, now captioned by another company's name in the header:
-  // one registration's credit at risk read as the other's, which is a number
-  // someone acts on. Remounting is also what re-runs each page's own fetch, so
-  // the data catches up with the caption rather than the two being reconciled
-  // page by page.
-  //
-  // `user.business.id` rather than the stored selection: this is the tenant the
-  // server said the last request acted for, and a key that changed on intent
-  // rather than on outcome would clear the screen for a switch that failed.
+  // Keyed on the tenant so switching GSTIN remounts the page and re-fetches
+  // data rather than showing one business's numbers under another's name.
   return (
     <Shell>
       <ErrorBoundary key={user.business?.id ?? "home"}>{children}</ErrorBoundary>
@@ -79,119 +73,122 @@ function Home() {
   return (
     <Shell>
       <ErrorBoundary key={user.business?.id ?? "home"}>
-        <DashboardPage />
+        <Suspense fallback={<LazyFallback />}>
+          <DashboardPage />
+        </Suspense>
       </ErrorBoundary>
     </Shell>
   );
 }
 
+function Lazy({ children }) {
+  return <Suspense fallback={<LazyFallback />}>{children}</Suspense>;
+}
+
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Navigate to="/" replace />} />
-      <Route path="/auth/callback" element={<AuthCallbackPage />} />
-      <Route path="/pricing" element={<PricingPage />} />
-      <Route path="/blog" element={<BlogLayout />}>
-        <Route index element={<BlogIndex />} />
-        <Route path="gst-filing-guide-india-2026" element={<GstFilingGuide />} />
-        <Route path="hsn-code-lookup" element={<HsnCodeLookup />} />
-        <Route path="gst-compliance-checklist-small-business" element={<GstComplianceChecklist />} />
-      </Route>
-      <Route path="/calculator" element={<CalculatorPage />} />
-      <Route path="/lookup" element={<LookupPage />} />
-      <Route path="/hsn" element={<HsnFinderPage />} />
-      <Route path="/gstin/:gstin" element={<GstinPage />} />
-      <Route path="/gst-rate/:product" element={<GstRatePage />} />
-      <Route path="/due-dates" element={<DueDatesPage />} />
-      <Route path="/resources" element={<ResourcesPage />} />
-      <Route path="/embed" element={<EmbedPage />} />
-      <Route path="/" element={<Home />} />
-      <Route
-        path="/invoices"
-        element={
-          <Protected>
-            <InvoicesPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/invoices/:id"
-        element={
-          <Protected>
-            <InvoiceDetailPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/upload"
-        element={
-          <Protected>
-            <UploadPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/reconcile"
-        element={
-          <Protected>
-            <ReconcilePage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/itc"
-        element={
-          <Protected>
-            <ITCPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/filing"
-        element={
-          <Protected>
-            <FilingPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/suppliers"
-        element={
-          <Protected>
-            <SuppliersPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/alerts"
-        element={
-          <Protected>
-            <AlertsPage />
-          </Protected>
-        }
-      />
-      <Route
-        path="/usage"
-        element={
-          <Protected>
-            <UsagePage />
-          </Protected>
-        }
-      />
-      {/* Behind `Protected` even though both probes it reads are public. They
-          are public so an operator with no account can watch the queue; this
-          page is for a signed-in business asking why its uploads are quiet,
-          and putting it outside the shell would mean a nav-less page reachable
-          from nowhere. */}
-      <Route
-        path="/status"
-        element={
-          <Protected>
-            <StatusPage />
-          </Protected>
-        }
-      />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    <Suspense fallback={<LazyFallback />}>
+      <Routes>
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route path="/auth/callback" element={<AuthCallbackPage />} />
+        <Route path="/pricing" element={<PricingPage />} />
+        <Route path="/blog" element={<Lazy><BlogLayout /></Lazy>}>
+          <Route index element={<Lazy><BlogIndex /></Lazy>} />
+          <Route path="gst-filing-guide-india-2026" element={<GstFilingGuide />} />
+          <Route path="hsn-code-lookup" element={<HsnCodeLookup />} />
+          <Route path="gst-compliance-checklist-small-business" element={<GstComplianceChecklist />} />
+        </Route>
+        <Route path="/calculator" element={<CalculatorPage />} />
+        <Route path="/lookup" element={<LookupPage />} />
+        <Route path="/hsn" element={<HsnFinderPage />} />
+        <Route path="/gstin/:gstin" element={<GstinPage />} />
+        <Route path="/gst-rate/:product" element={<GstRatePage />} />
+        <Route path="/due-dates" element={<DueDatesPage />} />
+        <Route path="/resources" element={<ResourcesPage />} />
+        <Route path="/embed" element={<EmbedPage />} />
+        <Route path="/" element={<Home />} />
+        <Route
+          path="/invoices"
+          element={
+            <Protected>
+              <InvoicesPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/invoices/:id"
+          element={
+            <Protected>
+              <InvoiceDetailPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/upload"
+          element={
+            <Protected>
+              <UploadPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/reconcile"
+          element={
+            <Protected>
+              <ReconcilePage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/itc"
+          element={
+            <Protected>
+              <ITCPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/filing"
+          element={
+            <Protected>
+              <FilingPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/suppliers"
+          element={
+            <Protected>
+              <SuppliersPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/alerts"
+          element={
+            <Protected>
+              <AlertsPage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/usage"
+          element={
+            <Protected>
+              <UsagePage />
+            </Protected>
+          }
+        />
+        <Route
+          path="/status"
+          element={
+            <Protected>
+              <StatusPage />
+            </Protected>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

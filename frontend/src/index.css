@@ -3018,6 +3018,62 @@ a:focus-visible {
   font-size: 0.85rem;
   margin: 0 0 1.5rem;
 }
+.landing-trust-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.25rem;
+  margin: 0 0 1.75rem;
+}
+.landing-trust-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.1rem;
+}
+.landing-trust-item strong {
+  font-size: 1.2rem;
+  color: var(--brand);
+  font-weight: 700;
+}
+.landing-trust-item span {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.landing-trust-sep {
+  width: 1px;
+  height: 28px;
+  background: var(--line);
+}
+.landing-tool-free {
+  font-size: 0.65rem;
+  color: var(--good) !important;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.15rem;
+}
+.landing-cta-actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.landing-cta-secondary {
+  background: transparent;
+  border: 1px solid var(--glass-input-border);
+  color: var(--ink) !important;
+  padding: 0.65rem 1.5rem;
+  border-radius: var(--radius);
+  text-decoration: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+  transition: all var(--doaide-transition, 150ms ease);
+}
+.landing-cta-secondary:hover {
+  border-color: var(--brand);
+  color: var(--brand) !important;
+}
 .landing-tool-cards {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -3144,12 +3200,22 @@ a:focus-visible {
 
 /* Responsive: tool pages */
 @media (max-width: 600px) {
-  .tools-nav { gap: 0.5rem; padding: 0.5rem 1rem; }
-  .tools-nav-links { display: none; }
+  .tools-nav { gap: 0.5rem; padding: 0.5rem 0.75rem; flex-wrap: nowrap; }
+  .tools-nav-links {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+  .tools-nav-links::-webkit-scrollbar { display: none; }
+  .tools-nav-link { white-space: nowrap; font-size: 0.78rem; padding: 0.3rem 0.5rem; }
+  .tools-nav-brand { font-size: 0.95rem; margin-right: 0.5rem; }
+  .tools-nav-cta { font-size: 0.78rem; padding: 0.35rem 0.75rem; white-space: nowrap; }
   .tool-main { padding: 1.5rem 1rem 3rem; }
   .tool-title { font-size: 1.4rem; }
   .calc-card { padding: 1rem; }
-  .landing-tool-cards { grid-template-columns: 1fr; max-width: 300px; }
+  .landing-tool-cards { grid-template-columns: repeat(2, 1fr); max-width: 400px; }
   .hsn-cat-grid { grid-template-columns: repeat(2, 1fr); }
   .landing-search-box { flex-direction: column; }
   .landing-search-btn { border-radius: 0; }

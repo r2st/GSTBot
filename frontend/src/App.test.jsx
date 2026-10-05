@@ -125,10 +125,10 @@ describe("App routing", () => {
       ["/gst-rate/laptop", "GST rate page"],
       ["/embed", "Embed page"],
       ["/resources", "Resources page"],
-    ])("renders %s without auth", (route, expected) => {
+    ])("renders %s without auth", async (route, expected) => {
       renderAt(route, { user: null, loading: false });
 
-      expect(screen.getByText(expected)).toBeInTheDocument();
+      expect(await screen.findByText(expected)).toBeInTheDocument();
     });
   });
 
@@ -143,69 +143,63 @@ describe("App routing", () => {
       ["/filing", "Filing page"],
       ["/suppliers", "Suppliers page"],
       ["/alerts", "Alerts page"],
-    ])("renders %s", (route, expected) => {
+    ])("renders %s", async (route, expected) => {
       renderAt(route);
 
-      expect(screen.getByText(expected)).toBeInTheDocument();
+      expect(await screen.findByText(expected)).toBeInTheDocument();
     });
 
-    it("wraps protected pages in the shell", () => {
+    it("wraps protected pages in the shell", async () => {
       renderAt("/invoices");
 
-      expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
+      expect(await screen.findByRole("navigation", { name: "Main" })).toBeInTheDocument();
       expect(screen.getByRole("link", { name: "Skip to content" })).toBeInTheDocument();
     });
 
-    it("keeps /invoices/:id distinct from the list", () => {
-      // Both live under /invoices; an over-eager route would match the list
-      // for a detail URL.
+    it("keeps /invoices/:id distinct from the list", async () => {
       renderAt("/invoices/42");
 
+      expect(await screen.findByText("Invoice detail page")).toBeInTheDocument();
       expect(screen.queryByText("Invoices page")).not.toBeInTheDocument();
     });
 
-    it("redirects away from /login", () => {
+    it("redirects away from /login", async () => {
       renderAt("/login");
 
-      expect(screen.getByText("Dashboard page")).toBeInTheDocument();
+      expect(await screen.findByText("Dashboard page")).toBeInTheDocument();
       expect(screen.queryByText("Login page")).not.toBeInTheDocument();
     });
 
-    it("sends an unknown path to the dashboard", () => {
+    it("sends an unknown path to the dashboard", async () => {
       renderAt("/nope/not/a/page");
 
-      expect(screen.getByText("Dashboard page")).toBeInTheDocument();
+      expect(await screen.findByText("Dashboard page")).toBeInTheDocument();
     });
   });
 
   describe("when a page crashes", () => {
     it("keeps the navigation usable so the user can leave the broken screen", async () => {
-      // This is why the boundary is inside Shell rather than around it. If it
-      // wrapped the shell, a crashed page would take the nav down with it and
-      // the only way out would be the browser's back button.
       const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
       crash.current = true;
       renderAt("/");
 
-      expect(screen.getByRole("alert")).toHaveTextContent(/this screen hit an error/i);
+      expect(await screen.findByRole("alert")).toHaveTextContent(/this screen hit an error/i);
       expect(screen.getByRole("navigation", { name: "Main" })).toBeInTheDocument();
 
-      // And navigating away clears it, rather than leaving every later route
-      // showing the fallback.
       crash.current = false;
       await userEvent.click(screen.getByRole("link", { name: "Invoices" }));
 
-      expect(screen.getByText("Invoices page")).toBeInTheDocument();
+      expect(await screen.findByText("Invoices page")).toBeInTheDocument();
       expect(screen.queryByRole("alert")).not.toBeInTheDocument();
       quiet.mockRestore();
     });
 
-    it("reports the underlying message rather than a bare apology", () => {
+    it("reports the underlying message rather than a bare apology", async () => {
       const quiet = vi.spyOn(console, "error").mockImplementation(() => {});
       crash.current = true;
       renderAt("/");
 
-      expect(screen.getByText("total is not a number")).toBeInTheDocument();
+      expect(await screen.findByText("total is not a number")).toBeInTheDocument();
       quiet.mockRestore();
     });
   });
@@ -228,9 +222,9 @@ describe("switching to another GSTIN", () => {
     );
   }
 
-  it("rebuilds the page so its data cannot outlive the tenant it was fetched for", () => {
+  it("rebuilds the page so its data cannot outlive the tenant it was fetched for", async () => {
     const { rerender } = renderFor(1);
-    const before = screen.getByText("Dashboard page");
+    const before = await screen.findByText("Dashboard page");
 
     auth.current = {
       user: { ...USER, business: { id: 2, legal_name: "Acme Exports" } },
@@ -242,17 +236,13 @@ describe("switching to another GSTIN", () => {
       </MemoryRouter>,
     );
 
-    // A new DOM node is the observable half of "unmounted and mounted again".
-    // Left keyed on nothing, React reuses this node and the previous tenant's
-    // figures stay on screen under the new company's name in the header.
-    expect(screen.getByText("Dashboard page")).not.toBe(before);
+    const after = await screen.findByText("Dashboard page");
+    expect(after).not.toBe(before);
   });
 
-  it("keeps the page alive across a re-render that does not change tenant", () => {
-    // The key must not be something that merely changes often: remounting on
-    // every render would refetch each page continuously.
+  it("keeps the page alive across a re-render that does not change tenant", async () => {
     const { rerender } = renderFor(1);
-    const before = screen.getByText("Dashboard page");
+    const before = await screen.findByText("Dashboard page");
 
     rerender(
       <MemoryRouter initialEntries={["/"]}>

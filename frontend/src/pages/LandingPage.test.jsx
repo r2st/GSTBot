@@ -212,7 +212,8 @@ describe("LandingPage", () => {
       renderLanding();
 
       expect(screen.getByText("Start Filing GST Returns in Minutes")).toBeInTheDocument();
-      expect(screen.getByText("Sign Up Free")).toBeInTheDocument();
+      expect(screen.getByText("Create Free Account")).toBeInTheDocument();
+      expect(screen.getByText(/Try GST Calculator/)).toBeInTheDocument();
     });
   });
 
@@ -225,11 +226,13 @@ describe("LandingPage", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows the business counter", () => {
+    it("shows the trust metrics", () => {
       renderLanding();
 
       expect(screen.getByText("12,000+")).toBeInTheDocument();
-      expect(screen.getByText(/businesses across India/)).toBeInTheDocument();
+      expect(screen.getByText("Businesses")).toBeInTheDocument();
+      expect(screen.getByText("50,000+")).toBeInTheDocument();
+      expect(screen.getByText("100%")).toBeInTheDocument();
     });
 
     it("renders four tool cards", () => {
