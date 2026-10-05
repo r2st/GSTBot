@@ -179,7 +179,12 @@ def cancel_subscription(
             detail="No active paid subscription to cancel.",
         )
     if sub.razorpay_subscription_id and razorpay_client.is_configured():
-        razorpay_client.cancel_subscription(sub.razorpay_subscription_id)
+        result = razorpay_client.cancel_subscription(sub.razorpay_subscription_id)
+        if result is None:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not cancel subscription with payment provider. Try again.",
+            )
     sub.tier = SubscriptionTier.FREE
     sub.status = SubscriptionStatus.CANCELLED
     db.commit()
@@ -230,7 +235,14 @@ async def razorpay_webhook(
     try:
         payload = json.loads(body)
     except (json.JSONDecodeError, ValueError):
-        return {"status": "ok"}
+        logger.error(
+            "Razorpay webhook body is not valid JSON",
+            extra={"body_length": len(body), "body_prefix": body[:200].decode("utf-8", errors="replace")},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Webhook body is not valid JSON.",
+        )
 
     event = payload.get("event", "")
     entity = (payload.get("payload", {}).get("payment", {}).get("entity", {})

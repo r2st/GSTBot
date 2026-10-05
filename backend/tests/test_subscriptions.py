@@ -245,6 +245,28 @@ class TestCancelSubscription:
         assert data["tier"] == "free"
         assert data["status"] == "cancelled"
 
+    def test_razorpay_failure_blocks_local_cancel(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+            razorpay_subscription_id="sub_test_fail",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with (
+            patch.object(razorpay_client, "is_configured", return_value=True),
+            patch.object(razorpay_client, "cancel_subscription", return_value=None),
+        ):
+            response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 502
+        db_session.refresh(sub)
+        assert sub.tier == SubscriptionTier.PRO
+        assert sub.status == SubscriptionStatus.ACTIVE
+
     def test_requires_authentication(self, client):
         response = client.post("/api/v1/subscriptions/cancel")
         assert response.status_code == 401
@@ -566,7 +588,7 @@ class TestWebhook:
             )
         assert response.status_code == 200
 
-    def test_malformed_json_is_acknowledged_without_crashing(self, client):
+    def test_malformed_json_is_rejected(self, client):
         with patch.object(
             razorpay_client, "verify_webhook_signature", return_value=True
         ):
@@ -575,4 +597,5 @@ class TestWebhook:
                 content=b"not json at all",
                 headers={"X-Razorpay-Signature": "valid"},
             )
-        assert response.status_code == 200
+        assert response.status_code == 400
+        assert "not valid JSON" in response.json()["detail"]
