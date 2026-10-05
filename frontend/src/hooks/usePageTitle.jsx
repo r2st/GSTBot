@@ -37,6 +37,12 @@ export function PageTitleProvider({ children }) {
   const set = useCallback((title) => {
     document.title = formatTitle(title);
 
+    const canonical = window.location.origin + window.location.pathname;
+    const link = document.querySelector('link[rel="canonical"]');
+    if (link) link.setAttribute("href", canonical);
+    const ogUrl = document.querySelector('meta[property="og:url"]');
+    if (ogUrl) ogUrl.setAttribute("content", canonical);
+
     // The first title of a session is the one the browser reads out as part of
     // loading the document. Repeating it here says everything twice.
     if (!hasAnnounced.current) {

@@ -14,9 +14,33 @@ function announcer() {
   return document.querySelector('[aria-live="polite"][aria-atomic="true"]');
 }
 
+function ensureCanonical() {
+  let link = document.querySelector('link[rel="canonical"]');
+  if (!link) {
+    link = document.createElement("link");
+    link.setAttribute("rel", "canonical");
+    link.setAttribute("href", "https://gst.doaide.com/");
+    document.head.appendChild(link);
+  }
+  return link;
+}
+
+function ensureOgUrl() {
+  let meta = document.querySelector('meta[property="og:url"]');
+  if (!meta) {
+    meta = document.createElement("meta");
+    meta.setAttribute("property", "og:url");
+    meta.setAttribute("content", "https://gst.doaide.com/");
+    document.head.appendChild(meta);
+  }
+  return meta;
+}
+
 describe("usePageTitle", () => {
   beforeEach(() => {
     document.title = DEFAULT_TITLE;
+    ensureCanonical();
+    ensureOgUrl();
   });
 
   afterEach(() => {
@@ -152,6 +176,28 @@ describe("usePageTitle", () => {
         </PageTitleProvider>,
       );
       expect(announcer()).toHaveClass("visually-hidden");
+    });
+  });
+
+  describe("the canonical URL", () => {
+    it("updates the canonical link to the current path", () => {
+      render(
+        <PageTitleProvider>
+          <Page title="Dashboard" />
+        </PageTitleProvider>,
+      );
+      const link = document.querySelector('link[rel="canonical"]');
+      expect(link.getAttribute("href")).toBe(window.location.origin + window.location.pathname);
+    });
+
+    it("updates the og:url meta to the current path", () => {
+      render(
+        <PageTitleProvider>
+          <Page title="Dashboard" />
+        </PageTitleProvider>,
+      );
+      const meta = document.querySelector('meta[property="og:url"]');
+      expect(meta.getAttribute("content")).toBe(window.location.origin + window.location.pathname);
     });
   });
 });

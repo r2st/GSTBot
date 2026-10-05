@@ -39,6 +39,17 @@ vi.mock("./pages/GstinPage", () => ({ default: () => <div>GSTIN page</div> }));
 vi.mock("./pages/GstRatePage", () => ({ default: () => <div>GST rate page</div> }));
 vi.mock("./pages/EmbedPage", () => ({ default: () => <div>Embed page</div> }));
 vi.mock("./pages/ResourcesPage", () => ({ default: () => <div>Resources page</div> }));
+vi.mock("./pages/BlogLayout", async () => {
+  const { Outlet } = await import("react-router-dom");
+  return {
+    default: () => <div>Blog layout<Outlet /></div>,
+    BlogIndex: () => <div>Blog index</div>,
+    ARTICLES: [],
+  };
+});
+vi.mock("./pages/blog/GstFilingGuide", () => ({ default: () => <div>Filing guide</div> }));
+vi.mock("./pages/blog/HsnCodeLookup", () => ({ default: () => <div>HSN lookup article</div> }));
+vi.mock("./pages/blog/GstComplianceChecklist", () => ({ default: () => <div>Compliance checklist</div> }));
 
 const USER = { id: 1, email: "owner@acme.in", business: { legal_name: "Acme Traders" } };
 
@@ -129,6 +140,34 @@ describe("App routing", () => {
       renderAt(route, { user: null, loading: false });
 
       expect(await screen.findByText(expected)).toBeInTheDocument();
+    });
+  });
+
+  describe("blog routes (no auth needed)", () => {
+    it("renders the blog index at /blog", async () => {
+      renderAt("/blog", { user: null, loading: false });
+
+      expect(await screen.findByText("Blog index")).toBeInTheDocument();
+    });
+
+    it("renders a blog article at /blog/:slug", async () => {
+      renderAt("/blog/gst-filing-guide-india-2026", { user: null, loading: false });
+
+      expect(await screen.findByText("Filing guide")).toBeInTheDocument();
+    });
+
+    it("does not redirect /blog to the homepage", async () => {
+      renderAt("/blog", { user: null, loading: false });
+
+      expect(await screen.findByText("Blog index")).toBeInTheDocument();
+      expect(screen.queryByText("Landing page")).not.toBeInTheDocument();
+    });
+
+    it("does not redirect /blog/:slug to the homepage", async () => {
+      renderAt("/blog/hsn-code-lookup", { user: null, loading: false });
+
+      expect(await screen.findByText("HSN lookup article")).toBeInTheDocument();
+      expect(screen.queryByText("Landing page")).not.toBeInTheDocument();
     });
   });
 
