@@ -177,8 +177,9 @@ TIER_PRICING = {
         "price_monthly": 0,
         "price_display": "Free",
         "features": [
-            "5 GST lookups/month",
-            "Basic compliance check",
+            "50 invoices/month",
+            "GSTR-2B reconciliation",
+            "ITC calculation",
             "Single business",
         ],
     },

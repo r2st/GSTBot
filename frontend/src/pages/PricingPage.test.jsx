@@ -15,7 +15,7 @@ const PRICING_RESPONSE = {
       name: "Free",
       price_display: "₹0/month",
       price_monthly: 0,
-      features: ["5 GST lookups/month", "Basic compliance"],
+      features: ["50 invoices/month", "GSTR-2B reconciliation"],
     },
     pro: {
       name: "Pro",
@@ -96,7 +96,7 @@ describe("PricingPage", () => {
     mockFetch(PRICING_RESPONSE, SUBSCRIPTION_RESPONSE);
     renderPage();
 
-    expect(await screen.findByText("5 GST lookups/month")).toBeInTheDocument();
+    expect(await screen.findByText("50 invoices/month")).toBeInTheDocument();
     expect(screen.getByText("Unlimited lookups")).toBeInTheDocument();
     expect(screen.getByText("API access")).toBeInTheDocument();
   });
