@@ -13,6 +13,7 @@ from starlette.config import Config
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.rate_limit import RateLimit
 from app.core.security import create_access_token
 from app.models.business import Business, BusinessPlan
 from app.models.user import User, UserRole
@@ -54,6 +55,8 @@ if settings.microsoft_client_id:
 
 FRONTEND_URL = settings.cors_origins[0] if settings.cors_origins else "http://localhost:5173"
 
+_oauth_callback_limit = RateLimit("oauth_callback", "30/minute", by="ip")
+
 
 def _callback_url(provider: str) -> str:
     return f"{settings.oauth_redirect_base}{settings.api_v1_prefix}/auth/{provider}/callback"
@@ -61,15 +64,19 @@ def _callback_url(provider: str) -> str:
 
 def _find_or_create_oauth_user(
     db: Session, *, provider: str, oauth_id: str, email: str, name: str | None
-) -> User:
+) -> User | None:
     user = db.scalar(
         select(User).where(User.oauth_provider == provider, User.oauth_id == oauth_id)
     )
     if user:
+        if not user.is_active:
+            return None
         return user
 
     user = db.scalar(select(User).where(User.email == email))
     if user:
+        if not user.is_active:
+            return None
         if not user.oauth_provider:
             user.oauth_provider = provider
             user.oauth_id = oauth_id
@@ -100,6 +107,17 @@ def _find_or_create_oauth_user(
     return user
 
 
+def _complete_oauth_login(user: User | None, provider: str) -> RedirectResponse:
+    if user is None:
+        return RedirectResponse(f"{FRONTEND_URL}/login?error=account_deactivated")
+    logger.info(
+        "OAuth login",
+        extra={"user_id": user.id, "business_id": user.business_id, "provider": provider},
+    )
+    access_token = create_access_token(user.id)
+    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
+
+
 # ── Google ────────────────────────────────────────────────
 
 @router.get("/google")
@@ -110,7 +128,10 @@ async def google_login(request: Request):
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/google/callback")
+@router.get(
+    "/google/callback",
+    dependencies=[Depends(_oauth_callback_limit)],
+)
 async def google_callback(request: Request, db: Session = Depends(get_db)):
     if not settings.google_client_id:
         raise HTTPException(status_code=501, detail="Google OAuth not configured")
@@ -132,8 +153,7 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
         email=email.lower(),
         name=userinfo.get("name"),
     )
-    access_token = create_access_token(user.id)
-    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
+    return _complete_oauth_login(user, "google")
 
 
 # ── GitHub ────────────────────────────────────────────────
@@ -146,7 +166,10 @@ async def github_login(request: Request):
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/github/callback")
+@router.get(
+    "/github/callback",
+    dependencies=[Depends(_oauth_callback_limit)],
+)
 async def github_callback(request: Request, db: Session = Depends(get_db)):
     if not settings.github_client_id:
         raise HTTPException(status_code=501, detail="GitHub OAuth not configured")
@@ -177,8 +200,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
         email=email.lower(),
         name=profile.get("name") or profile.get("login"),
     )
-    access_token = create_access_token(user.id)
-    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
+    return _complete_oauth_login(user, "github")
 
 
 # ── Microsoft ─────────────────────────────────────────────
@@ -191,7 +213,10 @@ async def microsoft_login(request: Request):
     return await oauth.microsoft.authorize_redirect(request, redirect_uri)
 
 
-@router.get("/microsoft/callback")
+@router.get(
+    "/microsoft/callback",
+    dependencies=[Depends(_oauth_callback_limit)],
+)
 async def microsoft_callback(request: Request, db: Session = Depends(get_db)):
     if not settings.microsoft_client_id:
         raise HTTPException(status_code=501, detail="Microsoft OAuth not configured")
@@ -213,5 +238,4 @@ async def microsoft_callback(request: Request, db: Session = Depends(get_db)):
         email=email.lower(),
         name=userinfo.get("name"),
     )
-    access_token = create_access_token(user.id)
-    return RedirectResponse(f"{FRONTEND_URL}/auth/callback?token={access_token}")
+    return _complete_oauth_login(user, "microsoft")
