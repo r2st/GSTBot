@@ -1,6 +1,7 @@
 """Usage tracking: count API calls per business per month, enforce tier limits."""
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -8,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from app.models.subscription import Subscription, SubscriptionTier
 from app.models.usage import UsageRecord
+
+logger = logging.getLogger(__name__)
 
 # Monthly limits per tier.  0 = unlimited.
 TIER_LIMITS: dict[SubscriptionTier, dict[str, int]] = {
@@ -98,7 +101,20 @@ def check_limit(
         )
     )
     used = row.call_count if row else 0
-    return used < limit, used, limit
+    allowed = used < limit
+    if not allowed:
+        logger.warning(
+            "Usage limit reached",
+            extra={
+                "business_id": business_id,
+                "endpoint": endpoint,
+                "used": used,
+                "limit": limit,
+                "tier": tier.value,
+                "period": period,
+            },
+        )
+    return allowed, used, limit
 
 
 def get_usage_summary(

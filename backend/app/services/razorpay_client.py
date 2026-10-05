@@ -36,6 +36,19 @@ def _plan_id_for_tier(tier: SubscriptionTier) -> str | None:
     return None
 
 
+def _exc_context(exc: Exception, operation: str, **fields: Any) -> dict[str, Any]:
+    """Structured fields for a Razorpay failure log line.
+
+    Pulls the HTTP status from the exception when it wraps one, so transport
+    errors (no response at all) carry ``status_code: None`` rather than
+    raising a second time trying to read it.
+    """
+    status: int | None = None
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+    return {"operation": operation, "status_code": status, **fields}
+
+
 def create_customer(email: str, name: str | None = None) -> dict[str, Any] | None:
     if not is_configured():
         return None
@@ -48,8 +61,11 @@ def create_customer(email: str, name: str | None = None) -> dict[str, Any] | Non
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception:
-        logger.exception("Razorpay create_customer failed")
+    except Exception as exc:
+        logger.exception(
+            "Razorpay create_customer failed",
+            extra=_exc_context(exc, "create_customer"),
+        )
         return None
 
 
@@ -75,8 +91,11 @@ def create_subscription(
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception:
-        logger.exception("Razorpay create_subscription failed")
+    except Exception as exc:
+        logger.exception(
+            "Razorpay create_subscription failed",
+            extra=_exc_context(exc, "create_subscription", plan_id=plan_id),
+        )
         return None
 
 
@@ -103,8 +122,11 @@ def create_order(
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception:
-        logger.exception("Razorpay create_order failed")
+    except Exception as exc:
+        logger.exception(
+            "Razorpay create_order failed",
+            extra=_exc_context(exc, "create_order", amount_paise=amount_paise),
+        )
         return None
 
 
@@ -149,8 +171,11 @@ def cancel_subscription(subscription_id: str) -> dict[str, Any] | None:
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception:
-        logger.exception("Razorpay cancel_subscription failed")
+    except Exception as exc:
+        logger.exception(
+            "Razorpay cancel_subscription failed",
+            extra=_exc_context(exc, "cancel_subscription", subscription_id=subscription_id),
+        )
         return None
 
 
@@ -165,8 +190,11 @@ def fetch_subscription(subscription_id: str) -> dict[str, Any] | None:
         )
         resp.raise_for_status()
         return resp.json()
-    except Exception:
-        logger.exception("Razorpay fetch_subscription failed")
+    except Exception as exc:
+        logger.exception(
+            "Razorpay fetch_subscription failed",
+            extra=_exc_context(exc, "fetch_subscription", subscription_id=subscription_id),
+        )
         return None
 
 
