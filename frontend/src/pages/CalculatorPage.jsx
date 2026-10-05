@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -158,6 +159,8 @@ export default function CalculatorPage() {
               <li><strong>28%</strong> — Luxury and sin goods: cars, AC, cement, soft drinks, tobacco</li>
             </ul>
           </section>
+
+          <RelatedTools current="/calculator" />
         </div>
       </main>
     </div>

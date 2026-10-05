@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
+import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -145,6 +146,8 @@ export default function LookupPage() {
               they cost money.
             </p>
           </section>
+
+          <RelatedTools current="/lookup" />
         </div>
       </main>
     </div>

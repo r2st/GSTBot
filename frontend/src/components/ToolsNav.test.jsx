@@ -14,12 +14,14 @@ function renderNav(route = "/calculator") {
 }
 
 describe("ToolsNav", () => {
-  it("renders all three tool links", () => {
+  it("renders all tool links", () => {
     renderNav();
 
     expect(screen.getByText("GST Calculator")).toBeInTheDocument();
     expect(screen.getByText("GSTIN Lookup")).toBeInTheDocument();
     expect(screen.getByText("HSN Finder")).toBeInTheDocument();
+    expect(screen.getByText("Due Dates")).toBeInTheDocument();
+    expect(screen.getByText("All Tools")).toBeInTheDocument();
   });
 
   it("applies active class to the current route", () => {

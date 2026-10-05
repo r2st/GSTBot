@@ -1,4 +1,14 @@
 User-agent: *
 Allow: /
+Disallow: /invoices
+Disallow: /upload
+Disallow: /reconcile
+Disallow: /itc
+Disallow: /filing
+Disallow: /suppliers
+Disallow: /alerts
+Disallow: /usage
+Disallow: /status
+Disallow: /auth/callback
 
 Sitemap: https://gst.doaide.com/sitemap.xml

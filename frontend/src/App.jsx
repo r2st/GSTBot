@@ -23,6 +23,7 @@ import LandingPage from "./pages/LandingPage";
 import LookupPage from "./pages/LookupPage";
 import PricingPage from "./pages/PricingPage";
 import ReconcilePage from "./pages/ReconcilePage";
+import ResourcesPage from "./pages/ResourcesPage";
 import StatusPage from "./pages/StatusPage";
 import SuppliersPage from "./pages/SuppliersPage";
 import UploadPage from "./pages/UploadPage";
@@ -102,6 +103,7 @@ export default function App() {
       <Route path="/gstin/:gstin" element={<GstinPage />} />
       <Route path="/gst-rate/:product" element={<GstRatePage />} />
       <Route path="/due-dates" element={<DueDatesPage />} />
+      <Route path="/resources" element={<ResourcesPage />} />
       <Route path="/embed" element={<EmbedPage />} />
       <Route path="/" element={<Home />} />
       <Route

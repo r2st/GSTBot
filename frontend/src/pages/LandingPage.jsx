@@ -372,6 +372,19 @@ const INSTANT_TOOLS = [
       </svg>
     ),
   },
+  {
+    to: "/due-dates",
+    title: "Due Dates Calendar",
+    desc: "Never miss a GST filing deadline — full calendar",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" />
+        <line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+      </svg>
+    ),
+  },
 ];
 
 function InstantLookup() {
@@ -453,7 +466,7 @@ function ReferralBanner() {
 }
 
 export default function LandingPage() {
-  usePageTitle("Free AI-Powered GST Compliance Tool for Indian Businesses");
+  usePageTitle("Free GST Calculator India | GSTIN Verification & HSN Code Search");
   const [visible, setVisible] = useState(false);
 
   useEffect(() => {
@@ -483,11 +496,11 @@ export default function LandingPage() {
             <div className="landing-hero-robot-wrap">
               <HeroRobot color="#F0B429" />
             </div>
-            <h1 className="landing-headline">Free AI-Powered GST Compliance for India</h1>
+            <h1 className="landing-headline">Free GST Calculator, GSTIN Verification &amp; HSN Code Search for India</h1>
             <p className="landing-subtitle">
-              Upload your invoices, auto-reconcile with GSTR-2B, and calculate your
-              Input Tax Credit — GSTR-1 and GSTR-3B returns prepared in minutes, not
-              hours. The free GST calculator and filing tool for Indian businesses.
+              Calculate GST instantly, verify any GSTIN number, search HSN codes &amp; rates,
+              and auto-reconcile with GSTR-2B — GSTR-1 and GSTR-3B returns prepared in
+              minutes. The free GST compliance tool for Indian businesses.
             </p>
             <div className="landing-typewriter-wrap">
               <Typewriter phrases={TYPEWRITER_PHRASES} />
@@ -572,6 +585,7 @@ export default function LandingPage() {
             <Link to="/calculator">GST Calculator</Link>
             <Link to="/lookup">GSTIN Lookup</Link>
             <Link to="/hsn">HSN Code Finder</Link>
+            <Link to="/due-dates">Due Dates Calendar</Link>
             <Link to="/embed">Embed Widget</Link>
           </div>
           <div className="landing-footer-col">
@@ -582,6 +596,7 @@ export default function LandingPage() {
           </div>
           <div className="landing-footer-col">
             <h4>Resources</h4>
+            <Link to="/resources">All GST Tools &amp; Guides</Link>
             <Link to="/blog">Blog</Link>
             <Link to="/blog/gst-filing-guide-india-2026">GST Filing Guide</Link>
             <Link to="/blog/hsn-code-lookup">HSN Code Lookup</Link>

@@ -38,6 +38,7 @@ vi.mock("./pages/HsnFinderPage", () => ({ default: () => <div>HSN page</div> }))
 vi.mock("./pages/GstinPage", () => ({ default: () => <div>GSTIN page</div> }));
 vi.mock("./pages/GstRatePage", () => ({ default: () => <div>GST rate page</div> }));
 vi.mock("./pages/EmbedPage", () => ({ default: () => <div>Embed page</div> }));
+vi.mock("./pages/ResourcesPage", () => ({ default: () => <div>Resources page</div> }));
 
 const USER = { id: 1, email: "owner@acme.in", business: { legal_name: "Acme Traders" } };
 
@@ -123,6 +124,7 @@ describe("App routing", () => {
       ["/gstin/27AAPFU0939F1ZV", "GSTIN page"],
       ["/gst-rate/laptop", "GST rate page"],
       ["/embed", "Embed page"],
+      ["/resources", "Resources page"],
     ])("renders %s without auth", (route, expected) => {
       renderAt(route, { user: null, loading: false });
 

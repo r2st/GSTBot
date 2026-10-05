@@ -1,4 +1,5 @@
 import { Link, useParams } from "react-router-dom";
+import RelatedTools from "../components/RelatedTools";
 import ToolsNav from "../components/ToolsNav";
 import ShareButtons from "../components/ShareButtons";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -90,6 +91,8 @@ export default function GstRatePage() {
               </table>
             </section>
           )}
+
+          <RelatedTools current={`/gst-rate/${product}`} />
         </div>
       </main>
     </div>

@@ -1,0 +1,27 @@
+import { Link } from "react-router-dom";
+
+const ALL_TOOLS = [
+  { path: "/calculator", label: "GST Calculator", desc: "Calculate CGST, SGST, IGST instantly" },
+  { path: "/lookup", label: "GSTIN Verification", desc: "Verify any GST number" },
+  { path: "/hsn", label: "HSN Code Search", desc: "Find HSN/SAC codes & GST rates" },
+  { path: "/due-dates", label: "Due Dates Calendar", desc: "GST filing deadlines" },
+  { path: "/resources", label: "All GST Tools", desc: "Complete tools & guides hub" },
+];
+
+export default function RelatedTools({ current }) {
+  const others = ALL_TOOLS.filter((t) => t.path !== current);
+
+  return (
+    <nav className="related-tools" aria-label="Related GST tools">
+      <h2 className="related-tools-heading">More Free GST Tools</h2>
+      <div className="related-tools-grid">
+        {others.map((t) => (
+          <Link key={t.path} to={t.path} className="related-tools-link">
+            <strong>{t.label}</strong>
+            <span>{t.desc}</span>
+          </Link>
+        ))}
+      </div>
+    </nav>
+  );
+}

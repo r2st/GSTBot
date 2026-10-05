@@ -30,14 +30,14 @@ describe("LandingPage", () => {
   it("shows the headline in serif font", () => {
     renderLanding();
 
-    expect(screen.getByText("Free AI-Powered GST Compliance for India")).toBeInTheDocument();
+    expect(screen.getByText(/Free GST Calculator, GSTIN Verification/)).toBeInTheDocument();
   });
 
   it("shows the monospace subtitle", () => {
     renderLanding();
 
     expect(
-      screen.getByText(/Upload your invoices/),
+      screen.getByText(/Calculate GST instantly/),
     ).toBeInTheDocument();
   });
 
@@ -232,7 +232,7 @@ describe("LandingPage", () => {
       expect(screen.getByText(/businesses across India/)).toBeInTheDocument();
     });
 
-    it("renders three tool cards", () => {
+    it("renders four tool cards", () => {
       renderLanding();
 
       const section = document.querySelector(".landing-tool-cards");
@@ -240,6 +240,7 @@ describe("LandingPage", () => {
       expect(section.textContent).toContain("GST Calculator");
       expect(section.textContent).toContain("GSTIN Lookup");
       expect(section.textContent).toContain("HSN Code Finder");
+      expect(section.textContent).toContain("Due Dates Calendar");
     });
 
     it("submits a GSTIN-shaped query to the lookup route", async () => {
@@ -292,7 +293,7 @@ describe("LandingPage", () => {
   });
 
   describe("footer navigation", () => {
-    it("has links to blog and pricing", () => {
+    it("has links to blog, pricing, and resources", () => {
       renderLanding();
 
       const pricingLinks = screen.getAllByText("Pricing");
@@ -300,6 +301,8 @@ describe("LandingPage", () => {
       expect(screen.getByText("Blog")).toBeInTheDocument();
       expect(screen.getByText("GST Filing Guide")).toBeInTheDocument();
       expect(screen.getByText("HSN Code Lookup")).toBeInTheDocument();
+      expect(screen.getByText("All GST Tools & Guides")).toBeInTheDocument();
+      expect(screen.getAllByText("Due Dates Calendar").length).toBeGreaterThan(0);
     });
   });
 

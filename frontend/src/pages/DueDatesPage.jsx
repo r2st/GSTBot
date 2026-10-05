@@ -1,4 +1,5 @@
 import { useState } from "react";
+import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -253,6 +254,8 @@ export default function DueDatesPage() {
               of the following year.
             </p>
           </section>
+
+          <RelatedTools current="/due-dates" />
         </div>
       </main>
       <script

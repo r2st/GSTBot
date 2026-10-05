@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import RelatedTools from "../components/RelatedTools";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { categories, byCategory, searchHSN } from "../lib/hsnData";
@@ -125,6 +126,8 @@ export default function HsnFinderPage() {
               <li><strong>Above ₹5 crore turnover:</strong> 6-digit HSN code on all invoices</li>
             </ul>
           </section>
+
+          <RelatedTools current="/hsn" />
         </div>
       </main>
     </div>
