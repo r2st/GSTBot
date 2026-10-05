@@ -691,7 +691,11 @@ def update_invoice(
         # the new figures earn, and nothing in between claims one. An HSN code
         # or a name is left alone, because the statement carries neither and
         # the run never read them.
-        withdrawn = invoice.status in VERDICT_STATUSES and bool(corrections & RECONCILED_FIELDS)
+        _DUPLICATE_IDENTITY = {"counterparty_gstin", "invoice_number"}
+        if invoice.status == InvoiceStatus.DUPLICATE:
+            withdrawn = bool(corrections & _DUPLICATE_IDENTITY)
+        else:
+            withdrawn = invoice.status in VERDICT_STATUSES and bool(corrections & RECONCILED_FIELDS)
         if invoice.status in UNREADABLE_STATUSES or withdrawn:
             invoice.status = InvoiceStatus.PARSED
     if changes and invoice.invoice_type == InvoiceType.PURCHASE and invoice.counterparty_gstin:
@@ -730,6 +734,15 @@ def reparse_invoice(
     unlike an upload where the queue is what keeps the request fast.
     """
     invoice = _owned_invoice(db, business, invoice_id)
+    if invoice.status == InvoiceStatus.DUPLICATE:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This invoice is a duplicate — re-reading the file cannot "
+                "change that. Correct the invoice number or counterparty "
+                "GSTIN, or delete one of the two copies."
+            ),
+        )
     # One invoice, so this is not the loop the parameter exists for — but the
     # tenant is already loaded and in hand, and taking it here keeps the
     # relationship walk to the one caller that genuinely has nothing else.
