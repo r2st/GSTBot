@@ -306,10 +306,7 @@ class RateLimit:
             )
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=(
-                    f"Rate limit exceeded: {self.rate.label}. "
-                    f"Try again in {decision.retry_after}s."
-                ),
+                detail=f"Too many requests. Try again in {decision.retry_after}s.",
                 headers={
                     "Retry-After": str(decision.retry_after),
                     "X-RateLimit-Limit": str(decision.limit),

@@ -311,6 +311,31 @@ class TestEnforcement:
             )
         assert client.get("/api/v1/meta/gstin/27AAPFU0939F1ZV").status_code != 429
 
+    def test_a_429_does_not_disclose_the_rate_limit_spec(
+        self, client, rate_limited, pinned_window
+    ):
+        """The detail must not say "30/minute" or "120/minute" — the exact
+        capacity tells an attacker how to pace requests just below the limit.
+
+        The ``Retry-After`` and ``X-RateLimit-*`` headers already carry what a
+        well-behaved client needs; the prose is for a person, and a person needs
+        "try again in N seconds", not a configuration value they cannot act on.
+        """
+        response = None
+        for i in range(25):
+            response = client.post(
+                "/api/v1/auth/login",
+                data={"username": f"nobody{i}@example.com", "password": "wrong-password"},
+            )
+            if response.status_code == 429:
+                break
+        assert response is not None and response.status_code == 429
+
+        detail = response.json()["detail"]
+        assert "/" not in detail, (
+            f"the detail discloses the rate spec — {detail}"
+        )
+
     def test_the_counters_are_forgotten_between_tests(self, client, rate_limited):
         # Guards the fixture itself: a leaked bucket makes an unrelated test
         # fail with a 429 and sends someone hunting in the wrong module.
