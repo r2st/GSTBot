@@ -280,7 +280,7 @@ def list_imported_periods(
     ),
     responses={
         201: {"description": "Reconciled. The report is in the response."},
-        409: {"description": "No GSTR-2B has been imported for that period yet."},
+        409: {"description": "No GSTR-2B imported for that period, or a reconciliation is already running."},
     },
     dependencies=[Depends(_run_limit), Depends(require_writer)],
 )
@@ -300,6 +300,8 @@ def run(
             db, business.id, payload.period, tolerance=payload.tolerance
         )
     except reconciliation.NoGSTR2BImported as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except reconciliation.ConcurrentReconciliation as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
     return ReconciliationDetailOut.model_validate(completed)

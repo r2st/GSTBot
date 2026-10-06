@@ -21,7 +21,7 @@ import pytest
 
 from app.models.gstr_return import GSTRReturn, ReturnType
 from app.models.invoice import InvoiceStatus
-from app.models.reconciliation_run import MatchCategory, ReconciliationStatus
+from app.models.reconciliation_run import MatchCategory, ReconciliationRun, ReconciliationStatus
 from app.models.supplier import Supplier
 from app.services import reconciliation
 from tests.conftest import SUPPLIER_GSTIN_OTHER_STATE
@@ -1181,3 +1181,65 @@ class TestWhenTheSupplierFiled:
 
         assert supplier.last_seen_at == date(2026, 5, 18)
         assert supplier.last_filed_period == PERIOD
+
+
+# ---------------------------------------------------------------------------
+# GB034: Concurrent reconciliation guard
+# ---------------------------------------------------------------------------
+
+class TestConcurrentReconciliationGuard:
+    """A second run for the same period must be rejected while one is RUNNING."""
+
+    def test_running_run_blocks_a_second(self, db_session, business):
+        import_2b(db_session, business.id, [portal()])
+        stuck = ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.RUNNING,
+        )
+        db_session.add(stuck)
+        db_session.commit()
+
+        with pytest.raises(reconciliation.ConcurrentReconciliation):
+            reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+
+    def test_completed_run_does_not_block(self, db_session, business):
+        import_2b(db_session, business.id, [portal()])
+        done = ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.COMPLETED,
+        )
+        db_session.add(done)
+        db_session.commit()
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        assert run.status is ReconciliationStatus.COMPLETED
+
+    def test_failed_run_does_not_block(self, db_session, business):
+        import_2b(db_session, business.id, [portal()])
+        failed = ReconciliationRun(
+            business_id=business.id,
+            period=PERIOD,
+            status=ReconciliationStatus.FAILED,
+        )
+        db_session.add(failed)
+        db_session.commit()
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        assert run.status is ReconciliationStatus.COMPLETED
+
+    def test_running_run_for_different_period_does_not_block(
+        self, db_session, business
+    ):
+        import_2b(db_session, business.id, [portal()])
+        other = ReconciliationRun(
+            business_id=business.id,
+            period="2026-03",
+            status=ReconciliationStatus.RUNNING,
+        )
+        db_session.add(other)
+        db_session.commit()
+
+        run = reconciliation.run_reconciliation(db_session, business.id, PERIOD)
+        assert run.status is ReconciliationStatus.COMPLETED

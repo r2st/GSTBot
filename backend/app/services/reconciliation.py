@@ -942,6 +942,10 @@ class NoGSTR2BImported(RuntimeError):
     """No GSTR-2B has been imported for the period being reconciled."""
 
 
+class ConcurrentReconciliation(RuntimeError):
+    """A reconciliation is already running for this business and period."""
+
+
 def run_reconciliation(
     db: Session,
     business_id: int,
@@ -960,6 +964,19 @@ def run_reconciliation(
     if gstr_return is None:
         raise NoGSTR2BImported(
             f"No GSTR-2B has been imported for {period}. Import one before reconciling."
+        )
+
+    already_running = db.scalar(
+        select(ReconciliationRun).where(
+            ReconciliationRun.business_id == business_id,
+            ReconciliationRun.period == period,
+            ReconciliationRun.status == ReconciliationStatus.RUNNING,
+        ).limit(1)
+    )
+    if already_running is not None:
+        raise ConcurrentReconciliation(
+            f"A reconciliation is already running for {period}. "
+            "Wait for it to finish before starting another."
         )
 
     started_at = datetime.now(UTC)
