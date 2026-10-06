@@ -196,6 +196,13 @@ class Settings(BaseSettings):
     # the run in minutes, not hold a worker for the afternoon.
     smtp_retry_max_wait_seconds: float = Field(default=15.0, ge=0, le=120)
 
+    # ---- Subscribers (email capture) ----
+    # HMAC key for generating unsubscribe tokens. Falls back to JWT secret if
+    # not set, so a deployment that has a JWT secret already works without a
+    # second secret — but a dedicated one is better, because rotating the JWT
+    # secret would then invalidate every unsubscribe link in the wild.
+    subscriber_hmac_secret: str = ""
+
     # ---- Razorpay ----
     razorpay_key_id: str = ""
     razorpay_key_secret: str = ""

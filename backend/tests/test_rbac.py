@@ -501,6 +501,8 @@ UNGATED_MUTATIONS = {
     "/api/v1/subscriptions/webhook",
     # Email capture from the landing page — no session exists yet.
     "/api/v1/meta/reminder-subscribe",
+    # Public email capture for filing-deadline reminders.
+    "/api/v1/subscribers",
 }
 
 

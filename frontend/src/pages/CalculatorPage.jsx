@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import Breadcrumb from "../components/Breadcrumb";
 import DeadlineBanner from "../components/DeadlineBanner";
 import DoAideFooter from "../components/DoAideFooter";
+import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
 import SavedCalculations, { getSavedCalcs, SaveCalcButton } from "../components/SavedCalculations";
 import SavePrompt, { getCalcCount, incrementCalcCount } from "../components/SavePrompt";
@@ -175,6 +176,16 @@ export default function CalculatorPage() {
           )}
 
           <SavedCalculations calcs={savedCalcs} onUpdate={setSavedCalcs} />
+
+          {result && (
+            <EmailCapture
+              source="calculator"
+              heading="Get notified about GST rate changes"
+              subtext="Stay updated when GST rates change — free email alerts."
+              buttonLabel="Notify Me"
+              compact
+            />
+          )}
 
           <section className="tool-info">
             <h2>How GST Calculation Works</h2>

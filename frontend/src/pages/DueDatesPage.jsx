@@ -1,6 +1,7 @@
 import { useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
 import DoAideFooter from "../components/DoAideFooter";
+import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
 import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
@@ -220,6 +221,13 @@ export default function DueDatesPage() {
             <ShareButtons
               path="/due-dates"
               text={`GST filing due dates for ${year.label} — complete deadline calendar on DoAide GST`}
+            />
+
+            <EmailCapture
+              source="filing-dates"
+              heading="Get GST filing reminders"
+              subtext="Never miss a deadline — get free email reminders before each GSTR-1 and GSTR-3B due date."
+              buttonLabel="Get Reminders"
             />
           </div>
 

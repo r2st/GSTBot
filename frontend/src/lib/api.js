@@ -414,6 +414,8 @@ export const api = {
 
   reminderSubscribe: (email) =>
     request("/meta/reminder-subscribe", { method: "POST", body: { email }, auth: false }),
+  subscribe: (email, source = "landing") =>
+    request("/subscribers", { method: "POST", body: { email, source }, auth: false }),
   recentLookups: () =>
     request("/meta/recent-lookups", { auth: false }),
 

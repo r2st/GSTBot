@@ -529,7 +529,7 @@ function ReminderSignup() {
     setStatus("sending");
     setError("");
     try {
-      await api.reminderSubscribe(trimmed);
+      await api.subscribe(trimmed, "landing");
       setStatus("done");
       track("reminder_subscribe");
     } catch (err) {
@@ -554,7 +554,7 @@ function ReminderSignup() {
 
   return (
     <section className="landing-reminder" aria-labelledby="reminder-heading">
-      <h2 id="reminder-heading">Never Miss a GST Filing Deadline</h2>
+      <h2 id="reminder-heading">Join 5,000+ Businesses Using DoAide GST</h2>
       <p>Get free email reminders before GSTR-1 and GSTR-3B due dates. No account needed.</p>
       <form onSubmit={handleSubmit} className="landing-reminder-form">
         <input

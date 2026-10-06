@@ -19,6 +19,10 @@ vi.mock("../lib/share", () => ({
   copyToClipboard: vi.fn().mockResolvedValue(true),
 }));
 
+vi.mock("../lib/api", () => ({
+  api: { subscribe: vi.fn().mockResolvedValue({ subscribed: true, new: true, message: "Done" }) },
+}));
+
 const mockTrack = vi.fn();
 vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
 

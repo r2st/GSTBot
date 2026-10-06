@@ -100,6 +100,9 @@ class TestSetOffNeedsAToken:
             "/api/v1/subscriptions/webhook",
             # Email capture for GST filing reminders, from the landing page.
             "/api/v1/meta/reminder-subscribe",
+            # Subscriber endpoints — public email capture and unsubscribe.
+            "/api/v1/subscribers",
+            "/api/v1/subscribers/unsubscribe",
             # Recent GSTIN lookups for social proof on the lookup page.
             "/api/v1/meta/recent-lookups",
             # Sitemap, robots.txt, and OG images for search engines / social.

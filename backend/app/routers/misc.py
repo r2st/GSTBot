@@ -20,11 +20,13 @@ free-tier rate limit.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import logging
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Path, Response, status
+from fastapi import APIRouter, Depends, Path, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -32,7 +34,8 @@ from app.core.database import check_database, get_db, pool_status
 from app.core.rate_limit import RateLimit
 from app.core.redis_client import get_redis, mark_unavailable, ping as redis_ping
 from app.core.storage import check_upload_dir
-from app.schemas.misc import ReminderSubscribeRequest
+from app.models.subscriber import Subscriber
+from app.schemas.misc import ReminderSubscribeRequest, SubscriberRequest
 from app.services import gstin as gstin_service
 from app.services import job_health
 from app.services.openrouter_client import is_configured
@@ -370,18 +373,126 @@ _reminder_limit = RateLimit("reminder_subscribe", "10/minute", by="ip")
 
 @router.post(
     "/meta/reminder-subscribe",
-    summary="Subscribe to GST filing deadline reminders",
+    summary="Subscribe to GST filing deadline reminders (legacy)",
     description=(
         "Captures an email address for GST filing deadline reminders. "
         "Public — called from the landing page before sign-in. "
-        "The email is validated and logged; delivery integration is separate."
+        "Delegates to the subscribers endpoint."
     ),
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(_reminder_limit)],
 )
-def reminder_subscribe(body: ReminderSubscribeRequest) -> dict[str, bool]:
-    logger.info(
-        "Reminder subscription received",
-        extra={"email_domain": body.email.rsplit("@", 1)[-1]},
-    )
+def reminder_subscribe(
+    body: ReminderSubscribeRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    _upsert_subscriber(db, body.email, "landing")
     return {"subscribed": True}
+
+
+# --------------------------------------------------------------------------
+# Subscribers — email capture for filing-deadline reminders
+# --------------------------------------------------------------------------
+
+_subscriber_limit = RateLimit("subscriber", "10/minute", by="ip")
+
+
+def _subscriber_hmac_secret() -> str:
+    return settings.subscriber_hmac_secret or settings.jwt_secret
+
+
+def make_unsubscribe_token(email: str) -> str:
+    return hmac.new(
+        _subscriber_hmac_secret().encode(),
+        email.lower().encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _upsert_subscriber(db: Session, email: str, source: str) -> tuple[bool, Subscriber]:
+    """Insert or resubscribe. Returns (is_new, subscriber)."""
+    normalised = email.lower().strip()
+    existing = db.query(Subscriber).filter_by(email=normalised).first()
+    if existing is not None:
+        if existing.unsubscribed_at is not None:
+            existing.unsubscribed_at = None
+            from app.models.mixins import utcnow
+            existing.subscribed_at = utcnow()
+            existing.source = source
+            db.commit()
+            return True, existing
+        return False, existing
+    subscriber = Subscriber(email=normalised, source=source)
+    db.add(subscriber)
+    db.commit()
+    db.refresh(subscriber)
+    return True, subscriber
+
+
+@router.post(
+    "/subscribers",
+    summary="Subscribe to GST filing deadline reminders",
+    description=(
+        "Accepts an email and subscribes it to GST filing reminders. "
+        "Duplicate emails are accepted idempotently. Public — called from "
+        "the tools pages before sign-in."
+    ),
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(_subscriber_limit)],
+)
+def subscribe(
+    body: SubscriberRequest,
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    is_new, subscriber = _upsert_subscriber(db, body.email, body.source)
+    logger.info(
+        "Subscriber %s",
+        "added" if is_new else "already subscribed",
+        extra={"email_domain": body.email.rsplit("@", 1)[-1], "source": body.source},
+    )
+    return {
+        "subscribed": True,
+        "new": is_new,
+        "message": (
+            "You'll receive reminders before each filing deadline."
+            if is_new
+            else "You're already subscribed."
+        ),
+    }
+
+
+@router.get(
+    "/subscribers/unsubscribe",
+    summary="Unsubscribe from filing reminders",
+    description=(
+        "Validates the HMAC token and marks the email as unsubscribed. "
+        "The token prevents anyone from unsubscribing an address they do "
+        "not control."
+    ),
+    dependencies=[Depends(_subscriber_limit)],
+)
+def unsubscribe(
+    email: str = Query(..., max_length=320),
+    token: str = Query(..., min_length=64, max_length=64),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    expected = make_unsubscribe_token(email)
+    if not hmac.compare_digest(token, expected):
+        return {"unsubscribed": False, "error": "Invalid or expired link."}
+
+    normalised = email.lower().strip()
+    subscriber = db.query(Subscriber).filter_by(email=normalised).first()
+    if subscriber is None:
+        return {"unsubscribed": False, "error": "Email not found."}
+
+    if subscriber.unsubscribed_at is not None:
+        return {"unsubscribed": True, "message": "Already unsubscribed."}
+
+    from app.models.mixins import utcnow
+    subscriber.unsubscribed_at = utcnow()
+    db.commit()
+    logger.info(
+        "Subscriber unsubscribed",
+        extra={"email_domain": email.rsplit("@", 1)[-1]},
+    )
+    return {"unsubscribed": True, "message": "You've been unsubscribed."}

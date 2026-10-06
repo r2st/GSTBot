@@ -20,6 +20,7 @@ vi.mock("../hooks/useAuth", () => ({
 vi.mock("../lib/api", () => ({
   api: {
     reminderSubscribe: vi.fn().mockResolvedValue({ subscribed: true, email: "a@b.com" }),
+    subscribe: vi.fn().mockResolvedValue({ subscribed: true, new: true, message: "Subscribed!" }),
   },
 }));
 
@@ -374,7 +375,7 @@ describe("LandingPage", () => {
     it("renders the email capture form", () => {
       renderLanding();
 
-      expect(screen.getByText("Never Miss a GST Filing Deadline")).toBeInTheDocument();
+      expect(screen.getByText(/5,000\+ Businesses Using DoAide GST/)).toBeInTheDocument();
       expect(screen.getByPlaceholderText("your@email.com")).toBeInTheDocument();
       expect(screen.getByText("Get Reminders")).toBeInTheDocument();
     });

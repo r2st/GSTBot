@@ -14,6 +14,9 @@ vi.mock("../lib/share", () => ({
 }));
 
 vi.mock("../lib/track", () => ({ track: vi.fn() }));
+vi.mock("../lib/api", () => ({
+  api: { subscribe: vi.fn().mockResolvedValue({ subscribed: true, new: true, message: "Done" }) },
+}));
 
 function renderPage(route = "/due-dates") {
   return render(
@@ -27,7 +30,7 @@ describe("DueDatesPage", () => {
   it("renders the page title and subtitle", () => {
     renderPage();
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("GST Filing Due Dates Calendar");
-    expect(screen.getByText(/Never miss a deadline/)).toBeInTheDocument();
+    expect(screen.getByText(/GSTR-1, GSTR-3B.*Never miss a deadline/)).toBeInTheDocument();
   });
 
   it("shows the ToolsNav component", () => {
