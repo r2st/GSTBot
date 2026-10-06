@@ -8,6 +8,7 @@ underlying error smtplib produced.
 """
 from __future__ import annotations
 
+import logging
 import smtplib
 
 import pytest
@@ -367,3 +368,29 @@ def test_the_backoff_is_actually_waited_out_and_not_merely_computed():
     before = time.perf_counter()
     _REAL_SLEEP(0.05)
     assert time.perf_counter() - before >= 0.04
+
+
+# ---------------------------------------------------------------------------
+# GB032: Observability — delivery success is logged
+# ---------------------------------------------------------------------------
+
+class TestDeliverySuccessIsLogged:
+
+    def test_a_successful_send_logs_delivery(self, caplog):
+        with caplog.at_level(logging.INFO, logger="app.services.email_sender"):
+            send_email(to="owner@example.com", subject="s", body="b")
+
+        assert any(
+            "Email delivered" in r.message and r.attempt == 1
+            for r in caplog.records
+        )
+
+    def test_delivery_after_retry_logs_the_winning_attempt(self, monkeypatch, caplog):
+        _relay(monkeypatch, failures=1, error=smtplib.SMTPServerDisconnected("bye"))
+
+        with caplog.at_level(logging.INFO, logger="app.services.email_sender"):
+            send_email(to="owner@example.com", subject="s", body="b")
+
+        delivered = [r for r in caplog.records if "Email delivered" in r.message]
+        assert len(delivered) == 1
+        assert delivered[0].attempt == 2

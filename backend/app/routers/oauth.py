@@ -95,6 +95,10 @@ def _find_or_create_oauth_user(
             user.oauth_id = oauth_id
             db.commit()
             db.refresh(user)
+            logger.info(
+                "OAuth provider linked to existing account",
+                extra={"provider": provider, "user_id": user.id},
+            )
         return user
 
     business = Business(
@@ -117,6 +121,14 @@ def _find_or_create_oauth_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+    logger.info(
+        "OAuth account created",
+        extra={
+            "provider": provider,
+            "user_id": user.id,
+            "business_id": business.id,
+        },
+    )
     return user
 
 

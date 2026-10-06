@@ -207,4 +207,8 @@ def send_email(*, to: str, subject: str, body: str) -> None:
             _sleep(delay)
             waited += delay
         else:
+            logger.info(
+                "Email delivered",
+                extra={"attempt": attempt, "attempts": attempts},
+            )
             return

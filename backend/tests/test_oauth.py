@@ -364,3 +364,94 @@ def test_unverified_email_creates_new_account_if_no_match(db_session):
     assert result is not None
     assert result.email == "newuser@example.com"
     assert result.oauth_provider == "github"
+
+
+# ── GB032: observability — OAuth account creation audit trail ──
+
+
+def test_new_oauth_account_creation_is_logged(db_session, caplog):
+    """Creating a brand-new user+business via OAuth must produce an audit line."""
+    with caplog.at_level(logging.INFO, logger="app.routers.oauth"):
+        result = _find_or_create_oauth_user(
+            db_session,
+            provider="google",
+            oauth_id="obs-new-gid",
+            email="obs-new@example.com",
+            name="Observable User",
+            email_verified=True,
+        )
+
+    assert result is not None
+    assert any(
+        "OAuth account created" in r.message
+        and r.provider == "google"
+        and r.user_id == result.id
+        and r.business_id == result.business_id
+        for r in caplog.records
+    )
+
+
+def test_oauth_provider_linking_is_logged(db_session, caplog):
+    """Linking a new OAuth provider to an existing password account must be logged."""
+    business = Business(legal_name="Link Obs Co", plan=BusinessPlan.FREE, is_active=True)
+    db_session.add(business)
+    db_session.flush()
+    user = User(
+        email="link-obs@example.com",
+        hashed_password="bcrypt-hash-here",
+        business_id=business.id,
+        role=UserRole.OWNER,
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    with caplog.at_level(logging.INFO, logger="app.routers.oauth"):
+        result = _find_or_create_oauth_user(
+            db_session,
+            provider="github",
+            oauth_id="link-obs-ghid",
+            email="link-obs@example.com",
+            name="Link Obs",
+            email_verified=True,
+        )
+
+    assert result is not None
+    assert any(
+        "OAuth provider linked" in r.message
+        and r.provider == "github"
+        and r.user_id == user.id
+        for r in caplog.records
+    )
+
+
+def test_returning_oauth_login_does_not_log_creation(db_session, caplog):
+    """A returning OAuth user already has a provider set — no creation or linking."""
+    business = Business(legal_name="Return Co", plan=BusinessPlan.FREE, is_active=True)
+    db_session.add(business)
+    db_session.flush()
+    user = User(
+        email="returning@example.com",
+        business_id=business.id,
+        role=UserRole.OWNER,
+        oauth_provider="google",
+        oauth_id="returning-gid",
+        is_active=True,
+    )
+    db_session.add(user)
+    db_session.commit()
+
+    with caplog.at_level(logging.INFO, logger="app.routers.oauth"):
+        result = _find_or_create_oauth_user(
+            db_session,
+            provider="google",
+            oauth_id="returning-gid",
+            email="returning@example.com",
+            name=None,
+        )
+
+    assert result is not None
+    assert not any(
+        "OAuth account created" in r.message or "OAuth provider linked" in r.message
+        for r in caplog.records
+    )

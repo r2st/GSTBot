@@ -130,6 +130,15 @@ def verify_payment(
         payload.razorpay_payment_id,
         payload.razorpay_signature,
     ):
+        logger.warning(
+            "Payment signature verification failed",
+            extra={
+                "business_id": business.id,
+                "user_id": current_user.id,
+                "razorpay_order_id": payload.razorpay_order_id,
+                "tier": payload.tier.value,
+            },
+        )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Payment verification failed. Contact support if you were charged, or try the payment again.",
@@ -170,6 +179,7 @@ def verify_payment(
 )
 def cancel_subscription(
     business: Business = Depends(get_current_business),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> SubscriptionOut:
     sub = usage_service.get_subscription(db, business.id)
@@ -178,6 +188,7 @@ def cancel_subscription(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No active paid subscription to cancel.",
         )
+    old_tier = sub.tier
     if sub.razorpay_subscription_id and razorpay_client.is_configured():
         result = razorpay_client.cancel_subscription(sub.razorpay_subscription_id)
         if result is None:
@@ -189,6 +200,14 @@ def cancel_subscription(
     sub.status = SubscriptionStatus.CANCELLED
     db.commit()
     db.refresh(sub)
+    logger.info(
+        "Subscription cancelled",
+        extra={
+            "business_id": business.id,
+            "user_id": current_user.id,
+            "old_tier": old_tier.value,
+        },
+    )
     return SubscriptionOut.model_validate(sub)
 
 
@@ -258,6 +277,10 @@ async def razorpay_webhook(
         )
     )
     if sub is None:
+        logger.warning(
+            "Webhook referenced unknown subscription",
+            extra={"razorpay_id": razorpay_id, "event": event},
+        )
         return {"status": "ok", "detail": "no matching subscription"}
 
     _TRANSITION: dict[str, SubscriptionStatus] = {

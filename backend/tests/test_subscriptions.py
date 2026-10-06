@@ -1,6 +1,7 @@
 """Tests for subscription management, payment flow, and usage tracking."""
 from __future__ import annotations
 
+import logging
 from unittest.mock import patch
 
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
@@ -599,3 +600,101 @@ class TestWebhook:
             )
         assert response.status_code == 400
         assert "not valid JSON" in response.json()["detail"]
+
+    def test_unmatched_subscription_is_logged(self, client, caplog):
+        import json
+        payload = {
+            "event": "payment.failed",
+            "payload": {
+                "payment": {"entity": {"id": "pay_orphaned_999"}},
+            },
+        }
+        with (
+            patch.object(razorpay_client, "verify_webhook_signature", return_value=True),
+            caplog.at_level(logging.WARNING, logger="app.routers.subscriptions"),
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        assert any(
+            "unknown subscription" in r.message and r.razorpay_id == "pay_orphaned_999"
+            for r in caplog.records
+        )
+
+
+# --------------------------------------------------------------------------
+# GB032: Observability — subscription lifecycle audit trail
+# --------------------------------------------------------------------------
+
+class TestSubscriptionCancellationIsLogged:
+    def test_cancellation_produces_an_audit_log_line(
+        self, auth_client, db_session, business, caplog
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with caplog.at_level(logging.INFO, logger="app.routers.subscriptions"):
+            response = auth_client.post("/api/v1/subscriptions/cancel")
+
+        assert response.status_code == 200
+        assert any(
+            "Subscription cancelled" in r.message
+            and r.business_id == business.id
+            and r.old_tier == "pro"
+            for r in caplog.records
+        )
+
+    def test_cancellation_log_includes_user_id(
+        self, auth_client, db_session, business, caplog
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.ENTERPRISE,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with caplog.at_level(logging.INFO, logger="app.routers.subscriptions"):
+            auth_client.post("/api/v1/subscriptions/cancel")
+
+        log = next(
+            r for r in caplog.records if "Subscription cancelled" in r.message
+        )
+        assert hasattr(log, "user_id")
+        assert log.old_tier == "enterprise"
+
+
+class TestPaymentVerificationFailureIsLogged:
+    def test_a_failed_signature_produces_a_warning(
+        self, auth_client, business, caplog
+    ):
+        with (
+            patch.object(razorpay_client, "verify_payment_signature", return_value=False),
+            caplog.at_level(logging.WARNING, logger="app.routers.subscriptions"),
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_suspect",
+                    "razorpay_payment_id": "pay_suspect",
+                    "razorpay_signature": "bad_sig",
+                    "tier": "pro",
+                },
+            )
+
+        assert response.status_code == 400
+        assert any(
+            "signature verification failed" in r.message
+            and r.razorpay_order_id == "order_suspect"
+            and r.business_id == business.id
+            for r in caplog.records
+        )
