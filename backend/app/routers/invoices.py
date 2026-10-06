@@ -723,7 +723,10 @@ def update_invoice(
         "Always runs inline — the caller is waiting on the answer — so it is "
         "limited more tightly than upload."
     ),
-    responses={404: {"description": "No such invoice in this tenant."}},
+    responses={
+        404: {"description": "No such invoice in this tenant."},
+        409: {"description": "The invoice is a duplicate or currently being processed."},
+    },
     dependencies=[Depends(_reparse_limit), Depends(require_writer)],
 )
 def reparse_invoice(
@@ -744,6 +747,14 @@ def reparse_invoice(
                 "This invoice is a duplicate — re-reading the file cannot "
                 "change that. Correct the invoice number or counterparty "
                 "GSTIN, or delete one of the two copies."
+            ),
+        )
+    if invoice.status == InvoiceStatus.PROCESSING:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This invoice is currently being processed. Wait for the "
+                "extraction to finish before requesting a reparse."
             ),
         )
     # One invoice, so this is not the loop the parameter exists for — but the

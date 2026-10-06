@@ -1356,6 +1356,18 @@ def test_reparse_reruns_extraction(auth_client, sample_invoice_text):
     assert response.json()["invoice_number"] == "INV-2026-0042"
 
 
+def test_reparse_rejects_processing_invoice(auth_client, db_session, sample_invoice_text):
+    """A reparse while a worker is mid-parse would race on the same row."""
+    invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
+    inv = db_session.get(Invoice, invoice_id)
+    inv.status = InvoiceStatus.PROCESSING
+    db_session.commit()
+
+    response = auth_client.post(f"/api/v1/invoices/{invoice_id}/reparse")
+    assert response.status_code == 409
+    assert "currently being processed" in response.json()["detail"]
+
+
 def test_delete_is_soft(auth_client, db_session, sample_invoice_text):
     """The row survives: a filing can be reopened during an assessment."""
     invoice_id = upload(auth_client, sample_invoice_text).json()["invoice"]["id"]
