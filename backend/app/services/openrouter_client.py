@@ -91,7 +91,7 @@ def _retry_after_seconds(response: Any) -> float | None:
     try:
         return max(0.0, float(str(raw).strip()))
     except ValueError:
-        pass
+        logger.debug("Retry-After header %r is not a plain number, trying HTTP-date", raw)
 
     try:
         when = parsedate_to_datetime(str(raw))

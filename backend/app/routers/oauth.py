@@ -206,16 +206,24 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
         logger.exception("GitHub OAuth callback failed")
         return RedirectResponse(f"{FRONTEND_URL}/login?error=github_auth_failed")
 
-    resp = await oauth.github.get("user", token=token)
-    profile = resp.json()
+    try:
+        resp = await oauth.github.get("user", token=token)
+        profile = resp.json()
+    except Exception:
+        logger.exception("GitHub user profile fetch failed")
+        return RedirectResponse(f"{FRONTEND_URL}/login?error=github_auth_failed")
 
     email = profile.get("email")
     if not email:
-        emails_resp = await oauth.github.get("user/emails", token=token)
-        for e in emails_resp.json():
-            if e.get("primary") and e.get("verified"):
-                email = e["email"]
-                break
+        try:
+            emails_resp = await oauth.github.get("user/emails", token=token)
+            for e in emails_resp.json():
+                if e.get("primary") and e.get("verified"):
+                    email = e["email"]
+                    break
+        except Exception:
+            logger.exception("GitHub user emails fetch failed")
+            return RedirectResponse(f"{FRONTEND_URL}/login?error=github_auth_failed")
 
     if not email:
         return RedirectResponse(f"{FRONTEND_URL}/login?error=no_email")

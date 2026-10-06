@@ -269,7 +269,11 @@ async def razorpay_webhook(
     razorpay_id = entity.get("id") or entity.get("subscription_id")
 
     if not razorpay_id:
-        return {"status": "ok"}
+        logger.warning(
+            "Razorpay webhook contained no identifiable subscription or payment id",
+            extra={"event": event},
+        )
+        return {"status": "ok", "detail": "no identifiable entity"}
 
     sub = db.scalar(
         select(Subscription).where(
