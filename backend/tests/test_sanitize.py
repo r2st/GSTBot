@@ -15,6 +15,7 @@ import pytest
 
 from app.core.sanitize import (
     clean_text,
+    content_disposition,
     csv_safe,
     escape_like,
     safe_extension,
@@ -302,3 +303,36 @@ class TestEveryLikeInTheProductDeclaresItsEscape:
             "these LIKE comparisons declare an escape character other than the "
             "backslash escape_like emits: " + ", ".join(wrong)
         )
+
+
+class TestContentDisposition:
+    """The header value that tells a browser to save the response as a file.
+
+    A filename that contains a double-quote or a backslash breaks out of the
+    quoted ASCII fallback; one with non-ASCII characters needs the RFC 5987
+    ``filename*`` parameter or the browser invents a name.
+    """
+
+    def test_a_normal_ascii_filename(self):
+        hdr = content_disposition("gstr1_27AAPFU0939F1ZV_042026.json")
+        assert hdr.startswith("attachment; ")
+        assert 'filename="gstr1_27AAPFU0939F1ZV_042026.json"' in hdr
+        assert "filename*=UTF-8''" in hdr
+
+    def test_a_double_quote_is_escaped_in_the_ascii_fallback(self):
+        hdr = content_disposition('file"name.pdf')
+        assert 'filename="file\\"name.pdf"' in hdr
+
+    def test_a_backslash_is_escaped_in_the_ascii_fallback(self):
+        hdr = content_disposition("file\\name.pdf")
+        assert 'filename="file\\\\name.pdf"' in hdr
+
+    def test_non_ascii_characters_are_percent_encoded_in_filename_star(self):
+        hdr = content_disposition("बिल.pdf")
+        assert "filename*=UTF-8''" in hdr
+        assert "%E0%A4%AC" in hdr
+
+    def test_both_parameters_are_always_present(self):
+        hdr = content_disposition("report.csv")
+        assert "filename=" in hdr
+        assert "filename*=" in hdr

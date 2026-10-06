@@ -132,6 +132,23 @@ def csv_safe(value: str | None) -> str:
     return f"'{value}" if value.startswith(_FORMULA_LEADERS) else value
 
 
+def content_disposition(filename: str) -> str:
+    """Build a safe ``Content-Disposition: attachment`` header value.
+
+    The ASCII fallback escapes backslashes and double quotes per RFC 6266.
+    A ``filename*`` parameter carries the original name in UTF-8 per RFC 5987,
+    so browsers that support it show non-ASCII characters correctly.
+    """
+    from urllib.parse import quote
+
+    ascii_safe = filename.replace("\\", "\\\\").replace('"', '\\"')
+    utf8_encoded = quote(filename, safe="")
+    return (
+        f'attachment; filename="{ascii_safe}"; '
+        f"filename*=UTF-8''{utf8_encoded}"
+    )
+
+
 def safe_extension(filename: str | None, *, max_length: int = 10) -> str:
     """The dotted extension of *filename*, if it is a plain alphanumeric one.
 

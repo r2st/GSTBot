@@ -12,6 +12,7 @@ from app.core.database import get_db
 from app.core.deps import get_current_business, require_writer
 from app.core.params import Slug
 from app.core.rate_limit import RateLimit
+from app.core.sanitize import content_disposition
 from app.models.business import Business
 from app.models.gstr_return import GSTRReturn, ReturnType
 from app.models.invoice import InvoiceType
@@ -431,7 +432,7 @@ def export(
             "filename": filename,
         },
     )
-    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    headers = {"Content-Disposition": content_disposition(filename)}
 
     if fmt == "csv":
         body = filing_service.to_csv(db, business, resolved, _DIRECTION[kind])
