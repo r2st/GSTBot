@@ -1,0 +1,238 @@
+import { useMemo, useState } from "react";
+import Breadcrumb from "../components/Breadcrumb";
+import CrossProductLinks from "../components/CrossProductLinks";
+import DoAideFooter from "../components/DoAideFooter";
+import EmailCapture from "../components/EmailCapture";
+import RelatedTools from "../components/RelatedTools";
+import SeoHead from "../components/SeoHead";
+import ShareButtons from "../components/ShareButtons";
+import ToolsNav from "../components/ToolsNav";
+import { usePageTitle } from "../hooks/usePageTitle";
+import { formatINR } from "../lib/gstCalc";
+
+const SUPPLY_TYPES = [
+  { key: "goods", label: "Goods (consignment value > ₹50,000)" },
+  { key: "handicraft", label: "Handicraft goods (interstate, any value)" },
+  { key: "job_work", label: "Job work (principal to job worker)" },
+];
+
+const VEHICLE_TYPES = [
+  { key: "regular", label: "Regular vehicle", kmPerDay: 200 },
+  { key: "over_dim", label: "Over-dimensional cargo", kmPerDay: 100 },
+];
+
+const THRESHOLD = 50000;
+
+const TOOL_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  name: "E-Way Bill Requirement Checker",
+  url: "https://gst.doaide.com/eway-bill",
+  applicationCategory: "FinanceApplication",
+  operatingSystem: "Any",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
+};
+
+const BREADCRUMBS = [
+  { name: "Home", url: "https://gst.doaide.com" },
+  { name: "E-Way Bill Checker" },
+];
+
+export default function EwayBillPage() {
+  usePageTitle("E-Way Bill Requirement Checker — Check if E-Way Bill is Needed");
+
+  const [supplyType, setSupplyType] = useState("goods");
+  const [consignmentValue, setConsignmentValue] = useState("");
+  const [distance, setDistance] = useState("");
+  const [vehicleType, setVehicleType] = useState("regular");
+  const [interstate, setInterstate] = useState(false);
+
+  const result = useMemo(() => {
+    const value = parseFloat(consignmentValue);
+    const dist = parseFloat(distance);
+    if (!Number.isFinite(value) || value < 0) return null;
+
+    const isHandicraft = supplyType === "handicraft";
+    const isJobWork = supplyType === "job_work";
+
+    let required = false;
+    let reason = "";
+
+    if (isHandicraft && interstate) {
+      required = true;
+      reason = "E-way bill is mandatory for interstate movement of handicraft goods regardless of value.";
+    } else if (isJobWork) {
+      required = true;
+      reason = "E-way bill is required for movement of goods to a job worker, regardless of the consignment value.";
+    } else if (value >= THRESHOLD) {
+      required = true;
+      reason = `Consignment value (${formatINR(value)}) exceeds the ₹50,000 threshold. E-way bill is mandatory.`;
+    } else {
+      required = false;
+      reason = `Consignment value (${formatINR(value)}) is below ₹50,000. E-way bill is generally not required for intrastate movement.`;
+      if (interstate && value > 0) {
+        reason += " However, some states have lower thresholds for intrastate movement. Check your state's rules.";
+      }
+    }
+
+    let validity = null;
+    if (required && Number.isFinite(dist) && dist > 0) {
+      const kmPerDay = VEHICLE_TYPES.find((v) => v.key === vehicleType)?.kmPerDay ?? 200;
+      validity = Math.max(1, Math.ceil(dist / kmPerDay));
+    }
+
+    return { required, reason, validity, distance: dist };
+  }, [supplyType, consignmentValue, distance, vehicleType, interstate]);
+
+  return (
+    <div className="tool-page">
+      <SeoHead
+        title="E-Way Bill Requirement Checker — Check if E-Way Bill is Needed"
+        description="Check if your shipment needs an e-way bill under GST. Enter consignment value and distance to get instant results. Free tool, no login required."
+        path="/eway-bill"
+        jsonLd={TOOL_SCHEMA}
+        breadcrumbs={BREADCRUMBS}
+      />
+      <ToolsNav />
+      <main className="tool-main">
+        <div className="tool-container">
+          <Breadcrumb />
+          <h1 className="tool-title">E-Way Bill Checker</h1>
+          <p className="tool-subtitle">
+            Check if your shipment requires an e-way bill under GST. No sign-up required.
+          </p>
+
+          <div className="calc-card">
+            <label className="calc-label">
+              Type of Supply
+              <select
+                className="calc-select"
+                value={supplyType}
+                onChange={(e) => setSupplyType(e.target.value)}
+              >
+                {SUPPLY_TYPES.map((s) => (
+                  <option key={s.key} value={s.key}>{s.label}</option>
+                ))}
+              </select>
+            </label>
+
+            <label className="calc-label">
+              Consignment Value (₹)
+              <input
+                type="number"
+                className="calc-input"
+                value={consignmentValue}
+                onChange={(e) => setConsignmentValue(e.target.value)}
+                placeholder="Enter total consignment value"
+                min="0"
+                step="0.01"
+                inputMode="decimal"
+                autoFocus
+              />
+            </label>
+
+            <label className="calc-checkbox-label">
+              <input
+                type="checkbox"
+                checked={interstate}
+                onChange={(e) => setInterstate(e.target.checked)}
+              />
+              Interstate movement
+            </label>
+
+            <label className="calc-label">
+              Approximate Distance (km) — for validity calculation
+              <input
+                type="number"
+                className="calc-input"
+                value={distance}
+                onChange={(e) => setDistance(e.target.value)}
+                placeholder="Enter distance in km"
+                min="0"
+                inputMode="numeric"
+              />
+            </label>
+
+            <label className="calc-label">
+              Vehicle Type
+              <select
+                className="calc-select"
+                value={vehicleType}
+                onChange={(e) => setVehicleType(e.target.value)}
+              >
+                {VEHICLE_TYPES.map((v) => (
+                  <option key={v.key} value={v.key}>{v.label}</option>
+                ))}
+              </select>
+            </label>
+
+            {result && (
+              <div className="calc-result" aria-live="polite">
+                <div className="calc-result-row calc-total" style={{ color: result.required ? "#f59e42" : "#34d399" }}>
+                  <span>E-Way Bill</span>
+                  <strong>{result.required ? "Required" : "Not Required"}</strong>
+                </div>
+                <p style={{ margin: "0.5rem 0", fontSize: "0.95rem", lineHeight: 1.5 }}>
+                  {result.reason}
+                </p>
+                {result.validity && (
+                  <div className="calc-result-row">
+                    <span>Validity ({result.distance} km)</span>
+                    <strong>{result.validity} day{result.validity > 1 ? "s" : ""}</strong>
+                  </div>
+                )}
+                <div className="calc-result-actions">
+                  <ShareButtons
+                    path="/eway-bill"
+                    text={`E-way bill ${result.required ? "required" : "not required"} — checked free on DoAide GST`}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+
+          <EmailCapture
+            source="eway-bill"
+            heading="Get E-Way Bill updates"
+            subtext="Stay updated on e-way bill rule changes — free email alerts."
+            buttonLabel="Notify Me"
+            compact
+          />
+
+          <section className="tool-info">
+            <h2>E-Way Bill Rules Under GST</h2>
+            <p>
+              An E-Way Bill (Electronic Way Bill) is a document required for the movement of
+              goods worth more than ₹50,000 under GST. It is generated on the e-way bill portal
+              and must be carried by the transporter.
+            </p>
+            <h3>When is an E-Way Bill Required?</h3>
+            <ul>
+              <li>Movement of goods valued above ₹50,000 (including GST)</li>
+              <li>Interstate movement of handicraft goods by exempted dealers — any value</li>
+              <li>Movement of goods for job work — regardless of value</li>
+              <li>Interstate movement by principal to job worker — regardless of value</li>
+            </ul>
+            <h3>E-Way Bill Validity</h3>
+            <ul>
+              <li><strong>Regular vehicles:</strong> 1 day for every 200 km or part thereof</li>
+              <li><strong>Over-dimensional cargo:</strong> 1 day for every 100 km or part thereof</li>
+              <li>Validity starts from the date and time of generation</li>
+            </ul>
+            <h3>Exemptions from E-Way Bill</h3>
+            <ul>
+              <li>Goods transported by non-motorized conveyance</li>
+              <li>Goods transported from port, airport, or land customs station to an ICD or CFS</li>
+              <li>Transit cargo from or to Nepal or Bhutan</li>
+              <li>Goods specified in Annexure to Rule 138(14) — e.g., LPG for household use, kerosene, postal baggage</li>
+            </ul>
+          </section>
+
+          <RelatedTools current="/eway-bill" />
+          <CrossProductLinks page="eway-bill" />
+        </div>
+      </main>
+      <DoAideFooter />
+    </div>
+  );
+}

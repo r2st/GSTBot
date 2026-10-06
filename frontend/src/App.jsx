@@ -42,6 +42,12 @@ const GuidesIndex = lazy(() => import("./pages/guides/GuidesIndex"));
 const GstRegistrationGuide = lazy(() => import("./pages/guides/GstRegistrationGuide"));
 const Gstr1FilingGuide = lazy(() => import("./pages/guides/Gstr1FilingGuide"));
 const Gstr3bFilingGuide = lazy(() => import("./pages/guides/Gstr3bFilingGuide"));
+const InputTaxCreditGuide = lazy(() => import("./pages/guides/InputTaxCreditGuide"));
+const EwayBillGuide = lazy(() => import("./pages/guides/EwayBillGuide"));
+const PenaltyCalculatorPage = lazy(() => import("./pages/PenaltyCalculatorPage"));
+const EwayBillPage = lazy(() => import("./pages/EwayBillPage"));
+const ItcEligibilityPage = lazy(() => import("./pages/ItcEligibilityPage"));
+const HsnCodePage = lazy(() => import("./pages/HsnCodePage"));
 
 function LazyFallback() {
   return (
@@ -124,6 +130,12 @@ export default function App() {
         <Route path="/guides/gst-registration" element={<Lazy><GstRegistrationGuide /></Lazy>} />
         <Route path="/guides/how-to-file-gstr-1" element={<Lazy><Gstr1FilingGuide /></Lazy>} />
         <Route path="/guides/how-to-file-gstr-3b" element={<Lazy><Gstr3bFilingGuide /></Lazy>} />
+        <Route path="/guides/input-tax-credit" element={<Lazy><InputTaxCreditGuide /></Lazy>} />
+        <Route path="/guides/eway-bill" element={<Lazy><EwayBillGuide /></Lazy>} />
+        <Route path="/penalty-calculator" element={<Lazy><PenaltyCalculatorPage /></Lazy>} />
+        <Route path="/eway-bill" element={<Lazy><EwayBillPage /></Lazy>} />
+        <Route path="/input-tax-credit" element={<Lazy><ItcEligibilityPage /></Lazy>} />
+        <Route path="/hsn/:code" element={<Lazy><HsnCodePage /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
         <Route path="/" element={<Home />} />

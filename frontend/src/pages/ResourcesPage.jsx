@@ -56,6 +56,40 @@ const TOOLS = [
     ),
   },
   {
+    to: "/penalty-calculator",
+    title: "Penalty Calculator",
+    desc: "Calculate late filing penalties and interest for GSTR-1, GSTR-3B, and GSTR-9. Get exact late fees based on days of delay.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    ),
+  },
+  {
+    to: "/eway-bill",
+    title: "E-Way Bill Checker",
+    desc: "Check if your shipment requires an e-way bill under GST. Enter consignment value and distance for instant results.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="1" y="3" width="15" height="13" rx="2" />
+        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+        <circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" />
+      </svg>
+    ),
+  },
+  {
+    to: "/input-tax-credit",
+    title: "ITC Eligibility Checker",
+    desc: "Check if your purchase qualifies for Input Tax Credit under GST. Covers blocked credits and Section 16 conditions.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+        <polyline points="22 4 12 14.01 9 11.01" />
+      </svg>
+    ),
+  },
+  {
     to: "/embed",
     title: "Embed GST Widgets",
     desc: "Add free GST calculator, GSTIN lookup, or HSN code finder widgets to your own website with a single line of code.",
@@ -98,6 +132,16 @@ const GUIDES = [
     to: "/blog/gst-compliance-checklist-small-business",
     title: "GST Compliance Checklist",
     desc: "Monthly and quarterly GST compliance checklist for small businesses.",
+  },
+  {
+    to: "/guides/input-tax-credit",
+    title: "Input Tax Credit Guide",
+    desc: "Complete ITC guide — eligibility, blocked credits, reversal rules, and practical examples.",
+  },
+  {
+    to: "/guides/eway-bill",
+    title: "E-Way Bill Guide",
+    desc: "E-way bill rules, generation process, validity periods, exemptions, and penalties.",
   },
 ];
 

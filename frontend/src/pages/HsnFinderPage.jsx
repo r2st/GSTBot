@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import Breadcrumb from "../components/Breadcrumb";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
@@ -79,7 +80,7 @@ export default function HsnFinderPage() {
                     <tbody>
                       {results.map((item) => (
                         <tr key={item.code}>
-                          <td className="hsn-code">{item.code}</td>
+                          <td className="hsn-code"><Link to={`/hsn/${item.code}`}>{item.code}</Link></td>
                           <td>
                             {item.desc}
                             {item.sac && <span className="hsn-sac-badge">SAC</span>}
@@ -129,6 +130,31 @@ export default function HsnFinderPage() {
               </div>
             </section>
           )}
+
+          <section className="hsn-categories" style={{ marginTop: "2rem" }}>
+            <h2>Most Searched HSN Codes</h2>
+            <div className="hsn-cat-grid">
+              {[
+                { code: "8517", label: "Mobile Phones" },
+                { code: "8471", label: "Computers" },
+                { code: "5208", label: "Cotton Fabric" },
+                { code: "3004", label: "Medicines" },
+                { code: "8703", label: "Motor Cars" },
+                { code: "7113", label: "Jewellery" },
+                { code: "2523", label: "Cement" },
+                { code: "6109", label: "T-Shirts" },
+                { code: "8528", label: "Televisions" },
+                { code: "9403", label: "Furniture" },
+                { code: "9983", label: "IT Services" },
+                { code: "0401", label: "Milk" },
+              ].map((item) => (
+                <Link key={item.code} to={`/hsn/${item.code}`} className="hsn-cat-card">
+                  <strong>{item.label}</strong>
+                  <span className="hsn-cat-count">HSN {item.code}</span>
+                </Link>
+              ))}
+            </div>
+          </section>
 
           <section className="tool-info">
             <h2>What Are HSN and SAC Codes?</h2>

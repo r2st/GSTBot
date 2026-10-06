@@ -386,6 +386,40 @@ const INSTANT_TOOLS = [
       </svg>
     ),
   },
+  {
+    to: "/penalty-calculator",
+    title: "Penalty Calculator",
+    desc: "Calculate late filing penalties & interest instantly",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" />
+        <polyline points="12 6 12 12 16 14" />
+      </svg>
+    ),
+  },
+  {
+    to: "/eway-bill",
+    title: "E-Way Bill Checker",
+    desc: "Check if your shipment needs an e-way bill",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="1" y="3" width="15" height="13" rx="2" />
+        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
+        <circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" />
+      </svg>
+    ),
+  },
+  {
+    to: "/input-tax-credit",
+    title: "ITC Eligibility",
+    desc: "Check Input Tax Credit eligibility for purchases",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+        <polyline points="22 4 12 14.01 9 11.01" />
+      </svg>
+    ),
+  },
 ];
 
 function InstantLookup() {
@@ -738,6 +772,9 @@ export default function LandingPage() {
             <Link to="/lookup">GSTIN Lookup</Link>
             <Link to="/hsn">HSN Code Finder</Link>
             <Link to="/due-dates">Due Dates Calendar</Link>
+            <Link to="/penalty-calculator">Penalty Calculator</Link>
+            <Link to="/eway-bill">E-Way Bill Checker</Link>
+            <Link to="/input-tax-credit">ITC Eligibility</Link>
             <Link to="/embed">Embed Widget</Link>
           </div>
           <div className="landing-footer-col">

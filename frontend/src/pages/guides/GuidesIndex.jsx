@@ -20,6 +20,16 @@ const GUIDES = [
     title: "How to File GSTR-3B",
     desc: "Step-by-step GSTR-3B filing guide. Covers output liability, ITC claim, tax payment, due dates, and common filing mistakes.",
   },
+  {
+    to: "/guides/input-tax-credit",
+    title: "Complete Guide to Input Tax Credit (ITC)",
+    desc: "Everything about ITC — eligibility, conditions under Section 16, blocked credits under Section 17(5), reversal rules, and practical examples.",
+  },
+  {
+    to: "/guides/eway-bill",
+    title: "E-Way Bill Guide for Businesses",
+    desc: "Complete e-way bill guide — when required, how to generate, validity periods, exemptions, penalties, and state-specific rules.",
+  },
 ];
 
 const BLOG_ARTICLES = [
@@ -45,6 +55,9 @@ const TOOLS = [
   { to: "/lookup", title: "GSTIN Lookup", desc: "Verify any GST number" },
   { to: "/hsn", title: "HSN Code Search", desc: "Find HSN/SAC codes and GST rates" },
   { to: "/due-dates", title: "Due Dates Calendar", desc: "GST filing deadlines" },
+  { to: "/penalty-calculator", title: "Penalty Calculator", desc: "Late filing penalties & interest" },
+  { to: "/eway-bill", title: "E-Way Bill Checker", desc: "Check if e-way bill is needed" },
+  { to: "/input-tax-credit", title: "ITC Eligibility", desc: "Check Input Tax Credit eligibility" },
 ];
 
 const BREADCRUMBS = [
