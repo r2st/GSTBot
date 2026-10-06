@@ -4172,3 +4172,45 @@ a:focus-visible {
   font-size: 0.75rem;
   color: var(--doaide-text-muted) !important;
 }
+
+/* ── Related Tools (bottom of each tool page) ── */
+.related-tools {
+  margin-top: 3rem;
+  padding: 2rem 0;
+  border-top: 1px solid var(--line);
+}
+.related-tools-heading {
+  font-size: 1.15rem;
+  color: var(--ink-strong);
+  margin: 0 0 1.25rem;
+}
+.related-tools-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.related-tools-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.65rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  text-decoration: none !important;
+  transition: background var(--doaide-transition), border-color var(--doaide-transition), box-shadow var(--doaide-transition);
+}
+.related-tools-link:hover {
+  background: var(--glass-feature-bg);
+  border-color: var(--glass-feature-border);
+  box-shadow: var(--shadow);
+}
+.related-tools-link strong {
+  font-size: 0.88rem;
+  color: var(--brand) !important;
+}
+.related-tools-link span {
+  font-size: 0.78rem;
+  color: var(--ink-soft) !important;
+  line-height: 1.35;
+}
