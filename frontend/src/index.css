@@ -4214,3 +4214,298 @@ a:focus-visible {
   color: var(--ink-soft) !important;
   line-height: 1.35;
 }
+
+/* Print button */
+.share-print {
+  cursor: pointer;
+  border: none;
+}
+
+/* Quiz / registration checker styles */
+.quiz-progress {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.5rem;
+}
+.quiz-progress-bar {
+  height: 4px;
+  background: var(--line);
+  border-radius: 2px;
+  margin-top: 0.35rem;
+  overflow: hidden;
+}
+.quiz-progress-fill {
+  height: 100%;
+  background: var(--brand);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+.quiz-question-text {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 1rem 0 0.75rem;
+}
+.quiz-options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.quiz-option {
+  padding: 0.75rem 1rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.95rem;
+  text-align: left;
+  color: var(--ink);
+  transition: background var(--doaide-transition), border-color var(--doaide-transition);
+}
+.quiz-option:hover {
+  background: var(--glass-feature-bg);
+  border-color: var(--glass-feature-border);
+}
+.quiz-option.selected {
+  background: var(--glass-feature-bg);
+  border-color: var(--brand);
+  color: var(--brand);
+  font-weight: 500;
+}
+.quiz-nav {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+.quiz-nav-btn {
+  padding: 0.4rem 0.8rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--ink);
+}
+.quiz-nav-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+
+/* Calendar styles */
+.calendar-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+.calendar-month-label {
+  font-size: 1.1rem;
+  min-width: 160px;
+  text-align: center;
+}
+.calendar-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1rem;
+}
+.calendar-filter-btn {
+  padding: 0.3rem 0.6rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--ink-soft);
+  transition: all var(--doaide-transition);
+}
+.calendar-filter-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.calendar-filter-btn.active {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: #fff;
+}
+.calendar-dates {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.calendar-date-card {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.calendar-date-card.past {
+  opacity: 0.5;
+}
+.calendar-date-card.urgent {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.05);
+}
+.calendar-date-card.soon {
+  border-color: #f59e42;
+  background: rgba(245, 158, 66, 0.05);
+}
+.calendar-date-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.25rem;
+}
+.calendar-type-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  letter-spacing: 0.02em;
+}
+.calendar-type-badge.gstr1 { background: #dbeafe; color: #1e40af; }
+.calendar-type-badge.gstr3b { background: #fef3c7; color: #92400e; }
+.calendar-type-badge.gstr9 { background: #fce7f3; color: #9d174d; }
+.calendar-type-badge.cmp08 { background: #d1fae5; color: #065f46; }
+.calendar-type-badge.iff { background: #ede9fe; color: #5b21b6; }
+.calendar-date-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+.calendar-date-desc {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  margin-top: 0.15rem;
+}
+.calendar-date-countdown {
+  font-size: 0.82rem;
+  font-weight: 500;
+  margin-top: 0.35rem;
+}
+.calendar-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.calendar-table th,
+.calendar-table td {
+  padding: 0.35rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.calendar-table th {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+}
+
+/* HSN/SAC finder styles */
+.hsn-category-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+.hsn-category-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.55rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--ink);
+  transition: all var(--doaide-transition);
+}
+.hsn-category-btn:hover {
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.hsn-category-count {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+  background: var(--line);
+  padding: 0.1rem 0.35rem;
+  border-radius: 8px;
+}
+.hsn-results-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  margin-bottom: 0.5rem;
+}
+.hsn-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.hsn-table th,
+.hsn-table td {
+  padding: 0.4rem 0.5rem;
+  text-align: left;
+  border-bottom: 1px solid var(--line);
+}
+.hsn-table th {
+  font-weight: 600;
+  color: var(--ink-soft);
+  font-size: 0.8rem;
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+}
+.hsn-code-link {
+  font-family: var(--font-mono, "IBM Plex Mono", monospace);
+  font-weight: 500;
+  color: var(--brand) !important;
+}
+.hsn-rate-badge {
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid;
+  border-radius: 4px;
+}
+.hsn-results {
+  margin-top: 0.75rem;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+/* Print styles */
+@media print {
+  .tools-nav,
+  .share-buttons,
+  .share-print,
+  .quiz-nav,
+  .email-capture,
+  .related-tools,
+  .cross-product-links,
+  .doaide-footer,
+  .tools-nav-cta,
+  .calendar-filter,
+  .quiz-nav-btn,
+  .breadcrumb {
+    display: none !important;
+  }
+  .tool-page {
+    background: #fff !important;
+  }
+  .tool-main {
+    padding: 0 !important;
+  }
+  .calc-card {
+    border: 1px solid #ddd !important;
+    box-shadow: none !important;
+  }
+  .calc-result {
+    break-inside: avoid;
+  }
+  body {
+    color: #000 !important;
+  }
+}

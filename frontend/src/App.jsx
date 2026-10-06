@@ -52,6 +52,10 @@ const CompositionSchemePage = lazy(() => import("./pages/CompositionSchemePage")
 const InvoiceGeneratorPage = lazy(() => import("./pages/InvoiceGeneratorPage"));
 const ReverseChargePage = lazy(() => import("./pages/ReverseChargePage"));
 const ItcMismatchPage = lazy(() => import("./pages/ItcMismatchPage"));
+const RegistrationCheckerPage = lazy(() => import("./pages/RegistrationCheckerPage"));
+const ReturnDueDateCalendarPage = lazy(() => import("./pages/ReturnDueDateCalendarPage"));
+const InterestCalculatorPage = lazy(() => import("./pages/InterestCalculatorPage"));
+const HsnSacFinderPage = lazy(() => import("./pages/HsnSacFinderPage"));
 
 function LazyFallback() {
   return (
@@ -144,6 +148,10 @@ export default function App() {
         <Route path="/reverse-charge" element={<Lazy><ReverseChargePage /></Lazy>} />
         <Route path="/itc-mismatch" element={<Lazy><ItcMismatchPage /></Lazy>} />
         <Route path="/hsn/:code" element={<Lazy><HsnCodePage /></Lazy>} />
+        <Route path="/registration-checker" element={<Lazy><RegistrationCheckerPage /></Lazy>} />
+        <Route path="/return-calendar" element={<Lazy><ReturnDueDateCalendarPage /></Lazy>} />
+        <Route path="/interest-calculator" element={<Lazy><InterestCalculatorPage /></Lazy>} />
+        <Route path="/hsn-sac-finder" element={<Lazy><HsnSacFinderPage /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
         <Route path="/" element={<Home />} />

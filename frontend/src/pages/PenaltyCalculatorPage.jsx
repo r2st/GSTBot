@@ -5,6 +5,7 @@ import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
 import SeoHead from "../components/SeoHead";
+import PrintButton from "../components/PrintButton";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -208,6 +209,7 @@ export default function PenaltyCalculatorPage() {
                     path="/penalty-calculator"
                     text={`GST late filing penalty for ${selectedReturn.label}: ${formatINR(result.total)} (${result.days} days late) — calculated free on DoAide GST`}
                   />
+                  <PrintButton label="Print Result" />
                 </div>
               </div>
             )}

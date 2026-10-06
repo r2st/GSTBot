@@ -137,6 +137,53 @@ const TOOLS = [
     ),
   },
   {
+    to: "/registration-checker",
+    title: "Registration Eligibility Checker",
+    desc: "Answer 7 questions to find out if GST registration is mandatory for your business. Covers all Section 22 & 24 scenarios.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="8.5" cy="7" r="4" />
+        <polyline points="17 11 19 13 23 9" />
+      </svg>
+    ),
+  },
+  {
+    to: "/return-calendar",
+    title: "Return Due Date Calendar",
+    desc: "Monthly calendar of GST filing deadlines — GSTR-1, GSTR-3B, GSTR-9, CMP-08, and IFF. With countdown timers.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="18" rx="2" />
+        <line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" />
+        <line x1="3" y1="10" x2="21" y2="10" />
+        <path d="M8 14h.01" /><path d="M12 14h.01" /><path d="M16 14h.01" />
+        <path d="M8 18h.01" /><path d="M12 18h.01" />
+      </svg>
+    ),
+  },
+  {
+    to: "/interest-calculator",
+    title: "Interest Calculator",
+    desc: "Calculate interest on late GST payment under Section 50. Supports 18% and 24% rates with month-wise breakdown.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <line x1="12" y1="1" x2="12" y2="23" /><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" />
+      </svg>
+    ),
+  },
+  {
+    to: "/hsn-sac-finder",
+    title: "HSN/SAC Code Finder",
+    desc: "Search HSN and SAC codes by product name, service description, or code number. Browse by category with GST rates.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" />
+        <line x1="8" y1="11" x2="14" y2="11" />
+      </svg>
+    ),
+  },
+  {
     to: "/embed",
     title: "Embed GST Widgets",
     desc: "Add free GST calculator, GSTIN lookup, or HSN code finder widgets to your own website with a single line of code.",

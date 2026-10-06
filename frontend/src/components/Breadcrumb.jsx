@@ -9,6 +9,13 @@ const ROUTE_LABELS = {
   "/embed": "Embed Widget",
   "/pricing": "Pricing",
   "/blog": "Blog",
+  "/penalty-calculator": "Penalty Calculator",
+  "/eway-bill": "E-Way Bill Checker",
+  "/input-tax-credit": "ITC Eligibility",
+  "/registration-checker": "Registration Checker",
+  "/return-calendar": "Return Due Date Calendar",
+  "/interest-calculator": "Interest Calculator",
+  "/hsn-sac-finder": "HSN/SAC Code Finder",
 };
 
 export default function Breadcrumb({ items }) {

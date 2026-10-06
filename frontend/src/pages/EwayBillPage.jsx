@@ -5,6 +5,7 @@ import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
 import SeoHead from "../components/SeoHead";
+import PrintButton from "../components/PrintButton";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -233,6 +234,7 @@ export default function EwayBillPage() {
                     path="/eway-bill"
                     text={`E-way bill ${result.required ? "required" : "not required"} — checked free on DoAide GST`}
                   />
+                  <PrintButton label="Print Result" />
                 </div>
               </div>
             )}

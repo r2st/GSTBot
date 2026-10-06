@@ -9,6 +9,7 @@ import RelatedTools from "../components/RelatedTools";
 import SavedCalculations, { getSavedCalcs, SaveCalcButton } from "../components/SavedCalculations";
 import SavePrompt, { getCalcCount, incrementCalcCount } from "../components/SavePrompt";
 import SeoHead from "../components/SeoHead";
+import PrintButton from "../components/PrintButton";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -185,6 +186,7 @@ export default function CalculatorPage() {
                     text={`GST on ${formatINR(result.taxable)} at ${rate}%: Total ${formatINR(result.total)} — calculated free on DoAide GST`}
                   />
                   <SaveCalcButton result={result} rate={rate} onSaved={setSavedCalcs} />
+                  <PrintButton label="Print Result" />
                 </div>
               </div>
             )}
