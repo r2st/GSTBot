@@ -2280,6 +2280,94 @@ a:focus-visible {
   }
 }
 
+/* ---- Save prompt (post-3rd-calculation signup nudge) ---- */
+.save-prompt {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  background: var(--glass);
+  border: 1px solid var(--brand);
+  border-radius: 0.75rem;
+}
+.save-prompt p {
+  margin: 0 0 0.75rem;
+  line-height: 1.5;
+}
+.save-prompt-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.btn-sm {
+  font-size: 0.85rem;
+  padding: 0.4rem 1rem;
+}
+
+/* ---- Cross-product DoAide footer ---- */
+.doaide-footer {
+  margin-top: 3rem;
+  padding: 2rem 0;
+  background: var(--glass, #f8f9fa);
+  border-top: 1px solid var(--line);
+}
+.doaide-footer-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+.doaide-footer-heading {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 0 0 1rem;
+}
+.doaide-footer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.75rem;
+}
+.doaide-footer-link {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--bg, #fff);
+  border: 1px solid var(--glass-border, #e9ecef);
+  border-radius: 0.5rem;
+  text-decoration: none;
+  color: var(--ink);
+  transition: border-color 0.15s;
+}
+.doaide-footer-link:hover {
+  border-color: var(--brand);
+}
+.doaide-footer-icon {
+  font-size: 1.25rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.doaide-footer-link strong {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--ink-strong);
+}
+.doaide-footer-link > span:last-child > span {
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+.doaide-footer-viewall {
+  margin-top: 1rem;
+  font-size: 0.8rem;
+}
+.doaide-footer-viewall a {
+  color: var(--brand);
+  text-decoration: none;
+}
+.doaide-footer-viewall a:hover {
+  text-decoration: underline;
+}
+
 /* ---- Usage page ---- */
 .usage-page {
   max-width: 800px;
