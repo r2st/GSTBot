@@ -5,6 +5,7 @@ import DeadlineBanner from "../components/DeadlineBanner";
 import DoAideFooter from "../components/DoAideFooter";
 import RecentLookups from "../components/RecentLookups";
 import RelatedTools from "../components/RelatedTools";
+import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -70,6 +71,11 @@ export default function LookupPage() {
 
   return (
     <div className="tool-page">
+      <SeoHead
+        title="Free GSTIN Lookup & Verification — Check Any GST Number"
+        description="Verify any GSTIN instantly. Check registration status, state code, PAN, business name, and filing compliance. Free GSTIN verification tool — no login required."
+        path="/lookup"
+      />
       <ToolsNav />
       <DeadlineBanner />
       <main className="tool-main">

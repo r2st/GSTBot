@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import SeoHead from "../../components/SeoHead";
+import ShareButtons from "../../components/ShareButtons";
 import DoAideFooter from "../../components/DoAideFooter";
 import ToolsNav from "../../components/ToolsNav";
 import { usePageTitle } from "../../hooks/usePageTitle";
@@ -236,6 +237,11 @@ export default function ZohoGstCompare() {
               <Link to="/compare/busy">DoAide GST vs Busy Accounting</Link>
               <Link to="/best-gst-software">Best GST Software in India 2026</Link>
             </div>
+            <ShareButtons
+              path="/compare/zoho-gst"
+              text="DoAide GST vs Zoho GST — see the full comparison of free GST tools"
+              label="Share this comparison"
+            />
             <h2>Free GST Tools</h2>
             <div className="compare-links-grid">
               <Link to="/calculator">GST Calculator</Link>

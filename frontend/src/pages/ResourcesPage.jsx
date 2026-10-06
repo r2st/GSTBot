@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import SeoHead from "../components/SeoHead";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 
@@ -105,6 +106,11 @@ export default function ResourcesPage() {
 
   return (
     <div className="tool-page">
+      <SeoHead
+        title="Free GST Tools & Resources — Calculator, GSTIN Lookup, HSN Search"
+        description="Complete collection of free GST tools for Indian businesses — GST calculator, GSTIN verification, HSN code search, filing due dates, and compliance guides."
+        path="/resources"
+      />
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">

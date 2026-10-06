@@ -102,9 +102,10 @@ class TestSetOffNeedsAToken:
             "/api/v1/meta/reminder-subscribe",
             # Recent GSTIN lookups for social proof on the lookup page.
             "/api/v1/meta/recent-lookups",
-            # Sitemap and robots.txt for search engine crawlers.
+            # Sitemap, robots.txt, and OG images for search engines / social.
             "/api/v1/seo/sitemap.xml",
             "/api/v1/seo/robots.txt",
+            "/api/v1/seo/og-image",
             # OAuth SSO — redirects to provider, no token needed.
             "/api/v1/auth/google",
             "/api/v1/auth/google/callback",

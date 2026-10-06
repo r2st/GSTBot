@@ -2,6 +2,7 @@ import { useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
 import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
+import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -154,6 +155,11 @@ export default function DueDatesPage() {
 
   return (
     <div className="tool-page">
+      <SeoHead
+        title="GST Filing Due Dates 2025-26 & 2026-27 — Complete Calendar"
+        description="Complete GST filing due dates calendar for FY 2025-26 and 2026-27. GSTR-1, GSTR-3B, GSTR-9, CMP-08, IFF deadlines for monthly and quarterly filers."
+        path="/due-dates"
+      />
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container due-dates-container">

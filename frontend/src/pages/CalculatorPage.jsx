@@ -6,6 +6,7 @@ import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
 import SavedCalculations, { getSavedCalcs, SaveCalcButton } from "../components/SavedCalculations";
 import SavePrompt, { getCalcCount, incrementCalcCount } from "../components/SavePrompt";
+import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -57,6 +58,11 @@ export default function CalculatorPage() {
 
   return (
     <div className="tool-page">
+      <SeoHead
+        title="Free GST Calculator Online - Calculate CGST, SGST, IGST"
+        description="Calculate GST instantly for any amount. Get CGST, SGST, IGST breakdown with inclusive/exclusive modes. Example: 18% GST on ₹10,000 = ₹1,800 tax, ₹11,800 total."
+        path="/calculator"
+      />
       <ToolsNav />
       <DeadlineBanner />
       <main className="tool-main">

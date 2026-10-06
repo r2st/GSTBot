@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
 import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
+import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -33,6 +34,11 @@ export default function HsnFinderPage() {
 
   return (
     <div className="tool-page">
+      <SeoHead
+        title="HSN Code Finder — Search GST Rates by Product or Service"
+        description="Find the correct HSN or SAC code and GST rate for any product or service. Search by name or code number. Free HSN code lookup — no signup required."
+        path="/hsn"
+      />
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">

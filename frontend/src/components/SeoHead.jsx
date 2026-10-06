@@ -29,9 +29,20 @@ function removeJsonLd(id) {
   if (el) el.remove();
 }
 
-export default function SeoHead({ title, description, path, jsonLd, breadcrumbs }) {
+const API_BASE = "https://api.doaide.com/api/v1";
+const DEFAULT_OG_IMAGE = `${BASE_URL}/og-image.png`;
+
+function ogImageUrl(title, subtitle) {
+  if (!title) return DEFAULT_OG_IMAGE;
+  const params = new URLSearchParams({ title });
+  if (subtitle) params.set("subtitle", subtitle);
+  return `${API_BASE}/seo/og-image?${params.toString()}`;
+}
+
+export default function SeoHead({ title, description, path, jsonLd, breadcrumbs, ogImage }) {
   useEffect(() => {
     const url = `${BASE_URL}${path}`;
+    const image = ogImage || ogImageUrl(title, description?.slice(0, 80));
 
     setMeta("description", description, "name");
     setMeta("og:title", title);
@@ -39,8 +50,16 @@ export default function SeoHead({ title, description, path, jsonLd, breadcrumbs 
     setMeta("og:url", url);
     setMeta("og:type", "website");
     setMeta("og:site_name", SITE_NAME);
+    setMeta("og:image", image);
+    setMeta("og:image:width", "1200");
+    setMeta("og:image:height", "630");
+    setMeta("og:image:alt", title);
+    setMeta("og:locale", "en_IN");
+    setMeta("twitter:card", "summary_large_image", "name");
     setMeta("twitter:title", title);
     setMeta("twitter:description", description);
+    setMeta("twitter:image", image);
+    setMeta("twitter:image:alt", title);
 
     if (jsonLd) {
       const schemas = Array.isArray(jsonLd) ? jsonLd : [jsonLd];
@@ -67,7 +86,7 @@ export default function SeoHead({ title, description, path, jsonLd, breadcrumbs 
       }
       if (breadcrumbs) removeJsonLd("seo-breadcrumb");
     };
-  }, [title, description, path, jsonLd, breadcrumbs]);
+  }, [title, description, path, jsonLd, breadcrumbs, ogImage]);
 
   return null;
 }

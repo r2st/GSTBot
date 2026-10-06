@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth";
+import SeoHead from "../components/SeoHead";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { api } from "../lib/api";
 import { track } from "../lib/track";
@@ -141,6 +142,11 @@ export default function PricingPage() {
 
   return (
     <div className="pricing-page">
+      <SeoHead
+        title="Pricing — DoAide GST"
+        description="Free GST calculator, GSTIN lookup, and HSN search forever. Upgrade from ₹499/month for filing assistance, saved history, and multi-client management."
+        path="/pricing"
+      />
       <div className="pricing-header">
         <h1>Simple, transparent pricing</h1>
         <p>Calculator, GSTIN lookup, and HSN search are free forever — no login required.</p>

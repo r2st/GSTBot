@@ -1,7 +1,10 @@
-"""Sitemap and robots.txt — public, read-only, cached."""
+"""Sitemap, robots.txt, and OG image — public, read-only, cached."""
 from __future__ import annotations
 
+import io
 import xml.etree.ElementTree as ET
+
+from PIL import Image
 
 
 class TestSitemap:
@@ -70,3 +73,44 @@ class TestRobotsTxt:
 
     def test_needs_no_authentication(self, client):
         assert client.get("/api/v1/seo/robots.txt").status_code == 200
+
+
+class TestOgImage:
+    def test_returns_a_1200x630_png(self, client):
+        response = client.get("/api/v1/seo/og-image", params={"title": "Test Title"})
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        img = Image.open(io.BytesIO(response.content))
+        assert img.size == (1200, 630)
+
+    def test_accepts_title_and_subtitle(self, client):
+        response = client.get(
+            "/api/v1/seo/og-image",
+            params={"title": "GST Rate for Laptop", "subtitle": "18% under HSN 8471"},
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+
+    def test_rejects_missing_title(self, client):
+        response = client.get("/api/v1/seo/og-image")
+        assert response.status_code == 422
+
+    def test_rejects_empty_title(self, client):
+        response = client.get("/api/v1/seo/og-image", params={"title": ""})
+        assert response.status_code == 422
+
+    def test_is_cached_for_a_day(self, client):
+        response = client.get("/api/v1/seo/og-image", params={"title": "Cache test"})
+        assert "max-age=86400" in response.headers.get("cache-control", "")
+
+    def test_needs_no_authentication(self, client):
+        assert client.get(
+            "/api/v1/seo/og-image", params={"title": "Public"}
+        ).status_code == 200
+
+    def test_long_title_wraps_without_error(self, client):
+        long_title = "GST Rate for Air Conditioner Split Inverter " * 3
+        response = client.get("/api/v1/seo/og-image", params={"title": long_title[:200]})
+        assert response.status_code == 200
+        img = Image.open(io.BytesIO(response.content))
+        assert img.size == (1200, 630)

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import SeoHead from "../../components/SeoHead";
+import ShareButtons from "../../components/ShareButtons";
 import DoAideFooter from "../../components/DoAideFooter";
 import ToolsNav from "../../components/ToolsNav";
 import { usePageTitle } from "../../hooks/usePageTitle";
@@ -367,6 +368,11 @@ export default function Gstr3bFilingGuide() {
               </div>
             </section>
 
+            <ShareButtons
+              path="/guides/how-to-file-gstr-3b"
+              text="How to file GSTR-3B — complete step-by-step guide on DoAide GST"
+              label="Share this guide"
+            />
             <section className="compare-links">
               <h2>Related Guides</h2>
               <div className="compare-links-grid">
