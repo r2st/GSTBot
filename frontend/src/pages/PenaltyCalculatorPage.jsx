@@ -35,6 +35,53 @@ const TOOL_SCHEMA = {
   offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
 };
 
+const FAQ_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "What is the late fee for GSTR-3B?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "The late fee for GSTR-3B is ₹50 per day (₹25 CGST + ₹25 SGST) for regular returns, subject to a maximum of ₹10,000 per return. For nil returns, the late fee is ₹20 per day (₹10 CGST + ₹10 SGST), maximum ₹500.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "What is the interest rate on late GST payment?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Interest on late payment of GST is charged at 18% per annum on the outstanding tax liability. It is calculated from the day after the due date until the date of actual payment. Interest is charged only on the net cash liability after adjusting ITC.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Is there a maximum cap on GST late fees?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Yes. For GSTR-1 and GSTR-3B, the maximum late fee is ₹10,000 per return (₹5,000 CGST + ₹5,000 SGST). For nil returns, the cap is ₹500. For GSTR-9 (annual return), the late fee is ₹200 per day with no upper cap, but is subject to 0.5% of turnover in the state.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "How is GST penalty different from late fee?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Late fee is charged for delayed filing of returns. Penalty under Sections 122-125 is imposed for offences like tax evasion, incorrect invoicing, or failure to register. Interest is charged on late payment of tax. All three are separate charges.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Can GST late fee be waived?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "The government has issued several notifications waiving or reducing late fees for past periods through amnesty schemes. Check the latest CBIC notifications for any ongoing late fee waiver schemes for your return period.",
+      },
+    },
+  ],
+};
+
 const BREADCRUMBS = [
   { name: "Home", url: "https://gst.doaide.com" },
   { name: "Penalty Calculator" },
@@ -77,7 +124,7 @@ export default function PenaltyCalculatorPage() {
         title="GST Late Filing Penalty Calculator — Interest & Late Fees"
         description="Calculate GST late filing penalties instantly. Get exact late fees and interest for GSTR-1, GSTR-3B, GSTR-9 based on days of delay. Free, no login required."
         path="/penalty-calculator"
-        jsonLd={TOOL_SCHEMA}
+        jsonLd={[TOOL_SCHEMA, FAQ_SCHEMA]}
         breadcrumbs={BREADCRUMBS}
       />
       <ToolsNav />
@@ -191,6 +238,44 @@ export default function PenaltyCalculatorPage() {
               <li>Calculated from the day after the due date until the date of payment</li>
               <li>Interest is charged only on the net cash liability (after adjusting ITC)</li>
             </ul>
+          </section>
+
+          <section className="tool-info">
+            <h2>Frequently Asked Questions</h2>
+
+            <h3>What is the late fee for GSTR-3B?</h3>
+            <p>
+              The late fee for GSTR-3B is ₹50 per day (₹25 CGST + ₹25 SGST) for regular
+              returns, maximum ₹10,000 per return. For nil returns, it is ₹20 per day,
+              maximum ₹500.
+            </p>
+
+            <h3>What is the interest rate on late GST payment?</h3>
+            <p>
+              Interest on late payment is 18% per annum on the outstanding tax liability,
+              calculated from the day after the due date until the date of payment. It applies
+              only on the net cash liability after adjusting ITC.
+            </p>
+
+            <h3>Is there a maximum cap on GST late fees?</h3>
+            <p>
+              Yes — ₹10,000 for GSTR-1 and GSTR-3B, ₹500 for nil returns. GSTR-9 has no
+              upper cap but is limited to 0.5% of turnover in the state.
+            </p>
+
+            <h3>How is GST penalty different from late fee?</h3>
+            <p>
+              Late fee is for delayed filing. Penalty (Sections 122-125) is for offences like
+              tax evasion or incorrect invoicing. Interest is for late payment of tax. All
+              three are separate charges.
+            </p>
+
+            <h3>Can GST late fee be waived?</h3>
+            <p>
+              The government periodically issues amnesty schemes waiving or reducing late
+              fees. Check the latest CBIC notifications for ongoing waiver schemes for
+              your return period.
+            </p>
           </section>
 
           <RelatedTools current="/penalty-calculator" />

@@ -64,6 +64,27 @@ export default function CalculatorPage() {
         title="Free GST Calculator Online - Calculate CGST, SGST, IGST"
         description="Calculate GST instantly for any amount. Get CGST, SGST, IGST breakdown with inclusive/exclusive modes. Example: 18% GST on ₹10,000 = ₹1,800 tax, ₹11,800 total."
         path="/calculator"
+        jsonLd={[
+          {
+            "@context": "https://schema.org",
+            "@type": "WebApplication",
+            name: "Free GST Calculator",
+            url: "https://gst.doaide.com/calculator",
+            applicationCategory: "FinanceApplication",
+            operatingSystem: "Any",
+            offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
+          },
+          {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: [
+              { "@type": "Question", name: "How do I calculate GST on a product?", acceptedAnswer: { "@type": "Answer", text: "Multiply the taxable amount by the GST rate percentage and divide by 100. For example, 18% GST on ₹10,000 = ₹10,000 × 18/100 = ₹1,800. The total becomes ₹11,800. For intrastate sales, split equally into CGST and SGST (₹900 each)." } },
+              { "@type": "Question", name: "What is the difference between GST exclusive and inclusive?", acceptedAnswer: { "@type": "Answer", text: "GST exclusive means the price does not include GST — you add GST on top. GST inclusive means GST is already included in the price — you extract it. Formula for inclusive: Taxable amount = Total / (1 + GST rate/100)." } },
+              { "@type": "Question", name: "When is IGST charged instead of CGST+SGST?", acceptedAnswer: { "@type": "Answer", text: "IGST is charged on interstate supplies (supplier and buyer in different states). CGST+SGST is charged on intrastate supplies (same state). The total GST amount is the same — only the split differs." } },
+              { "@type": "Question", name: "What are the GST rate slabs in India?", acceptedAnswer: { "@type": "Answer", text: "India has 5 GST slabs: 0% (essentials like milk, grains), 5% (sugar, tea, transport), 12% (processed food, medicines), 18% (most goods and services), and 28% (luxury goods, cars, cement, tobacco)." } },
+            ],
+          },
+        ]}
       />
       <ToolsNav />
       <DeadlineBanner />
@@ -203,6 +224,35 @@ export default function CalculatorPage() {
               <li><strong>18%</strong> — Most goods and services: electronics, furniture, IT services</li>
               <li><strong>28%</strong> — Luxury and sin goods: cars, AC, cement, soft drinks, tobacco</li>
             </ul>
+          </section>
+
+          <section className="tool-info">
+            <h2>Frequently Asked Questions</h2>
+
+            <h3>How do I calculate GST on a product?</h3>
+            <p>
+              Multiply the taxable amount by the GST rate and divide by 100. For example,
+              18% GST on ₹10,000 = ₹1,800 tax, total ₹11,800. For intrastate sales, the
+              tax splits equally into CGST and SGST (₹900 each).
+            </p>
+
+            <h3>What is the difference between GST exclusive and inclusive?</h3>
+            <p>
+              Exclusive means GST is added on top of the price. Inclusive means GST is
+              already included — you extract it. Formula: Taxable = Total ÷ (1 + rate/100).
+            </p>
+
+            <h3>When is IGST charged instead of CGST+SGST?</h3>
+            <p>
+              IGST applies to interstate supplies (different states). CGST+SGST applies to
+              intrastate supplies (same state). The total GST amount is identical.
+            </p>
+
+            <h3>What are the GST rate slabs in India?</h3>
+            <p>
+              Five slabs: 0% (essentials), 5% (necessities), 12% (processed food, medicines),
+              18% (most goods and services), and 28% (luxury goods, tobacco).
+            </p>
           </section>
 
           <RelatedTools current="/calculator" />

@@ -34,6 +34,53 @@ const TOOL_SCHEMA = {
   offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
 };
 
+const FAQ_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "What is Input Tax Credit (ITC) under GST?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Input Tax Credit (ITC) allows businesses to reduce their GST liability by claiming credit for GST paid on business purchases. It is the backbone of GST's value-added tax mechanism, ensuring tax is levied only on value addition at each stage.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "What are blocked credits under Section 17(5)?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Blocked credits include GST paid on motor vehicles (with exceptions), food and beverages, club memberships, personal consumption, gifts and free samples, construction of immovable property (except plant and machinery), and purchases under the composition scheme.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "What are the conditions for claiming ITC?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "To claim ITC under Section 16(2): you must have a valid tax invoice, goods/services must be received, supplier must have paid GST to government, you must have filed the relevant return, invoice must appear in GSTR-2B, and payment must be made within 180 days.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Can ITC be claimed on motor vehicles?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "ITC on motor vehicles is generally blocked under Section 17(5)(a). Exceptions include vehicles used for transportation of goods, passenger transport with seating capacity >13, driving training, or vehicles used for further supply (dealers/lessors).",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "What happens if payment is not made within 180 days?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "If payment is not made to the supplier within 180 days of the invoice date, the ITC claimed must be reversed along with interest. The credit can be reclaimed when payment is eventually made.",
+      },
+    },
+  ],
+};
+
 const BREADCRUMBS = [
   { name: "Home", url: "https://gst.doaide.com" },
   { name: "ITC Eligibility Checker" },
@@ -106,7 +153,7 @@ export default function ItcEligibilityPage() {
         title="GST Input Tax Credit Eligibility Checker — Free ITC Tool"
         description="Check if your purchase is eligible for Input Tax Credit under GST. Enter purchase details to see ITC eligibility, blocked credits, and conditions. Free, no login required."
         path="/input-tax-credit"
-        jsonLd={TOOL_SCHEMA}
+        jsonLd={[TOOL_SCHEMA, FAQ_SCHEMA]}
         breadcrumbs={BREADCRUMBS}
       />
       <ToolsNav />
@@ -230,6 +277,43 @@ export default function ItcEligibilityPage() {
               <li>Gifts and free samples</li>
               <li>Tax paid under composition scheme</li>
             </ul>
+          </section>
+
+          <section className="tool-info">
+            <h2>Frequently Asked Questions</h2>
+
+            <h3>What is Input Tax Credit (ITC) under GST?</h3>
+            <p>
+              ITC allows businesses to reduce their GST liability by claiming credit for GST
+              paid on business purchases. It ensures tax is levied only on value addition
+              at each stage of the supply chain.
+            </p>
+
+            <h3>What are blocked credits under Section 17(5)?</h3>
+            <p>
+              Blocked credits include GST on motor vehicles (with exceptions), food &amp;
+              beverages, club memberships, personal consumption, gifts, construction of
+              immovable property (except plant &amp; machinery), and composition scheme purchases.
+            </p>
+
+            <h3>What are the conditions for claiming ITC?</h3>
+            <p>
+              Under Section 16(2): valid tax invoice, goods/services received, supplier has
+              paid GST, relevant return filed, invoice appears in GSTR-2B, and payment made
+              to supplier within 180 days.
+            </p>
+
+            <h3>Can ITC be claimed on motor vehicles?</h3>
+            <p>
+              Generally blocked. Exceptions: vehicles for goods transport, passenger transport
+              (&gt;13 seats), driving training, or further supply by dealers/lessors.
+            </p>
+
+            <h3>What happens if payment is not made within 180 days?</h3>
+            <p>
+              The ITC claimed must be reversed with interest. The credit can be reclaimed
+              when payment is eventually made to the supplier.
+            </p>
           </section>
 
           <RelatedTools current="/input-tax-credit" />

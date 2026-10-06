@@ -21,6 +21,16 @@ class TestSitemap:
         assert "https://gst.doaide.com/hsn" in body
         assert "https://gst.doaide.com/lookup" in body
 
+    def test_contains_free_tool_pages(self, client):
+        body = client.get("/api/v1/seo/sitemap.xml").text
+        assert "https://gst.doaide.com/penalty-calculator" in body
+        assert "https://gst.doaide.com/eway-bill" in body
+        assert "https://gst.doaide.com/input-tax-credit" in body
+        assert "https://gst.doaide.com/composition-scheme" in body
+        assert "https://gst.doaide.com/invoice-generator" in body
+        assert "https://gst.doaide.com/reverse-charge" in body
+        assert "https://gst.doaide.com/itc-mismatch" in body
+
     def test_contains_product_rate_pages(self, client):
         body = client.get("/api/v1/seo/sitemap.xml").text
         assert "https://gst.doaide.com/gst-rate/laptop" in body
@@ -57,6 +67,16 @@ class TestRobotsTxt:
         assert "Allow: /gst-rate/" in body
         assert "Allow: /gstin/" in body
         assert "Allow: /calculator" in body
+
+    def test_allows_free_tool_pages(self, client):
+        body = client.get("/api/v1/seo/robots.txt").text
+        assert "Allow: /penalty-calculator" in body
+        assert "Allow: /eway-bill" in body
+        assert "Allow: /input-tax-credit" in body
+        assert "Allow: /composition-scheme" in body
+        assert "Allow: /invoice-generator" in body
+        assert "Allow: /reverse-charge" in body
+        assert "Allow: /itc-mismatch" in body
 
     def test_disallows_private_pages(self, client):
         body = client.get("/api/v1/seo/robots.txt").text

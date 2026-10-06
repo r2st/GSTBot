@@ -32,6 +32,13 @@ STATIC_PAGES = [
     "/due-dates",
     "/resources",
     "/pricing",
+    "/penalty-calculator",
+    "/eway-bill",
+    "/input-tax-credit",
+    "/composition-scheme",
+    "/invoice-generator",
+    "/reverse-charge",
+    "/itc-mismatch",
     "/blog",
     "/blog/gst-filing-guide-india-2026",
     "/blog/hsn-code-lookup",
@@ -139,6 +146,13 @@ Allow: /hsn
 Allow: /due-dates
 Allow: /resources
 Allow: /pricing
+Allow: /penalty-calculator
+Allow: /eway-bill
+Allow: /input-tax-credit
+Allow: /composition-scheme
+Allow: /invoice-generator
+Allow: /reverse-charge
+Allow: /itc-mismatch
 Allow: /blog/
 
 Disallow: /api/

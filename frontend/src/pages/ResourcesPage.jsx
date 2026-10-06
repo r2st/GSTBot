@@ -90,6 +90,53 @@ const TOOLS = [
     ),
   },
   {
+    to: "/composition-scheme",
+    title: "Composition Scheme Checker",
+    desc: "Check if your business is eligible for the GST Composition Scheme. Get applicable tax rates and turnover limits.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" />
+        <circle cx="8.5" cy="7" r="4" />
+        <line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" />
+      </svg>
+    ),
+  },
+  {
+    to: "/invoice-generator",
+    title: "GST Invoice Generator",
+    desc: "Create GST-compliant tax invoices with automatic CGST/SGST/IGST calculation. Download as PDF for free.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+        <polyline points="14 2 14 8 20 8" />
+        <line x1="16" y1="13" x2="8" y2="13" /><line x1="16" y1="17" x2="8" y2="17" />
+        <polyline points="10 9 9 9 8 9" />
+      </svg>
+    ),
+  },
+  {
+    to: "/reverse-charge",
+    title: "Reverse Charge Calculator",
+    desc: "Calculate GST liability under Reverse Charge Mechanism (RCM) for legal, GTA, director fees, and other services.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="1 4 1 10 7 10" /><polyline points="23 20 23 14 17 14" />
+        <path d="M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15" />
+      </svg>
+    ),
+  },
+  {
+    to: "/itc-mismatch",
+    title: "ITC Mismatch Calculator",
+    desc: "Compare GSTR-2A/2B data with your purchase books. Find mismatches, excess claims, and missing invoices.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+      </svg>
+    ),
+  },
+  {
     to: "/embed",
     title: "Embed GST Widgets",
     desc: "Add free GST calculator, GSTIN lookup, or HSN code finder widgets to your own website with a single line of code.",

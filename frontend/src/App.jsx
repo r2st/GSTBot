@@ -48,6 +48,10 @@ const PenaltyCalculatorPage = lazy(() => import("./pages/PenaltyCalculatorPage")
 const EwayBillPage = lazy(() => import("./pages/EwayBillPage"));
 const ItcEligibilityPage = lazy(() => import("./pages/ItcEligibilityPage"));
 const HsnCodePage = lazy(() => import("./pages/HsnCodePage"));
+const CompositionSchemePage = lazy(() => import("./pages/CompositionSchemePage"));
+const InvoiceGeneratorPage = lazy(() => import("./pages/InvoiceGeneratorPage"));
+const ReverseChargePage = lazy(() => import("./pages/ReverseChargePage"));
+const ItcMismatchPage = lazy(() => import("./pages/ItcMismatchPage"));
 
 function LazyFallback() {
   return (
@@ -135,6 +139,10 @@ export default function App() {
         <Route path="/penalty-calculator" element={<Lazy><PenaltyCalculatorPage /></Lazy>} />
         <Route path="/eway-bill" element={<Lazy><EwayBillPage /></Lazy>} />
         <Route path="/input-tax-credit" element={<Lazy><ItcEligibilityPage /></Lazy>} />
+        <Route path="/composition-scheme" element={<Lazy><CompositionSchemePage /></Lazy>} />
+        <Route path="/invoice-generator" element={<Lazy><InvoiceGeneratorPage /></Lazy>} />
+        <Route path="/reverse-charge" element={<Lazy><ReverseChargePage /></Lazy>} />
+        <Route path="/itc-mismatch" element={<Lazy><ItcMismatchPage /></Lazy>} />
         <Route path="/hsn/:code" element={<Lazy><HsnCodePage /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />

@@ -1,0 +1,88 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import { describe, expect, it, vi } from "vitest";
+import InvoiceGeneratorPage from "./InvoiceGeneratorPage";
+
+vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+vi.mock("../lib/share", () => ({
+  fullUrl: (p) => `http://localhost${p}`,
+  whatsappUrl: (text, url) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`,
+  twitterUrl: (text, url) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
+  copyToClipboard: vi.fn().mockResolvedValue(true),
+}));
+vi.mock("../lib/api", () => ({
+  api: { subscribe: vi.fn().mockResolvedValue({ subscribed: true, new: true, message: "Done" }) },
+}));
+vi.mock("../lib/track", () => ({ track: () => {} }));
+
+function renderPage() {
+  return render(
+    <MemoryRouter initialEntries={["/invoice-generator"]}>
+      <InvoiceGeneratorPage />
+    </MemoryRouter>,
+  );
+}
+
+describe("InvoiceGeneratorPage", () => {
+  it("renders the page title and subtitle", () => {
+    renderPage();
+    expect(screen.getByRole("heading", { name: "GST Invoice Generator" })).toBeInTheDocument();
+    expect(screen.getByText(/Create GST-compliant tax invoices/)).toBeInTheDocument();
+  });
+
+  it("shows seller and buyer input sections", () => {
+    renderPage();
+    expect(screen.getByText("Seller Details")).toBeInTheDocument();
+    expect(screen.getByText("Buyer Details")).toBeInTheDocument();
+  });
+
+  it("shows the add item button", () => {
+    renderPage();
+    expect(screen.getByText("+ Add Item")).toBeInTheDocument();
+  });
+
+  it("shows total when item rate is entered", async () => {
+    renderPage();
+    const rateInputs = screen.getAllByPlaceholderText("0.00");
+    await userEvent.type(rateInputs[0], "1000");
+
+    const result = document.querySelector(".calc-result");
+    expect(result).not.toBeNull();
+    expect(result.textContent).toContain("Taxable Amount");
+  });
+
+  it("preview button is disabled without required fields", () => {
+    renderPage();
+    const previewBtn = screen.getByText("Preview Invoice");
+    expect(previewBtn).toBeDisabled();
+  });
+
+  it("preview button enables with required fields filled", async () => {
+    renderPage();
+    const sellerName = screen.getAllByPlaceholderText(/business name/i)[0];
+    const buyerName = screen.getAllByPlaceholderText(/business name/i)[1];
+    const invoiceInput = screen.getByPlaceholderText("INV-001");
+    const descInputs = screen.getAllByPlaceholderText("Item description");
+    const rateInputs = screen.getAllByPlaceholderText("0.00");
+
+    await userEvent.type(sellerName, "Test Seller");
+    await userEvent.type(buyerName, "Test Buyer");
+    await userEvent.type(invoiceInput, "INV-001");
+    await userEvent.type(descInputs[0], "Test Item");
+    await userEvent.type(rateInputs[0], "1000");
+
+    const previewBtn = screen.getByText("Preview Invoice");
+    expect(previewBtn).not.toBeDisabled();
+  });
+
+  it("renders FAQ section", () => {
+    renderPage();
+    expect(screen.getByText("Frequently Asked Questions")).toBeInTheDocument();
+  });
+
+  it("renders related tools", () => {
+    renderPage();
+    expect(screen.getByText("More Free GST Tools")).toBeInTheDocument();
+  });
+});
