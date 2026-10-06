@@ -673,6 +673,207 @@ class TestSubscriptionCancellationIsLogged:
         assert log.old_tier == "enterprise"
 
 
+# --------------------------------------------------------------------------
+# GB034: State machine — subscription transition guards
+# --------------------------------------------------------------------------
+
+class TestWebhookTransitionGuards:
+    """Webhook must reject invalid state transitions."""
+
+    def _send_webhook(self, client, event, razorpay_id):
+        import json
+        payload = {
+            "event": event,
+            "payload": {
+                "subscription": {"entity": {"id": razorpay_id}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            return client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+
+    def test_expired_cannot_go_to_past_due(self, client, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.EXPIRED,
+            razorpay_subscription_id="sub_expired_guard",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = self._send_webhook(client, "payment.failed", "sub_expired_guard")
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.EXPIRED
+
+    def test_cancelled_cannot_be_reactivated_by_webhook(
+        self, client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.CANCELLED,
+            razorpay_subscription_id="sub_cancel_guard",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = self._send_webhook(
+            client, "subscription.charged", "sub_cancel_guard"
+        )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.CANCELLED
+
+    def test_expired_cannot_be_reactivated_by_webhook(
+        self, client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.EXPIRED,
+            razorpay_subscription_id="sub_exp_guard",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = self._send_webhook(
+            client, "subscription.activated", "sub_exp_guard"
+        )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.EXPIRED
+
+    def test_cancelled_cannot_go_to_past_due(self, client, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.CANCELLED,
+            razorpay_subscription_id="sub_cancel_pd",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = self._send_webhook(
+            client, "subscription.halted", "sub_cancel_pd"
+        )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.CANCELLED
+
+    def test_invalid_transition_is_logged(
+        self, client, db_session, business, caplog
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.EXPIRED,
+            razorpay_subscription_id="sub_log_guard",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with caplog.at_level(logging.WARNING, logger="app.routers.subscriptions"):
+            self._send_webhook(client, "subscription.charged", "sub_log_guard")
+
+        assert any(
+            "invalid transition" in r.message.lower()
+            for r in caplog.records
+        )
+
+
+class TestVerifyPaymentTransitionGuards:
+    """verify_payment must not reactivate cancelled/expired subscriptions."""
+
+    def test_cancelled_subscription_rejects_payment(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.CANCELLED,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.object(
+            razorpay_client, "verify_payment_signature", return_value=True
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_stale",
+                    "razorpay_payment_id": "pay_stale",
+                    "razorpay_signature": "valid_sig",
+                    "tier": "enterprise",
+                },
+            )
+        assert response.status_code == 409
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.CANCELLED
+        assert sub.tier == SubscriptionTier.PRO
+
+    def test_expired_subscription_rejects_payment(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.EXPIRED,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.object(
+            razorpay_client, "verify_payment_signature", return_value=True
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_old",
+                    "razorpay_payment_id": "pay_old",
+                    "razorpay_signature": "valid_sig",
+                    "tier": "pro",
+                },
+            )
+        assert response.status_code == 409
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.EXPIRED
+
+    def test_past_due_subscription_can_be_reactivated(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.PAST_DUE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        with patch.object(
+            razorpay_client, "verify_payment_signature", return_value=True
+        ):
+            response = auth_client.post(
+                "/api/v1/subscriptions/verify-payment",
+                json={
+                    "razorpay_order_id": "order_retry",
+                    "razorpay_payment_id": "pay_retry",
+                    "razorpay_signature": "valid_sig",
+                    "tier": "pro",
+                },
+            )
+        assert response.status_code == 200
+        db_session.refresh(sub)
+        assert sub.status == SubscriptionStatus.ACTIVE
+
+
 class TestPaymentVerificationFailureIsLogged:
     def test_a_failed_signature_produces_a_warning(
         self, auth_client, business, caplog

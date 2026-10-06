@@ -154,6 +154,14 @@ def verify_payment(
         )
         db.add(sub)
     else:
+        if sub.status in (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    f"Subscription is {sub.status.value}. "
+                    "Create a new order instead of verifying a payment against it."
+                ),
+            )
         sub.tier = payload.tier
         sub.status = SubscriptionStatus.ACTIVE
         sub.razorpay_subscription_id = payload.razorpay_payment_id
@@ -296,8 +304,37 @@ async def razorpay_webhook(
         "payment.failed": SubscriptionStatus.PAST_DUE,
     }
 
+    _VALID_FROM: dict[SubscriptionStatus, frozenset[SubscriptionStatus]] = {
+        SubscriptionStatus.ACTIVE: frozenset({
+            SubscriptionStatus.PAST_DUE,
+        }),
+        SubscriptionStatus.PAST_DUE: frozenset({
+            SubscriptionStatus.ACTIVE,
+        }),
+        SubscriptionStatus.CANCELLED: frozenset({
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+        }),
+        SubscriptionStatus.EXPIRED: frozenset({
+            SubscriptionStatus.ACTIVE,
+            SubscriptionStatus.PAST_DUE,
+        }),
+    }
+
     new_status = _TRANSITION.get(event)
     if new_status is not None and sub.status != new_status:
+        allowed_from = _VALID_FROM.get(new_status, frozenset())
+        if sub.status not in allowed_from:
+            logger.warning(
+                "Webhook requested invalid transition %s → %s; ignored",
+                sub.status.value, new_status.value,
+                extra={
+                    "business_id": sub.business_id,
+                    "razorpay_id": razorpay_id,
+                    "event": event,
+                },
+            )
+            return {"status": "ok", "detail": "transition not allowed"}
         old = sub.status
         sub.status = new_status
         db.commit()
