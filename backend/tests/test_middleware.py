@@ -125,6 +125,13 @@ class TestUnhandledExceptions:
             "hunter2" in record.getMessage() or record.exc_info for record in caplog.records
         )
 
+    def test_security_headers_are_present_on_unhandled_500(self, prod_client):
+        response = prod_client.get("/api/v1/_test_boom")
+        assert response.headers["X-Content-Type-Options"] == "nosniff"
+        assert response.headers["X-Frame-Options"] == "DENY"
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "default-src 'none'" in response.headers["Content-Security-Policy"]
+
 
 class TestDatabaseErrorMapping:
     """A database failure the request caused is not a 500."""

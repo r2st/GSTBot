@@ -311,20 +311,26 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "exception_type": type(exc).__name__,
             },
         )
+        from app.core.middleware import SecurityHeadersMiddleware
+
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content=error_body(500, _opaque_message(), code="internal_error"),
-            # Set here rather than left to CorrelationIdMiddleware. A handler
-            # for a *specific* exception type is installed in Starlette's inner
+            # Set here rather than left to the user middleware. A handler for a
+            # *specific* exception type is installed in Starlette's inner
             # ExceptionMiddleware, so its response travels back out through the
-            # user middleware and picks the header up on the way. This one is
-            # the bare ``Exception`` handler, which lives in the outermost
-            # ServerErrorMiddleware — nothing runs after it. Without this the
-            # one response whose body says "quote this reference" is the only
-            # response that does not carry the reference as a header.
+            # user middleware and picks headers up on the way. This one is the
+            # bare ``Exception`` handler, which lives in the outermost
+            # ServerErrorMiddleware — nothing runs after it. Without these, the
+            # one response type that most needs hardening is the only one
+            # served without security headers or a traceable id.
             headers={
                 "X-Request-ID": get_correlation_id() or "-",
                 "X-Correlation-ID": get_correlation_id() or "-",
+                **SecurityHeadersMiddleware._BASE,
+                "Content-Security-Policy": (
+                    "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+                ),
             },
         )
 
