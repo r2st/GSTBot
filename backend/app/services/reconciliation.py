@@ -780,26 +780,22 @@ def _score_suppliers(db: Session, business_id: int, result: ReconciliationResult
         supplier.filing_history = sorted(history, key=lambda e: e["period"])[-36:]
 
         # Counters are totals over the recorded history, so re-running a period
-        # cannot inflate them.
-        supplier.total_invoices = sum(
-            int(e.get("matched") or 0) + int(e.get("mismatched") or 0)
-            + int(e.get("missing") or 0)
-            for e in supplier.filing_history
-        )
-        supplier.matched_invoices = sum(
-            int(e.get("matched") or 0) for e in supplier.filing_history
-        )
-        supplier.mismatched_invoices = sum(
-            int(e.get("mismatched") or 0) for e in supplier.filing_history
-        )
-        supplier.missing_invoices = sum(
-            int(e.get("missing") or 0) for e in supplier.filing_history
-        )
-        supplier.late_filings = sum(
-            1
-            for e in supplier.filing_history
-            if (e.get("filing_delay_days") or 0) > 0
-        )
+        # cannot inflate them.  Single pass rather than five separate sum() calls.
+        _matched = _mismatched = _missing = _late = 0
+        for e in supplier.filing_history:
+            m = int(e.get("matched") or 0)
+            mm = int(e.get("mismatched") or 0)
+            mi = int(e.get("missing") or 0)
+            _matched += m
+            _mismatched += mm
+            _missing += mi
+            if (e.get("filing_delay_days") or 0) > 0:
+                _late += 1
+        supplier.total_invoices = _matched + _mismatched + _missing
+        supplier.matched_invoices = _matched
+        supplier.mismatched_invoices = _mismatched
+        supplier.missing_invoices = _missing
+        supplier.late_filings = _late
 
         score = supplier_score.score_supplier(supplier, as_of_period=result.period)
         supplier_score.apply_score(supplier, score)
@@ -1143,23 +1139,28 @@ def summarise_records(records: list[GSTR2BRecord]) -> dict[str, Decimal | int]:
     the month after a large return — carries no credit rather than a negative
     amount of it, which is the same floor the eligible pool takes.
     """
-    def net(field: str) -> Decimal:
-        total = sum(
-            (
-                -getattr(record, field) if record.is_credit_note else getattr(record, field)
-                for record in records
-            ),
-            ZERO,
-        )
-        return max(ZERO, total)
+    tv = cgst = sgst = igst = cess = ZERO
+    for record in records:
+        if record.is_credit_note:
+            tv -= record.taxable_value
+            cgst -= record.cgst
+            sgst -= record.sgst
+            igst -= record.igst
+            cess -= record.cess
+        else:
+            tv += record.taxable_value
+            cgst += record.cgst
+            sgst += record.sgst
+            igst += record.igst
+            cess += record.cess
 
     return {
         "invoice_count": len(records),
-        "total_taxable_value": net("taxable_value"),
-        "total_cgst": net("cgst"),
-        "total_sgst": net("sgst"),
-        "total_igst": net("igst"),
-        "total_cess": net("cess"),
+        "total_taxable_value": max(ZERO, tv),
+        "total_cgst": max(ZERO, cgst),
+        "total_sgst": max(ZERO, sgst),
+        "total_igst": max(ZERO, igst),
+        "total_cess": max(ZERO, cess),
     }
 
 

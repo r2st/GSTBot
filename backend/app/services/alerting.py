@@ -518,7 +518,7 @@ def sweep_filing_deadlines(db: Session, *, today: date | None = None) -> SweepRe
         .order_by(Business.id)
     ).all()
 
-    total = SweepResult()
+    t_businesses = t_raised = t_reopened = t_resolved = t_failed = 0
     for business in businesses:
         try:
             one = sweep_business(db, business, today=today)
@@ -529,22 +529,22 @@ def sweep_filing_deadlines(db: Session, *, today: date | None = None) -> SweepRe
                 "Filing deadline sweep failed for business %s", business.id,
                 extra={"business_id": business.id},
             )
-            total = SweepResult(
-                businesses=total.businesses + 1,
-                raised=total.raised,
-                reopened=total.reopened,
-                resolved=total.resolved,
-                failed=total.failed + 1,
-            )
+            t_businesses += 1
+            t_failed += 1
             continue
 
-        total = SweepResult(
-            businesses=total.businesses + one.businesses,
-            raised=total.raised + one.raised,
-            reopened=total.reopened + one.reopened,
-            resolved=total.resolved + one.resolved,
-            failed=total.failed,
-        )
+        t_businesses += one.businesses
+        t_raised += one.raised
+        t_reopened += one.reopened
+        t_resolved += one.resolved
+
+    total = SweepResult(
+        businesses=t_businesses,
+        raised=t_raised,
+        reopened=t_reopened,
+        resolved=t_resolved,
+        failed=t_failed,
+    )
 
     logger.info(
         "Filing deadline sweep completed",

@@ -874,6 +874,72 @@ def _input_eligible(run) -> Decimal:
     return max(ZERO, total - capital)
 
 
+def _combined_purchase_scan(
+    invoices: list[Invoice],
+    period: str,
+    *,
+    as_of: date | None = None,
+) -> tuple[Rule37Result, TaxHeads, TaxHeads]:
+    """rule_37 + rule_37_reavailment + capital_goods_in_service in one pass."""
+    today = as_of or gst_calendar.today_ist()
+    r37 = Rule37Result()
+    reavail = TaxHeads()
+    cap_pool = TaxHeads()
+
+    p_start = gst_calendar.period_start(period)
+    p_end = gst_calendar.period_end(period)
+    oldest_cap = gst_calendar.months_before(period, RULE_43_MONTHS - 1)
+
+    for invoice in invoices:
+        if not invoice.claims_credit:
+            continue
+
+        idate = invoice.invoice_date
+
+        # --- capital_goods_in_service ---
+        if invoice.is_capital_good and invoice.period and oldest_cap <= invoice.period <= period:
+            cap_pool = cap_pool + _invoice_tax(invoice)
+
+        # --- rule_37 ---
+        if idate is not None and (invoice.paid_at is None or invoice.paid_at > today):
+            tax = _invoice_tax(invoice)
+            if tax.total > ZERO:
+                outstanding = (today - idate).days
+                remaining = RULE_37_DAYS - outstanding
+                item = Rule37Item(
+                    invoice_id=invoice.id,
+                    invoice_number=invoice.invoice_number,
+                    supplier_gstin=invoice.counterparty_gstin,
+                    supplier_name=invoice.counterparty_name,
+                    invoice_date=idate,
+                    days_outstanding=outstanding,
+                    days_remaining=remaining,
+                    tax=tax,
+                    overdue=remaining < 0,
+                )
+                if remaining < 0:
+                    r37.overdue.append(item)
+                    r37.reversal = r37.reversal + tax
+                elif remaining <= RULE_37_WARNING_DAYS:
+                    r37.approaching.append(item)
+                    r37.approaching_amount = r37.approaching_amount + tax
+
+        # --- rule_37_reavailment ---
+        if (
+            invoice.paid_at is not None
+            and idate is not None
+            and p_start <= invoice.paid_at <= p_end
+            and lapse_date(idate) < p_start
+        ):
+            tax = _invoice_tax(invoice)
+            if tax.total > ZERO:
+                reavail = reavail + tax
+
+    r37.overdue.sort(key=lambda i: i.days_outstanding or 0, reverse=True)
+    r37.approaching.sort(key=lambda i: i.days_remaining or 0)
+    return r37, reavail, cap_pool
+
+
 def summarise(
     db: Session,
     business_id: int,
@@ -950,7 +1016,9 @@ def summarise(
         if invoice.reverse_charge and not invoice.itc_eligible
     )
 
-    capital_credit = capital_goods_in_service(all_purchases, period)
+    rule_37_result, reavailment, capital_credit = _combined_purchase_scan(
+        all_purchases, period, as_of=as_of,
+    )
 
     # Where a reconciliation exists, cap the pool at what it found eligible.
     # The run reports one total rather than a per-head split, so scale the
@@ -968,8 +1036,6 @@ def summarise(
         eligible_total = _input_eligible(last_run)
         if eligible_total < available.total:
             available = available.scaled(eligible_total / available.total)
-
-    rule_37_result = rule_37(all_purchases, as_of=as_of)
 
     output_tax, exempt, total = _outward_tax_and_turnover(db, business_id, period)
     if exempt_turnover is not None:
@@ -1008,7 +1074,6 @@ def summarise(
     # reversal was one-way and permanent, and a business that pays a supplier
     # late lost the whole of that invoice's credit for good.
     rule_37_reversal = rule_37_result.reversal_in(period)
-    reavailment = rule_37_reavailment(all_purchases, period)
     reversal = rule_37_reversal + proportionate.total_reversal
     net_available = TaxHeads(
         igst=max(ZERO, available.igst + proportionate.capital_credit_this_month.igst

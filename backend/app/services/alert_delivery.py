@@ -245,7 +245,7 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
     # survived that filter.
     outstanding = _outstanding_by_business(db, [bid for bid, _ in digest_targets])
 
-    total = AlertEmailResult()
+    t_biz = t_sent = t_alerts_sent = t_alerts_failed = t_skipped = 0
     for business_id, recipients in digest_targets:
         alerts = outstanding.get(business_id, [])
         # Still reachable, and still a ``continue`` rather than a ``return``.
@@ -258,13 +258,7 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
             continue
 
         if not recipients:
-            total = AlertEmailResult(
-                businesses=total.businesses,
-                emails_sent=total.emails_sent,
-                alerts_sent=total.alerts_sent,
-                alerts_failed=total.alerts_failed,
-                skipped_no_recipient=total.skipped_no_recipient + len(alerts),
-            )
+            t_skipped += len(alerts)
             continue
 
         subject, body = _digest(alerts)
@@ -316,22 +310,23 @@ def send_pending_alerts(db: Session, *, now: datetime | None = None) -> AlertEma
                 "Could not send/record alert delivery",
                 extra={"business_id": business_id, "alert_count": len(alerts)},
             )
-            total = AlertEmailResult(
-                businesses=total.businesses + 1,
-                emails_sent=total.emails_sent,
-                alerts_sent=total.alerts_sent,
-                alerts_failed=total.alerts_failed + len(alerts),
-                skipped_no_recipient=total.skipped_no_recipient,
-            )
+            t_biz += 1
+            t_alerts_failed += len(alerts)
             continue
 
-        total = AlertEmailResult(
-            businesses=total.businesses + 1,
-            emails_sent=total.emails_sent + (1 if reached else 0),
-            alerts_sent=total.alerts_sent + (len(alerts) if reached else 0),
-            alerts_failed=total.alerts_failed + (0 if reached else len(alerts)),
-            skipped_no_recipient=total.skipped_no_recipient,
-        )
+        t_biz += 1
+        if reached:
+            t_sent += 1
+            t_alerts_sent += len(alerts)
+        else:
+            t_alerts_failed += len(alerts)
 
+    total = AlertEmailResult(
+        businesses=t_biz,
+        emails_sent=t_sent,
+        alerts_sent=t_alerts_sent,
+        alerts_failed=t_alerts_failed,
+        skipped_no_recipient=t_skipped,
+    )
     logger.info("Alert email digest completed", extra=total.as_dict())
     return total
