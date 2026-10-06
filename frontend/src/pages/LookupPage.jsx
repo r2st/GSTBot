@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Breadcrumb from "../components/Breadcrumb";
+import CrossProductLinks from "../components/CrossProductLinks";
 import DeadlineBanner from "../components/DeadlineBanner";
 import DoAideFooter from "../components/DoAideFooter";
 import RecentLookups from "../components/RecentLookups";
@@ -162,6 +163,7 @@ export default function LookupPage() {
           </section>
 
           <RelatedTools current="/lookup" />
+          <CrossProductLinks page="lookup" />
         </div>
       </main>
       <DoAideFooter />

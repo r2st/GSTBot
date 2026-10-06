@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import Breadcrumb from "../components/Breadcrumb";
+import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import SeoHead, { BASE_URL } from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
@@ -113,6 +114,7 @@ export default function GstinPage() {
             <p className="rate-calc-link">
               <Link to="/lookup">Verify another GSTIN →</Link>
             </p>
+            <CrossProductLinks page="gstin" />
           </div>
         </div>
       </main>

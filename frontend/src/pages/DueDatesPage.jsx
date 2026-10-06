@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
@@ -273,6 +274,7 @@ export default function DueDatesPage() {
           </section>
 
           <RelatedTools current="/due-dates" />
+          <CrossProductLinks page="due-dates" />
         </div>
       </main>
       <DoAideFooter />

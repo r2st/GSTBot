@@ -4122,3 +4122,53 @@ a:focus-visible {
 @media (max-width: 480px) {
   .email-capture-form { flex-direction: column; }
 }
+
+/* Cross-product contextual links */
+.cross-product-links {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--doaide-border);
+}
+.cross-product-heading {
+  font-family: var(--doaide-font-display);
+  font-size: 1.15rem;
+  color: var(--doaide-text);
+  margin: 0 0 1rem;
+}
+.cross-product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.75rem;
+}
+.cross-product-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  position: relative;
+  padding: 1rem 1.25rem;
+  border-radius: var(--doaide-radius-md);
+  border: 1px solid var(--doaide-border);
+  background: var(--doaide-surface);
+  text-decoration: none !important;
+  transition: border-color var(--doaide-transition), box-shadow var(--doaide-transition);
+}
+.cross-product-card:hover {
+  border-color: var(--doaide-gold);
+  box-shadow: var(--doaide-shadow-gold);
+}
+.cross-product-card strong {
+  font-size: 0.9rem;
+  color: var(--doaide-gold) !important;
+}
+.cross-product-card > span {
+  font-size: 0.8rem;
+  color: var(--doaide-text-secondary) !important;
+  line-height: 1.45;
+}
+.cross-product-external {
+  position: absolute;
+  top: 0.75rem;
+  right: 0.85rem;
+  font-size: 0.75rem;
+  color: var(--doaide-text-muted) !important;
+}

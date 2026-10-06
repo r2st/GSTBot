@@ -4,6 +4,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import DeadlineBanner from "../components/DeadlineBanner";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
+import CrossProductLinks from "../components/CrossProductLinks";
 import RelatedTools from "../components/RelatedTools";
 import SavedCalculations, { getSavedCalcs, SaveCalcButton } from "../components/SavedCalculations";
 import SavePrompt, { getCalcCount, incrementCalcCount } from "../components/SavePrompt";
@@ -205,6 +206,7 @@ export default function CalculatorPage() {
           </section>
 
           <RelatedTools current="/calculator" />
+          <CrossProductLinks page="calculator" />
         </div>
       </main>
       <DoAideFooter />

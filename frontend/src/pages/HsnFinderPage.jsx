@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
 import SeoHead from "../components/SeoHead";
@@ -144,6 +145,7 @@ export default function HsnFinderPage() {
           </section>
 
           <RelatedTools current="/hsn" />
+          <CrossProductLinks page="hsn" />
         </div>
       </main>
       <DoAideFooter />
