@@ -6,6 +6,8 @@ const ALL_TOOLS = [
   { path: "/hsn", label: "HSN Code Search", desc: "Find HSN/SAC codes & GST rates" },
   { path: "/due-dates", label: "Due Dates Calendar", desc: "GST filing deadlines" },
   { path: "/resources", label: "All GST Tools", desc: "Complete tools & guides hub" },
+  { path: "/best-gst-software", label: "Best GST Software", desc: "Top 10 GST tools compared" },
+  { path: "/guides", label: "GST Guides", desc: "Step-by-step filing tutorials" },
 ];
 
 export default function RelatedTools({ current }) {

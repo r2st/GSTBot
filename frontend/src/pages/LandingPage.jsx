@@ -749,15 +749,17 @@ export default function LandingPage() {
           <div className="landing-footer-col">
             <h4>Resources</h4>
             <Link to="/resources">All GST Tools &amp; Guides</Link>
+            <Link to="/guides">GST Guides</Link>
             <Link to="/blog">Blog</Link>
+            <Link to="/best-gst-software">Best GST Software</Link>
             <Link to="/blog/gst-filing-guide-india-2026">GST Filing Guide</Link>
-            <Link to="/blog/hsn-code-lookup">HSN Code Lookup</Link>
           </div>
           <div className="landing-footer-col">
-            <h4>Blog Articles</h4>
-            <a href="https://doaide.com/blog-gst-filing-dates">GST Filing Dates Guide</a>
-            <a href="https://doaide.com/blog-gstin-verification">GSTIN Verification Guide</a>
-            <a href="https://doaide.com/blog-gst-rates-hsn-codes">GST Rates &amp; HSN Codes</a>
+            <h4>Compare</h4>
+            <Link to="/compare/cleartax">DoAide vs ClearTax</Link>
+            <Link to="/compare/zoho-gst">DoAide vs Zoho GST</Link>
+            <Link to="/compare/tally">DoAide vs Tally Prime</Link>
+            <Link to="/compare/busy">DoAide vs Busy</Link>
           </div>
           <div className="landing-footer-col">
             <h4>Company</h4>

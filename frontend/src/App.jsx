@@ -32,6 +32,15 @@ const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
 const GstComplianceChecklist = lazy(() => import("./pages/blog/GstComplianceChecklist"));
 const GstFilingGuide = lazy(() => import("./pages/blog/GstFilingGuide"));
 const HsnCodeLookup = lazy(() => import("./pages/blog/HsnCodeLookup"));
+const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
+const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
+const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
+const BusyCompare = lazy(() => import("./pages/compare/BusyCompare"));
+const BestGstSoftwarePage = lazy(() => import("./pages/BestGstSoftwarePage"));
+const GuidesIndex = lazy(() => import("./pages/guides/GuidesIndex"));
+const GstRegistrationGuide = lazy(() => import("./pages/guides/GstRegistrationGuide"));
+const Gstr1FilingGuide = lazy(() => import("./pages/guides/Gstr1FilingGuide"));
+const Gstr3bFilingGuide = lazy(() => import("./pages/guides/Gstr3bFilingGuide"));
 
 function LazyFallback() {
   return (
@@ -105,6 +114,15 @@ export default function App() {
         <Route path="/gst-rate/:product" element={<GstRatePage />} />
         <Route path="/due-dates" element={<DueDatesPage />} />
         <Route path="/resources" element={<ResourcesPage />} />
+        <Route path="/compare/cleartax" element={<Lazy><ClearTaxCompare /></Lazy>} />
+        <Route path="/compare/zoho-gst" element={<Lazy><ZohoGstCompare /></Lazy>} />
+        <Route path="/compare/tally" element={<Lazy><TallyCompare /></Lazy>} />
+        <Route path="/compare/busy" element={<Lazy><BusyCompare /></Lazy>} />
+        <Route path="/best-gst-software" element={<Lazy><BestGstSoftwarePage /></Lazy>} />
+        <Route path="/guides" element={<Lazy><GuidesIndex /></Lazy>} />
+        <Route path="/guides/gst-registration" element={<Lazy><GstRegistrationGuide /></Lazy>} />
+        <Route path="/guides/how-to-file-gstr-1" element={<Lazy><Gstr1FilingGuide /></Lazy>} />
+        <Route path="/guides/how-to-file-gstr-3b" element={<Lazy><Gstr3bFilingGuide /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/" element={<Home />} />
         <Route

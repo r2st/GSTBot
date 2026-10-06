@@ -69,19 +69,34 @@ const TOOLS = [
 
 const GUIDES = [
   {
+    to: "/guides/gst-registration",
+    title: "How to Register for GST in India",
+    desc: "Step-by-step GST registration guide. Documents required, eligibility, and common mistakes to avoid.",
+  },
+  {
+    to: "/guides/how-to-file-gstr-1",
+    title: "How to File GSTR-1",
+    desc: "Complete guide to filing GSTR-1 for outward supplies. B2B, B2C, credit notes, and HSN summary.",
+  },
+  {
+    to: "/guides/how-to-file-gstr-3b",
+    title: "How to File GSTR-3B",
+    desc: "Step-by-step GSTR-3B filing guide. Output liability, ITC claim, tax payment, and penalties.",
+  },
+  {
     to: "/blog/gst-filing-guide-india-2026",
     title: "GST Filing Guide for India 2026",
-    desc: "Step-by-step guide to filing GSTR-1, GSTR-3B, and annual returns. Covers registration, invoicing, ITC, and common mistakes.",
+    desc: "Comprehensive overview of all GST returns, due dates, and filing requirements.",
   },
   {
     to: "/blog/hsn-code-lookup",
     title: "HSN Code Lookup Guide",
-    desc: "How to find the correct HSN or SAC code for your products and services. Includes reporting requirements by turnover.",
+    desc: "How to find the correct HSN or SAC code for your products and services.",
   },
   {
     to: "/blog/gst-compliance-checklist-small-business",
-    title: "GST Compliance Checklist for Small Businesses",
-    desc: "Monthly and quarterly GST compliance checklist — what to file, when, and how to avoid penalties.",
+    title: "GST Compliance Checklist",
+    desc: "Monthly and quarterly GST compliance checklist for small businesses.",
   },
 ];
 
@@ -122,6 +137,28 @@ export default function ResourcesPage() {
                   <p>{g.desc}</p>
                 </Link>
               ))}
+            </div>
+          </section>
+
+          <section className="resources-section" aria-labelledby="compare-heading">
+            <h2 id="compare-heading" className="resources-heading">Compare GST Software</h2>
+            <div className="resources-grid">
+              <Link to="/best-gst-software" className="resources-card">
+                <h3>Best GST Software in India 2026</h3>
+                <p>Top 10 GST solutions compared &mdash; features, pricing, and ratings.</p>
+              </Link>
+              <Link to="/compare/cleartax" className="resources-card">
+                <h3>DoAide GST vs ClearTax</h3>
+                <p>Feature, pricing, and ease-of-use comparison.</p>
+              </Link>
+              <Link to="/compare/zoho-gst" className="resources-card">
+                <h3>DoAide GST vs Zoho GST</h3>
+                <p>Standalone vs ecosystem-based GST tools compared.</p>
+              </Link>
+              <Link to="/compare/tally" className="resources-card">
+                <h3>DoAide GST vs Tally Prime</h3>
+                <p>Web-based vs desktop GST software comparison.</p>
+              </Link>
             </div>
           </section>
 

@@ -37,12 +37,15 @@ describe("ResourcesPage", () => {
     expect(toolsSection.textContent).toContain("Embed GST Widgets");
   });
 
-  it("links to all three guides", () => {
+  it("links to guides including new step-by-step guides", () => {
     renderResources();
 
+    expect(screen.getByText("How to Register for GST in India")).toBeInTheDocument();
+    expect(screen.getByText("How to File GSTR-1")).toBeInTheDocument();
+    expect(screen.getByText("How to File GSTR-3B")).toBeInTheDocument();
     expect(screen.getByText("GST Filing Guide for India 2026")).toBeInTheDocument();
     expect(screen.getByText("HSN Code Lookup Guide")).toBeInTheDocument();
-    expect(screen.getByText("GST Compliance Checklist for Small Businesses")).toBeInTheDocument();
+    expect(screen.getByText("GST Compliance Checklist")).toBeInTheDocument();
   });
 
   it("has a sign-up CTA section", () => {
@@ -58,11 +61,12 @@ describe("ResourcesPage", () => {
     expect(screen.getByText("Pricing Plans")).toBeInTheDocument();
   });
 
-  it("has section headings for tools and guides", () => {
+  it("has section headings for tools, guides, comparisons, and platform", () => {
     renderResources();
 
     expect(screen.getByText("Free GST Tools")).toBeInTheDocument();
     expect(screen.getByText("GST Guides & Articles")).toBeInTheDocument();
+    expect(screen.getByText("Compare GST Software")).toBeInTheDocument();
     expect(screen.getByText("GST Compliance Platform")).toBeInTheDocument();
   });
 
