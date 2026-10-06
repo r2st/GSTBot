@@ -29,7 +29,7 @@ function removeJsonLd(id) {
   if (el) el.remove();
 }
 
-const API_BASE = "https://api.doaide.com/api/v1";
+const API_BASE = `${BASE_URL}/api/v1`;
 const DEFAULT_OG_IMAGE = `${BASE_URL}/og-image.png`;
 
 function ogImageUrl(title, subtitle) {
