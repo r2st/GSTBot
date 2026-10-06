@@ -326,6 +326,9 @@ _reminder_limit = RateLimit("reminder_subscribe", "10/minute", by="ip")
     status_code=status.HTTP_200_OK,
     dependencies=[Depends(_reminder_limit)],
 )
-def reminder_subscribe(body: ReminderSubscribeRequest) -> dict[str, Any]:
-    logger.info("Reminder subscription received")
-    return {"subscribed": True, "email": body.email}
+def reminder_subscribe(body: ReminderSubscribeRequest) -> dict[str, bool]:
+    logger.info(
+        "Reminder subscription received",
+        extra={"email_domain": body.email.rsplit("@", 1)[-1]},
+    )
+    return {"subscribed": True}

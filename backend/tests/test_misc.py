@@ -302,7 +302,7 @@ class TestReminderSubscribe:
         assert response.status_code == 200
         body = response.json()
         assert body["subscribed"] is True
-        assert body["email"] == "user@example.com"
+        assert "email" not in body
 
     def test_an_invalid_email_is_rejected(self, client):
         response = client.post(
