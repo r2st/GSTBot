@@ -228,6 +228,17 @@ class TestSecurityHeaders:
         # https://localhost, which is not recoverable without clearing state.
         assert "Strict-Transport-Security" not in client.get("/api/v1/health").headers
 
+    def test_cache_control_no_store_is_present(self, client):
+        assert client.get("/api/v1/health").headers["Cache-Control"] == "no-store"
+
+    def test_cache_control_on_authenticated_responses(self, auth_client):
+        assert auth_client.get("/api/v1/dashboard").headers["Cache-Control"] == "no-store"
+
+    def test_permissions_policy_includes_tracking_opt_outs(self, client):
+        pp = client.get("/api/v1/health").headers["Permissions-Policy"]
+        assert "interest-cohort=()" in pp
+        assert "browsing-topics=()" in pp
+
     def test_hsts_appears_when_enabled(self, client, monkeypatch):
         from app.core.config import settings
 

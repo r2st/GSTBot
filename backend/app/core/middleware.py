@@ -167,7 +167,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         "X-Frame-Options": "DENY",
         "Referrer-Policy": "no-referrer",
         "Cross-Origin-Opener-Policy": "same-origin",
-        "Permissions-Policy": "geolocation=(), microphone=(), camera=(), payment=()",
+        "Permissions-Policy": (
+            "geolocation=(), microphone=(), camera=(), payment=(), "
+            "interest-cohort=(), browsing-topics=()"
+        ),
+        "Cache-Control": "no-store",
     }
 
     def __init__(self, app, docs_paths: tuple[str, ...] = ()) -> None:
