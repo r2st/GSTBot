@@ -14,19 +14,26 @@ table still keys every row to exactly one ``business_id``.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import hashlib
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.database import get_db
 from app.core.deps import get_current_user
 from app.core.params import RowId
-from app.core.rate_limit import RateLimit
+from app.core.rate_limit import RateLimit, apply_headers, charge, client_ip, forget, peek
+from app.core.ratespec import parse_rate
 from app.core.security import verify_password
 from app.models.business import Business
 from app.models.business_membership import BusinessMembership, MembershipRole
 from app.models.user import User
 from app.schemas.business import LinkBusinessIn, MyBusinessesOut, MyBusinessOut
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/businesses", tags=["businesses"])
 
@@ -34,6 +41,23 @@ _read_limit = RateLimit("businesses_read", "120/minute")
 # Verifies a password, so it earns the same tight budget login itself has —
 # see app.routers.auth._login_limit.
 _link_limit = RateLimit("businesses_link", "20/minute", by="ip")
+
+# Per-account failure counter, mirroring auth._LOGIN_ACCOUNT_LIMIT. Without
+# this, the link endpoint is a better brute-force vector than login for
+# distributed attacks: login's per-account budget (10/15m) limits total
+# guesses regardless of how many source IPs the attacker has, whereas the
+# link endpoint previously had only the per-IP limit.
+_LINK_ACCOUNT_LIMIT = "link_account"
+_LINK_ACCOUNT_SPEC = "10/15m"
+
+
+def _link_account_rate():
+    return parse_rate(settings.rate_limits.get(_LINK_ACCOUNT_LIMIT, _LINK_ACCOUNT_SPEC))
+
+
+def _link_account_key(email: str) -> str:
+    digest = hashlib.sha256(email.strip().lower().encode("utf-8")).hexdigest()
+    return f"{_LINK_ACCOUNT_LIMIT}:{digest[:32]}"
 
 
 def _out(business: Business, *, role: str, is_home: bool) -> MyBusinessOut:
@@ -127,10 +151,33 @@ def my_businesses(
 )
 def link_business(
     payload: LinkBusinessIn,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> MyBusinessOut:
     """Link another account's business here, proven by that account's own password."""
+    account_rate = _link_account_rate() if settings.rate_limit_enabled else None
+    account_key = _link_account_key(payload.email)
+
+    if account_rate is not None:
+        budget = peek(account_key, account_rate)
+        if not budget.allowed:
+            logger.warning(
+                "Link blocked: account attempt budget exhausted",
+                extra={"client_ip": client_ip(request), "status_code": 429},
+            )
+            request.state.rate_limit = budget
+            headers = {"Retry-After": str(budget.retry_after)}
+            apply_headers(headers, budget)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=(
+                    "Too many failed attempts for this account. "
+                    f"Try again in {budget.retry_after}s."
+                ),
+                headers=headers,
+            )
+
     other = db.scalar(select(User).where(User.email == payload.email.lower()))
     # Same message whether the email is unknown or the password is wrong —
     # telling the two apart would let this endpoint be used to check whether
@@ -138,10 +185,14 @@ def link_business(
     if other is None or not other.is_active or not verify_password(
         payload.password, other.hashed_password
     ):
+        if account_rate is not None:
+            charge(account_key, account_rate)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="That email and password do not match an active account.",
         )
+    if account_rate is not None:
+        forget(account_key, account_rate)
 
     if other.business_id == current_user.business_id:
         raise HTTPException(

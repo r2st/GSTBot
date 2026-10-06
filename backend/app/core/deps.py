@@ -217,6 +217,14 @@ class RequireRole:
 # means something: the person who is shown the books and does not touch them.
 require_writer = RequireRole(UserRole.ACCOUNTANT)
 
+# Subscription billing operations — create-order, verify-payment, cancel —
+# change what the business pays, not what it files. An accountant linked to
+# manage invoices should not be able to downgrade a client's paid plan or
+# commit the business to a new one. The comment above ``require_writer``
+# says the owner/accountant line is "who pays the bill"; these endpoints are
+# exactly the bill.
+require_owner = RequireRole(UserRole.OWNER)
+
 __all__ = [
     "ActiveTenant",
     "RequireRole",
@@ -224,5 +232,6 @@ __all__ = [
     "get_current_business",
     "get_current_user",
     "oauth2_scheme",
+    "require_owner",
     "require_writer",
 ]

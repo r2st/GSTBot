@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.deps import get_current_business, get_current_user, require_writer
+from app.core.deps import get_current_business, get_current_user, require_owner, require_writer
 from app.core.rate_limit import RateLimit
 from app.models.business import Business
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
@@ -35,6 +35,7 @@ router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 _pricing_limit = RateLimit("pricing", "60/minute", by="ip")
 _order_limit = RateLimit("create_order", "10/minute")
 _verify_limit = RateLimit("verify_payment", "10/minute")
+_cancel_limit = RateLimit("cancel_subscription", "10/minute")
 _usage_limit = RateLimit("usage", "60/minute")
 _webhook_limit = RateLimit("razorpay_webhook", "30/minute", by="ip")
 
@@ -76,7 +77,7 @@ def current_subscription(
     "/create-order",
     response_model=CreateOrderResponse,
     summary="Create a Razorpay order for a tier upgrade",
-    dependencies=[Depends(require_writer), Depends(_order_limit)],
+    dependencies=[Depends(require_owner), Depends(_order_limit)],
 )
 def create_order(
     payload: CreateOrderRequest,
@@ -117,7 +118,7 @@ def create_order(
     "/verify-payment",
     response_model=SubscriptionOut,
     summary="Verify Razorpay payment and activate subscription",
-    dependencies=[Depends(require_writer), Depends(_verify_limit)],
+    dependencies=[Depends(require_owner), Depends(_verify_limit)],
 )
 def verify_payment(
     payload: VerifyPaymentRequest,
@@ -183,7 +184,7 @@ def verify_payment(
     "/cancel",
     response_model=SubscriptionOut,
     summary="Cancel the current subscription (reverts to free)",
-    dependencies=[Depends(require_writer), Depends(_verify_limit)],
+    dependencies=[Depends(require_owner), Depends(_cancel_limit)],
 )
 def cancel_subscription(
     business: Business = Depends(get_current_business),
@@ -286,7 +287,7 @@ async def razorpay_webhook(
             "Razorpay webhook contained no identifiable subscription or payment id",
             extra={"event": event},
         )
-        return {"status": "ok", "detail": "no identifiable entity"}
+        return {"status": "ok"}
 
     sub = db.scalar(
         select(Subscription).where(
@@ -298,7 +299,7 @@ async def razorpay_webhook(
             "Webhook referenced unknown subscription",
             extra={"razorpay_id": razorpay_id, "event": event},
         )
-        return {"status": "ok", "detail": "no matching subscription"}
+        return {"status": "ok"}
 
     _TRANSITION: dict[str, SubscriptionStatus] = {
         "subscription.halted": SubscriptionStatus.PAST_DUE,
@@ -339,7 +340,7 @@ async def razorpay_webhook(
                     "event": event,
                 },
             )
-            return {"status": "ok", "detail": "transition not allowed"}
+            return {"status": "ok"}
         old = sub.status
         sub.status = new_status
         db.commit()

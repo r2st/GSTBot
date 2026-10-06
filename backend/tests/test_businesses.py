@@ -361,6 +361,55 @@ class TestLinkingABusiness:
 # DELETE /businesses/mine/{business_id}
 # ---------------------------------------------------------------------------
 
+# --------------------------------------------------------------------------
+# GB036: Fence audit — per-account brute-force protection on link
+# --------------------------------------------------------------------------
+
+class TestLinkPerAccountRateLimit:
+    """The link endpoint verifies passwords and must have a per-account counter.
+
+    Without it, a distributed attacker can guess passwords at this endpoint
+    without the per-account budget that login enforces — the IP limit alone
+    is only as strong as the number of source addresses the attacker has.
+    """
+
+    def test_failures_are_counted_per_account(
+        self, auth_client, client, rate_limited, pinned_window
+    ):
+        register_second_business(client)
+        for _ in range(10):
+            response = link(auth_client, password="wrong-password-guess")
+            assert response.status_code == 401
+
+        # The 11th attempt should be rate-limited
+        response = link(auth_client, password="wrong-password-guess")
+        assert response.status_code == 429
+        assert "too many failed attempts" in response.json()["detail"].lower()
+
+    def test_correct_password_resets_the_counter(
+        self, auth_client, client, rate_limited, pinned_window
+    ):
+        register_second_business(client)
+        for _ in range(5):
+            link(auth_client, password="wrong-password-guess")
+
+        # Correct password should succeed and reset the counter
+        response = link(auth_client)
+        assert response.status_code == 201
+
+    def test_different_accounts_have_separate_budgets(
+        self, auth_client, client, rate_limited, pinned_window
+    ):
+        register_second_business(client)
+        # Exhaust the budget for SECOND_EMAIL
+        for _ in range(10):
+            link(auth_client, password="wrong")
+
+        # A different email should still have its own budget
+        response = link(auth_client, email="nonexistent@example.com", password="wrong")
+        assert response.status_code == 401  # Not 429
+
+
 class TestUnlinkingABusiness:
     def test_it_removes_the_membership(self, auth_client, client, db_session):
         register_second_business(client)

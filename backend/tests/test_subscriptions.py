@@ -4,6 +4,9 @@ from __future__ import annotations
 import logging
 from unittest.mock import patch
 
+import pytest
+from sqlalchemy import select
+
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.services import razorpay_client
 from app.services import usage as usage_service
@@ -919,6 +922,174 @@ class TestVerifyPaymentTransitionGuards:
         assert response.status_code == 200
         db_session.refresh(sub)
         assert sub.status == SubscriptionStatus.ACTIVE
+
+
+# --------------------------------------------------------------------------
+# GB036: Fence audit — billing ops require owner role
+# --------------------------------------------------------------------------
+
+class TestBillingOpsRequireOwner:
+    """Subscription billing operations must not be accessible to accountants.
+
+    An accountant linked to manage invoices should not be able to change what
+    the business pays — create orders, verify payments, or cancel the plan.
+    These are billing decisions, not bookkeeping.
+    """
+
+    @pytest.fixture()
+    def accountant_client(self, auth_client, db_session):
+        from app.models.user import User, UserRole
+        from tests.conftest import TEST_EMAIL
+        user = db_session.scalar(select(User).where(User.email == TEST_EMAIL))
+        user.role = UserRole.ACCOUNTANT
+        db_session.commit()
+        return auth_client
+
+    def test_accountant_cannot_create_order(self, accountant_client):
+        response = accountant_client.post(
+            "/api/v1/subscriptions/create-order",
+            json={"tier": "pro"},
+        )
+        assert response.status_code == 403, response.text
+
+    def test_accountant_cannot_verify_payment(self, accountant_client):
+        response = accountant_client.post(
+            "/api/v1/subscriptions/verify-payment",
+            json={
+                "razorpay_order_id": "order_test",
+                "razorpay_payment_id": "pay_test",
+                "razorpay_signature": "sig",
+                "tier": "pro",
+            },
+        )
+        assert response.status_code == 403, response.text
+
+    def test_accountant_cannot_cancel_subscription(self, accountant_client):
+        response = accountant_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 403, response.text
+
+    def test_owner_can_still_create_order(self, auth_client):
+        with patch.object(razorpay_client, "is_configured", return_value=False):
+            response = auth_client.post(
+                "/api/v1/subscriptions/create-order",
+                json={"tier": "pro"},
+            )
+        assert response.status_code != 403
+
+    def test_owner_can_still_cancel(self, auth_client, db_session, business):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.ACTIVE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 200
+
+    def test_viewer_is_still_refused(self, auth_client, db_session):
+        from app.models.user import User, UserRole
+        from tests.conftest import TEST_EMAIL
+        user = db_session.scalar(select(User).where(User.email == TEST_EMAIL))
+        user.role = UserRole.VIEWER
+        db_session.commit()
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 403
+
+
+# --------------------------------------------------------------------------
+# GB036: Fence audit — webhook responses are uniform
+# --------------------------------------------------------------------------
+
+# --------------------------------------------------------------------------
+# GB036: Fence audit — cancel has its own rate-limit bucket
+# --------------------------------------------------------------------------
+
+class TestCancelHasSeparateRateLimit:
+    """Cancel and verify-payment must not share a rate-limit bucket.
+
+    When they shared ``_verify_limit``, exhausting one endpoint's budget
+    starved the other — an attacker could spam cancel to block legitimate
+    payment verification.
+    """
+
+    def test_cancel_uses_its_own_bucket_name(self):
+        from app.routers.subscriptions import _cancel_limit, _verify_limit
+        assert _cancel_limit.name != _verify_limit.name
+
+
+# --------------------------------------------------------------------------
+# GB036: Fence audit — webhook responses are uniform
+# --------------------------------------------------------------------------
+
+class TestWebhookResponsesAreUniform:
+    """Webhook must not leak internal state through varying response bodies."""
+
+    def test_no_entity_returns_generic_ok(self, client):
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=b'{"event": "test"}',
+                headers={"X-Razorpay-Signature": "good"},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {"status": "ok"}
+
+    def test_unknown_subscription_returns_generic_ok(self, client):
+        import json
+        payload = {
+            "event": "payment.failed",
+            "payload": {
+                "payment": {"entity": {"id": "pay_nonexistent"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {"status": "ok"}
+        assert "detail" not in body
+
+    def test_invalid_transition_returns_generic_ok(
+        self, client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.EXPIRED,
+            razorpay_subscription_id="sub_uniform_test",
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        import json
+        payload = {
+            "event": "subscription.charged",
+            "payload": {
+                "subscription": {"entity": {"id": "sub_uniform_test"}},
+            },
+        }
+        with patch.object(
+            razorpay_client, "verify_webhook_signature", return_value=True
+        ):
+            response = client.post(
+                "/api/v1/subscriptions/webhook",
+                content=json.dumps(payload).encode(),
+                headers={"X-Razorpay-Signature": "valid"},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body == {"status": "ok"}
+        assert "detail" not in body
 
 
 class TestPaymentVerificationFailureIsLogged:
