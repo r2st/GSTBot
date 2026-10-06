@@ -268,6 +268,53 @@ class TestCancelSubscription:
         assert sub.tier == SubscriptionTier.PRO
         assert sub.status == SubscriptionStatus.ACTIVE
 
+    def test_cancelling_already_cancelled_is_refused(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.CANCELLED,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 409
+        assert "already cancelled" in response.json()["detail"]
+
+    def test_cancelling_expired_is_refused(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.EXPIRED,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 409
+        assert "already expired" in response.json()["detail"]
+
+    def test_cancelling_past_due_is_allowed(
+        self, auth_client, db_session, business
+    ):
+        sub = Subscription(
+            business_id=business.id,
+            tier=SubscriptionTier.PRO,
+            status=SubscriptionStatus.PAST_DUE,
+        )
+        db_session.add(sub)
+        db_session.commit()
+
+        response = auth_client.post("/api/v1/subscriptions/cancel")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] == "free"
+        assert data["status"] == "cancelled"
+
     def test_requires_authentication(self, client):
         response = client.post("/api/v1/subscriptions/cancel")
         assert response.status_code == 401

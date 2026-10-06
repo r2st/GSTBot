@@ -196,6 +196,11 @@ def cancel_subscription(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No active paid subscription to cancel.",
         )
+    if sub.status in (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Subscription is already {sub.status.value}.",
+        )
     old_tier = sub.tier
     if sub.razorpay_subscription_id and razorpay_client.is_configured():
         result = razorpay_client.cancel_subscription(sub.razorpay_subscription_id)
