@@ -3031,6 +3031,72 @@ a:focus-visible {
   overflow-x: auto;
 }
 
+/* Embed page enhancements */
+.embed-container { max-width: 720px; }
+.embed-options { margin-bottom: 1.25rem; }
+.embed-options-heading {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+}
+.embed-options-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0.75rem;
+}
+@media (max-width: 600px) {
+  .embed-options-grid { grid-template-columns: 1fr; }
+}
+.embed-preview-section {
+  margin-top: 2rem;
+}
+.embed-preview-heading {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+  color: var(--ink-strong);
+}
+.embed-preview-frame {
+  display: flex;
+  justify-content: center;
+}
+
+/* Widget (standalone embeddable calculator) */
+.widget-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--canvas);
+  font-family: var(--doaide-font, 'Schibsted Grotesk', system-ui, sans-serif);
+  box-sizing: border-box;
+}
+.widget-header {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 1rem;
+  color: var(--ink-strong);
+}
+.widget-body {
+  flex: 1;
+  padding: 1rem;
+}
+.widget-powered {
+  display: block;
+  text-align: center;
+  padding: 0.6rem 1rem;
+  border-top: 1px solid var(--line);
+  font-size: 0.75rem;
+  color: var(--ink-soft) !important;
+  text-decoration: none;
+}
+.widget-powered:hover {
+  color: var(--brand) !important;
+}
+.widget-powered strong {
+  color: var(--brand);
+}
+
 /* Tool info sections (below the card) */
 .tool-info {
   margin-top: 2.5rem;

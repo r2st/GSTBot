@@ -6,6 +6,7 @@ import {
   origin,
   twitterUrl,
   whatsappUrl,
+  widgetEmbedSnippet,
 } from "./share";
 
 describe("origin", () => {
@@ -85,5 +86,37 @@ describe("embedSnippet", () => {
     const html = embedSnippet("lookup", { width: "500", height: "600" });
     expect(html).toContain('width="500"');
     expect(html).toContain('height="600"');
+  });
+});
+
+describe("widgetEmbedSnippet", () => {
+  it("returns a /widget iframe for calculator", () => {
+    const html = widgetEmbedSnippet("calculator");
+    expect(html).toContain("<iframe");
+    expect(html).toContain("/widget");
+    expect(html).toContain('height="460"');
+  });
+
+  it("includes theme and rate params", () => {
+    const html = widgetEmbedSnippet("calculator", { theme: "light", rate: 5 });
+    expect(html).toContain("theme=light");
+    expect(html).toContain("rate=5");
+  });
+
+  it("omits rate param when 18 (default)", () => {
+    const html = widgetEmbedSnippet("calculator", { theme: "dark", rate: 18 });
+    expect(html).not.toContain("rate=");
+  });
+
+  it("includes custom width", () => {
+    const html = widgetEmbedSnippet("calculator", { width: 400 });
+    expect(html).toContain("width=400");
+    expect(html).toContain('width="400"');
+  });
+
+  it("falls back to embedSnippet for non-calculator tools", () => {
+    const html = widgetEmbedSnippet("lookup");
+    expect(html).toContain("/embed/lookup");
+    expect(html).not.toContain("/widget");
   });
 });

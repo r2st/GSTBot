@@ -49,3 +49,18 @@ export function embedSnippet(tool, { width = "100%", height = "400" } = {}) {
   const src = `${origin()}/embed/${tool}`;
   return `<iframe src="${src}" width="${width}" height="${height}" frameborder="0" style="border:1px solid #e5e7eb;border-radius:8px;" title="DoAide GST ${tool}"></iframe>`;
 }
+
+export function widgetEmbedSnippet(tool, { theme = "dark", rate = 18, width } = {}) {
+  if (tool !== "calculator") {
+    return embedSnippet(tool);
+  }
+  const params = new URLSearchParams();
+  if (theme) params.set("theme", theme);
+  if (rate !== 18) params.set("rate", String(rate));
+  if (width) params.set("width", String(width));
+  const qs = params.toString();
+  const src = `${origin()}/widget${qs ? `?${qs}` : ""}`;
+  const iframeWidth = width || "100%";
+  const iframeHeight = "460";
+  return `<iframe src="${src}" width="${iframeWidth}" height="${iframeHeight}" frameborder="0" style="border:1px solid #e5e7eb;border-radius:8px;" title="DoAide GST Calculator"></iframe>`;
+}

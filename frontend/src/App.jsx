@@ -13,6 +13,7 @@ const CalculatorPage = lazy(() => import("./pages/CalculatorPage"));
 const DashboardPage = lazy(() => import("./pages/DashboardPage"));
 const DueDatesPage = lazy(() => import("./pages/DueDatesPage"));
 const EmbedPage = lazy(() => import("./pages/EmbedPage"));
+const WidgetPage = lazy(() => import("./pages/WidgetPage"));
 const FilingPage = lazy(() => import("./pages/FilingPage"));
 const GstinPage = lazy(() => import("./pages/GstinPage"));
 const GstRatePage = lazy(() => import("./pages/GstRatePage"));
@@ -124,6 +125,7 @@ export default function App() {
         <Route path="/guides/how-to-file-gstr-1" element={<Lazy><Gstr1FilingGuide /></Lazy>} />
         <Route path="/guides/how-to-file-gstr-3b" element={<Lazy><Gstr3bFilingGuide /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
+        <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
         <Route path="/" element={<Home />} />
         <Route
           path="/invoices"
