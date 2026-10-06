@@ -109,7 +109,8 @@ def _owned_supplier(db: Session, business: Business, supplier_id: int) -> Suppli
     )
     if found is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Supplier not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Supplier {supplier_id} not found",
         )
     return found
 

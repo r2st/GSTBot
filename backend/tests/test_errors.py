@@ -737,3 +737,47 @@ class TestAnHTTPExceptionDetailIsBoundedToo:
         # quoting: the number is cut at the source, not the message at the
         # handler.
         assert "larger than any invoice carries" in response.json()["detail"]
+
+
+# ---- GB030: entity IDs in 404s, OAuth constants, payment guidance, webhook auth ----
+
+class TestA404IncludesTheRequestedId:
+    """A 404 that says only "not found" forces the caller to correlate the
+    response with the request. Including the id makes a log entry or error
+    toast self-contained."""
+
+    def test_invoice_404_names_the_id(self, auth_client):
+        r = auth_client.get("/api/v1/invoices/999999")
+        assert r.status_code == 404
+        assert "999999" in r.json()["detail"]
+
+    def test_supplier_404_names_the_id(self, auth_client):
+        r = auth_client.get("/api/v1/suppliers/999999")
+        assert r.status_code == 404
+        assert "999999" in r.json()["detail"]
+
+    def test_alert_404_names_the_id(self, auth_client):
+        r = auth_client.post("/api/v1/alerts/999999/read")
+        assert r.status_code == 404
+        assert "999999" in r.json()["detail"]
+
+    def test_reconciliation_run_404_names_the_id(self, auth_client):
+        r = auth_client.get("/api/v1/reconciliation/999999")
+        assert r.status_code == 404
+        assert "999999" in r.json()["detail"]
+
+
+class TestOAuthNotConfiguredReturns501:
+    """Unconfigured OAuth providers must return 501, not a bare integer."""
+
+    def test_google_returns_501(self, client):
+        r = client.get("/api/v1/auth/google", follow_redirects=False)
+        assert r.status_code == 501
+
+    def test_github_returns_501(self, client):
+        r = client.get("/api/v1/auth/github", follow_redirects=False)
+        assert r.status_code == 501
+
+    def test_microsoft_returns_501(self, client):
+        r = client.get("/api/v1/auth/microsoft", follow_redirects=False)
+        assert r.status_code == 501

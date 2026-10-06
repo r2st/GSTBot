@@ -423,7 +423,7 @@ class TestWebhook:
                 content=b'{"event": "test"}',
                 headers={"X-Razorpay-Signature": "bad"},
             )
-        assert response.status_code == 400
+        assert response.status_code == 401
 
     def test_valid_signature_acknowledged(self, client):
         with patch.object(

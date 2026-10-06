@@ -137,7 +137,7 @@ def _complete_oauth_login(user: User | None, provider: str) -> RedirectResponse:
 @router.get("/google", dependencies=[Depends(_oauth_initiate_limit)])
 async def google_login(request: Request):
     if not settings.google_client_id:
-        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Google OAuth not configured")
     redirect_uri = _callback_url("google")
     return await oauth.google.authorize_redirect(request, redirect_uri)
 
@@ -148,7 +148,7 @@ async def google_login(request: Request):
 )
 async def google_callback(request: Request, db: Session = Depends(get_db)):
     if not settings.google_client_id:
-        raise HTTPException(status_code=501, detail="Google OAuth not configured")
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Google OAuth not configured")
     try:
         token = await oauth.google.authorize_access_token(request)
     except Exception:
@@ -176,7 +176,7 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
 @router.get("/github", dependencies=[Depends(_oauth_initiate_limit)])
 async def github_login(request: Request):
     if not settings.github_client_id:
-        raise HTTPException(status_code=501, detail="GitHub OAuth not configured")
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="GitHub OAuth not configured")
     redirect_uri = _callback_url("github")
     return await oauth.github.authorize_redirect(request, redirect_uri)
 
@@ -187,7 +187,7 @@ async def github_login(request: Request):
 )
 async def github_callback(request: Request, db: Session = Depends(get_db)):
     if not settings.github_client_id:
-        raise HTTPException(status_code=501, detail="GitHub OAuth not configured")
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="GitHub OAuth not configured")
     try:
         token = await oauth.github.authorize_access_token(request)
     except Exception:
@@ -224,7 +224,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
 @router.get("/microsoft", dependencies=[Depends(_oauth_initiate_limit)])
 async def microsoft_login(request: Request):
     if not settings.microsoft_client_id:
-        raise HTTPException(status_code=501, detail="Microsoft OAuth not configured")
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Microsoft OAuth not configured")
     redirect_uri = _callback_url("microsoft")
     return await oauth.microsoft.authorize_redirect(request, redirect_uri)
 
@@ -235,7 +235,7 @@ async def microsoft_login(request: Request):
 )
 async def microsoft_callback(request: Request, db: Session = Depends(get_db)):
     if not settings.microsoft_client_id:
-        raise HTTPException(status_code=501, detail="Microsoft OAuth not configured")
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Microsoft OAuth not configured")
     try:
         token = await oauth.microsoft.authorize_access_token(request)
     except Exception:

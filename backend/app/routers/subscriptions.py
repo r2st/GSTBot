@@ -102,7 +102,7 @@ def create_order(
     if order is None:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Could not create payment order. Try again.",
+            detail="Could not create payment order. Try again, or contact support if this persists.",
         )
     return CreateOrderResponse(
         order_id=order["id"],
@@ -132,7 +132,7 @@ def verify_payment(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Payment verification failed.",
+            detail="Payment verification failed. Contact support if you were charged, or try the payment again.",
         )
 
     sub = usage_service.get_subscription(db, business.id)
@@ -183,7 +183,7 @@ def cancel_subscription(
         if result is None:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail="Could not cancel subscription with payment provider. Try again.",
+                detail="Could not cancel subscription with payment provider. Try again, or contact support if this persists.",
             )
     sub.tier = SubscriptionTier.FREE
     sub.status = SubscriptionStatus.CANCELLED
@@ -228,7 +228,7 @@ async def razorpay_webhook(
     signature = request.headers.get("X-Razorpay-Signature", "")
     if not razorpay_client.verify_webhook_signature(body, signature):
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid webhook signature.",
         )
 

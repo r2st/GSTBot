@@ -232,7 +232,7 @@ class TestEveryRefusalReadsLikeASentence:
         stopping the sweep.
         """
         messages = [message for _, message in HTTP_DETAILS]
-        assert "Invoice not found" in messages
+        assert any("Invoice" in m and "not found" in m for m in messages)
         assert any("read-only" in message for message in messages)
 
 

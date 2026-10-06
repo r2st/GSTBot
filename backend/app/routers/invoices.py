@@ -124,7 +124,10 @@ def _owned_invoice(db: Session, business: Business, invoice_id: int) -> Invoice:
         )
     )
     if invoice is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Invoice {invoice_id} not found",
+        )
     return invoice
 
 

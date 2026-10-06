@@ -405,7 +405,8 @@ def get_run(
     )
     if found is None:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Reconciliation run not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Reconciliation run {run_id} not found",
         )
     return ReconciliationDetailOut.model_validate(found)
 
