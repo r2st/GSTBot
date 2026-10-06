@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { track } from "../lib/track";
 
 const TIER_ORDER = ["free", "pro", "enterprise"];
-const TIER_LABELS = { free: "Free", pro: "Pro", enterprise: "Enterprise" };
+const TIER_LABELS = { free: "Free Tools", pro: "SMB", enterprise: "CA" };
 const HIGHLIGHT_TIER = "pro";
 
 function loadRazorpayScript() {
@@ -77,7 +77,7 @@ export default function PricingPage() {
         amount: order.amount,
         currency: order.currency,
         name: "DoAide GST",
-        description: `${TIER_LABELS[tier]} Plan - Monthly`,
+        description: `${TIER_LABELS[tier]} Plan — Monthly`,
         order_id: order.order_id,
         handler: async function (response) {
           try {
@@ -143,7 +143,8 @@ export default function PricingPage() {
     <div className="pricing-page">
       <div className="pricing-header">
         <h1>Simple, transparent pricing</h1>
-        <p>Choose the plan that fits your GST compliance needs</p>
+        <p>Calculator, GSTIN lookup, and HSN search are free forever — no login required.</p>
+        <p>Upgrade for filing assistance, saved history, and multi-client management.</p>
       </div>
 
       {error && <div className="pricing-error" role="alert">{error}</div>}

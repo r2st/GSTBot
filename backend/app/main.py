@@ -39,6 +39,7 @@ from app.routers import (
     misc,
     oauth,
     reconciliation,
+    seo,
     subscriptions,
     suppliers,
 )
@@ -368,6 +369,7 @@ def create_app() -> FastAPI:
     application.include_router(suppliers.router, prefix=prefix)
     application.include_router(alerts.router, prefix=prefix)
     application.include_router(subscriptions.router, prefix=prefix)
+    application.include_router(seo.router, prefix=prefix)
 
     @application.get("/", include_in_schema=False)
     def root() -> dict[str, str | None]:

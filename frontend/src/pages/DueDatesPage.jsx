@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -260,6 +261,7 @@ export default function DueDatesPage() {
           <RelatedTools current="/due-dates" />
         </div>
       </main>
+      <DoAideFooter />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_SCHEMA) }}

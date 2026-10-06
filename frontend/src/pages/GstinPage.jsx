@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import Breadcrumb from "../components/Breadcrumb";
+import DoAideFooter from "../components/DoAideFooter";
+import SeoHead, { BASE_URL } from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -31,11 +34,50 @@ export default function GstinPage() {
     return () => { cancelled = true; };
   }, [gstin]);
 
+  const path = `/gstin/${gstin || ""}`;
+  const seoTitle = result && result.valid
+    ? `GSTIN ${result.gstin} — ${result.state_name} | DoAide`
+    : `GSTIN ${gstin || ""} — Verification & Details | DoAide`;
+  const seoDesc = result && result.valid
+    ? `GSTIN ${result.gstin} is valid. Registered in ${result.state_name} (${result.state_code}). PAN: ${result.pan}. Verify any GSTIN on DoAide GST.`
+    : `Verify GSTIN ${gstin || ""}. Check registration status, state, PAN details. Free GSTIN lookup on DoAide GST.`;
+
+  const jsonLd = result && result.valid ? {
+    "@context": "https://schema.org",
+    "@type": "GovernmentService",
+    name: `GSTIN ${result.gstin}`,
+    description: `GST registration in ${result.state_name}`,
+    areaServed: { "@type": "State", name: result.state_name },
+    provider: {
+      "@type": "GovernmentOrganization",
+      name: "Goods and Services Tax Network",
+      url: "https://www.gst.gov.in",
+    },
+  } : null;
+
+  const breadcrumbs = [
+    { name: "Home", url: BASE_URL },
+    { name: "GSTIN Lookup", url: `${BASE_URL}/lookup` },
+    { name: `GSTIN ${gstin || ""}` },
+  ];
+
   return (
     <div className="tool-page">
+      <SeoHead
+        title={seoTitle}
+        description={seoDesc}
+        path={path}
+        jsonLd={jsonLd}
+        breadcrumbs={breadcrumbs}
+      />
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">
+          <Breadcrumb items={[
+            { label: "Home", to: "/" },
+            { label: "GSTIN Lookup", to: "/lookup" },
+            { label: `GSTIN ${gstin || ""}` },
+          ]} />
           <h1 className="tool-title">GSTIN {gstin}</h1>
 
           <div className="calc-card">
@@ -69,11 +111,12 @@ export default function GstinPage() {
             )}
 
             <p className="rate-calc-link">
-              <Link to="/lookup">Look up another GSTIN →</Link>
+              <Link to="/lookup">Verify another GSTIN →</Link>
             </p>
           </div>
         </div>
       </main>
+      <DoAideFooter />
     </div>
   );
 }

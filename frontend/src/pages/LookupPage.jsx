@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import Breadcrumb from "../components/Breadcrumb";
+import DeadlineBanner from "../components/DeadlineBanner";
+import DoAideFooter from "../components/DoAideFooter";
+import RecentLookups from "../components/RecentLookups";
 import RelatedTools from "../components/RelatedTools";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -68,6 +71,7 @@ export default function LookupPage() {
   return (
     <div className="tool-page">
       <ToolsNav />
+      <DeadlineBanner />
       <main className="tool-main">
         <div className="tool-container">
           <Breadcrumb />
@@ -125,6 +129,8 @@ export default function LookupPage() {
             )}
           </div>
 
+          <RecentLookups />
+
           <section className="tool-info">
             <h2>What Is a GSTIN?</h2>
             <p>
@@ -152,6 +158,7 @@ export default function LookupPage() {
           <RelatedTools current="/lookup" />
         </div>
       </main>
+      <DoAideFooter />
     </div>
   );
 }

@@ -9,6 +9,9 @@ vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
 const mockCopyToClipboard = vi.fn();
 vi.mock("../lib/share", () => ({
   copyToClipboard: (...args) => mockCopyToClipboard(...args),
+  fullUrl: (p) => `http://localhost${p}`,
+  whatsappUrl: (text, url) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`,
+  twitterUrl: (text, url) => `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(url)}`,
 }));
 
 const mockTrack = vi.fn();

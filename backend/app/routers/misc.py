@@ -30,7 +30,7 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import check_database, get_db, pool_status
 from app.core.rate_limit import RateLimit
-from app.core.redis_client import ping as redis_ping
+from app.core.redis_client import get_redis, mark_unavailable, ping as redis_ping
 from app.core.storage import check_upload_dir
 from app.schemas.misc import ReminderSubscribeRequest
 from app.services import gstin as gstin_service
@@ -303,13 +303,66 @@ def validate_gstin(
         parts = gstin_service.parse(gstin)
     except gstin_service.InvalidGSTIN as exc:
         return {"gstin": gstin_service.normalize(gstin), "valid": False, "error": str(exc)}
-    return {
+    result = {
         "gstin": parts.gstin,
         "valid": True,
         "state_code": parts.state_code,
         "state_name": parts.state_name,
         "pan": parts.pan,
     }
+    _record_lookup(result)
+    return result
+
+
+_RECENT_LOOKUPS_KEY = "gstbot:recent_lookups"
+_RECENT_LOOKUPS_MAX = 20
+
+
+def _record_lookup(result: dict[str, Any]) -> None:
+    """Best-effort: push a valid lookup into the recent list in Redis."""
+    if not result.get("valid"):
+        return
+    client = get_redis()
+    if client is None:
+        return
+    import json
+
+    entry = json.dumps({
+        "gstin": result["gstin"],
+        "state_name": result.get("state_name", ""),
+        "valid": True,
+    })
+    try:
+        pipe = client.pipeline(transaction=False)
+        pipe.lrem(_RECENT_LOOKUPS_KEY, 1, entry)
+        pipe.lpush(_RECENT_LOOKUPS_KEY, entry)
+        pipe.ltrim(_RECENT_LOOKUPS_KEY, 0, _RECENT_LOOKUPS_MAX - 1)
+        pipe.execute()
+    except Exception:  # noqa: BLE001
+        mark_unavailable("recent lookup record failed")
+
+
+@router.get(
+    "/meta/recent-lookups",
+    summary="Recently verified GSTINs",
+    description=(
+        "The last 20 valid GSTIN lookups, anonymised (no IP, no timestamp). "
+        "Public — shown on the lookup page for social proof."
+    ),
+    dependencies=[Depends(_meta_limit)],
+)
+def recent_lookups() -> dict[str, Any]:
+    client = get_redis()
+    if client is None:
+        return {"lookups": []}
+    import json
+
+    try:
+        raw = client.lrange(_RECENT_LOOKUPS_KEY, 0, _RECENT_LOOKUPS_MAX - 1)
+        return {"lookups": [json.loads(item) for item in raw]}
+    except Exception:  # noqa: BLE001
+        mark_unavailable("recent lookups read failed")
+        return {"lookups": []}
 
 
 _reminder_limit = RateLimit("reminder_subscribe", "10/minute", by="ip")

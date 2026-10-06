@@ -3060,6 +3060,30 @@ a:focus-visible {
   margin-bottom: 0.35rem;
   line-height: 1.5;
 }
+.seo-links {
+  list-style: none;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+.seo-links li a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.seo-links li a:hover {
+  text-decoration: underline;
+}
+.rate-example {
+  margin-top: 1.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--glass-feature-border, #e5e7eb);
+}
+.rate-example h2 {
+  font-size: 1.1rem;
+  margin-bottom: 0.75rem;
+}
 
 /* Landing page: instant lookup hero */
 .landing-instant {
@@ -3478,6 +3502,222 @@ a:focus-visible {
 .due-dates-empty { color: var(--ink-soft); opacity: 0.4; }
 .due-dates-annual-row { background: rgba(245, 158, 66, 0.08); }
 .due-dates-annual-row .due-dates-period { color: var(--brand); }
+
+/* ---- Save calculation button & saved list ---- */
+.calc-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.save-calc-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--brand);
+  white-space: nowrap;
+}
+.save-calc-btn:hover { color: var(--brand-hover); }
+
+.saved-calcs {
+  margin: 1.5rem 0;
+}
+.saved-calcs-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+.saved-calcs-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--brand);
+  color: var(--brand-text);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+.saved-calcs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.saved-calc-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.6rem;
+}
+.saved-calc-main {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.saved-calc-label {
+  display: block;
+  font-size: 0.7rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.saved-calc-type {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.saved-calc-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.saved-calc-share {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: #25D366;
+  text-decoration: none;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.saved-calc-share:hover { background: rgba(37, 211, 102, 0.1); }
+.saved-calc-remove {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.saved-calc-remove:hover { color: var(--bad); background: var(--bad-bg); }
+
+/* ---- Deadline banner ---- */
+.deadline-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 1.25rem;
+  background: var(--warn-bg);
+  border-bottom: 1px solid rgba(251, 191, 36, 0.25);
+  font-size: 0.88rem;
+}
+.deadline-urgent {
+  background: var(--bad-bg);
+  border-bottom-color: rgba(248, 113, 113, 0.25);
+}
+.deadline-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.deadline-banner-icon { flex-shrink: 0; color: var(--warn); }
+.deadline-urgent .deadline-banner-icon { color: var(--bad); }
+.deadline-days { color: var(--warn); font-weight: 700; }
+.deadline-days-urgent { color: var(--bad); font-weight: 700; }
+.deadline-banner-link {
+  color: var(--brand);
+  text-decoration: none;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.deadline-banner-link:hover { text-decoration: underline; }
+.deadline-banner-close {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem;
+  border: none;
+  background: none;
+  color: var(--ink-soft);
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.deadline-banner-close:hover { color: var(--ink); background: var(--glass-inset); }
+
+/* ---- Recent GSTIN lookups ---- */
+.recent-lookups {
+  margin: 1.5rem 0;
+}
+.recent-lookups-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 0.75rem;
+}
+.recent-lookups-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.5rem;
+}
+.recent-lookup-item {
+  display: block;
+  padding: 0.65rem 0.85rem;
+  background: var(--glass);
+  border: 1px solid var(--glass-border);
+  border-radius: 0.6rem;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+.recent-lookup-item:hover {
+  border-color: var(--brand);
+  background: var(--glass-inset);
+}
+.recent-lookup-gstin {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.recent-lookup-gstin code {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.recent-lookup-status {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0.1rem 0.4rem;
+  border-radius: 3px;
+}
+.recent-lookup-status.lookup-valid {
+  color: var(--good);
+  background: var(--good-bg);
+}
+.recent-lookup-status.lookup-invalid {
+  color: var(--bad);
+  background: var(--bad-bg);
+}
+.recent-lookup-details {
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+}
 
 /* Responsive: tool pages */
 @media (max-width: 600px) {

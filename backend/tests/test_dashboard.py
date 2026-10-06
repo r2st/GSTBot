@@ -273,6 +273,16 @@ def test_the_due_date_rolls_over_the_year(auth_client):
     assert body["next_due_date"] == "2027-01-20"
 
 
+def test_the_gstr1_due_date_is_the_eleventh_of_the_next_month(auth_client):
+    body = auth_client.get("/api/v1/dashboard?period=2026-04").json()
+    assert body["gstr1_due_date"] == "2026-05-11"
+
+
+def test_the_gstr1_due_date_rolls_over_the_year(auth_client):
+    body = auth_client.get("/api/v1/dashboard?period=2026-12").json()
+    assert body["gstr1_due_date"] == "2027-01-11"
+
+
 def test_recent_periods_run_oldest_first_and_cross_the_year(auth_client):
     periods = [p["period"] for p in auth_client.get(
         "/api/v1/dashboard?period=2026-02").json()["recent_periods"]]

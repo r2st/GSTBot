@@ -100,6 +100,18 @@ class TestSetOffNeedsAToken:
             "/api/v1/subscriptions/webhook",
             # Email capture for GST filing reminders, from the landing page.
             "/api/v1/meta/reminder-subscribe",
+            # Recent GSTIN lookups for social proof on the lookup page.
+            "/api/v1/meta/recent-lookups",
+            # Sitemap and robots.txt for search engine crawlers.
+            "/api/v1/seo/sitemap.xml",
+            "/api/v1/seo/robots.txt",
+            # OAuth SSO — redirects to provider, no token needed.
+            "/api/v1/auth/google",
+            "/api/v1/auth/google/callback",
+            "/api/v1/auth/github",
+            "/api/v1/auth/github/callback",
+            "/api/v1/auth/microsoft",
+            "/api/v1/auth/microsoft/callback",
         }
 
         def calls(dependant):

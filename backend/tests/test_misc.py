@@ -291,6 +291,81 @@ class TestTheGstinLookupDoesNotEchoUnboundedInput:
             assert response.status_code == 200, BUSINESS_GSTIN[:length]
 
 
+class TestRecentLookups:
+    """Server-side recent GSTIN lookups — public, backed by Redis."""
+
+    def test_recent_lookups_returns_empty_without_redis(self, client, monkeypatch):
+        monkeypatch.setattr(misc, "get_redis", lambda: None)
+        response = client.get("/api/v1/meta/recent-lookups")
+        assert response.status_code == 200
+        assert response.json()["lookups"] == []
+
+    def test_valid_lookup_is_recorded_and_returned(self, client, monkeypatch):
+        recorded = []
+
+        class FakeRedis:
+            def pipeline(self, **_kw):
+                return self
+
+            def lrem(self, key, count, value):
+                recorded.append(("lrem", key, value))
+
+            def lpush(self, key, value):
+                recorded.append(("lpush", key, value))
+
+            def ltrim(self, key, start, end):
+                recorded.append(("ltrim", key, start, end))
+
+            def execute(self):
+                pass
+
+            def lrange(self, key, start, end):
+                import json
+                return [json.dumps({
+                    "gstin": BUSINESS_GSTIN,
+                    "state_name": "Maharashtra",
+                    "valid": True,
+                })]
+
+        monkeypatch.setattr(misc, "get_redis", lambda: FakeRedis())
+        client.get(f"/api/v1/meta/gstin/{BUSINESS_GSTIN}")
+        assert any(op[0] == "lpush" for op in recorded)
+
+        response = client.get("/api/v1/meta/recent-lookups")
+        assert response.status_code == 200
+        lookups = response.json()["lookups"]
+        assert len(lookups) == 1
+        assert lookups[0]["gstin"] == BUSINESS_GSTIN
+
+    def test_invalid_gstin_is_not_recorded(self, client, monkeypatch):
+        recorded = []
+
+        class FakeRedis:
+            def pipeline(self, **_kw):
+                return self
+
+            def lrem(self, key, count, value):
+                recorded.append(("lrem", key, value))
+
+            def lpush(self, key, value):
+                recorded.append(("lpush", key, value))
+
+            def ltrim(self, key, start, end):
+                recorded.append(("ltrim", key, start, end))
+
+            def execute(self):
+                pass
+
+        monkeypatch.setattr(misc, "get_redis", lambda: FakeRedis())
+        client.get("/api/v1/meta/gstin/27AAPFU0939F1ZW")
+        assert len(recorded) == 0
+
+    def test_no_auth_required(self, client, monkeypatch):
+        monkeypatch.setattr(misc, "get_redis", lambda: None)
+        response = client.get("/api/v1/meta/recent-lookups")
+        assert response.status_code == 200
+
+
 class TestReminderSubscribe:
     """Email capture for GST filing deadline reminders — public, no auth."""
 

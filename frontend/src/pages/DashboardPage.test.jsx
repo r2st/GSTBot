@@ -46,6 +46,7 @@ function dashboard(overrides = {}) {
     recent_periods: [],
     open_alerts: 0,
     next_due_date: "2026-05-20",
+    gstr1_due_date: "2026-05-11",
     last_reconciliation: null,
     ...overrides,
   };
@@ -229,11 +230,12 @@ describe("DashboardPage", () => {
   });
 
   it("warns loudly once a deadline has passed", async () => {
-    vi.setSystemTime(new Date(2026, 5, 1)); // 1 June, past the 20 May due date.
+    vi.setSystemTime(new Date(2026, 5, 1)); // 1 June, past both due dates.
     mockDashboard(dashboard());
     renderPage();
 
-    expect(await screen.findByRole("status")).toHaveTextContent(/overdue/);
+    const banners = await screen.findAllByRole("status");
+    expect(banners.some((b) => b.textContent.includes("overdue"))).toBe(true);
     vi.useRealTimers();
   });
 
@@ -269,56 +271,69 @@ describe("DashboardPage", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("Database unavailable");
   });
 
-  describe("the GSTR-3B due date notice", () => {
-    // The due date in the fixture is 20 May 2026; each case moves "today"
-    // relative to it. A missed 3B carries interest at 18% and a per-day late
-    // fee, so how loud this gets is the point of the component.
+  describe("the filing deadline notices", () => {
+    // The fixture has GSTR-1 due 11 May 2026 and GSTR-3B due 20 May 2026.
     afterEach(() => vi.useRealTimers());
 
-    async function noticeOn(year, monthIndex, day, body = dashboard()) {
+    async function noticesOn(year, monthIndex, day, body = dashboard()) {
       vi.setSystemTime(new Date(year, monthIndex, day));
       mockDashboard(body);
       renderPage();
-      return screen.findByRole("status");
+      return screen.findAllByRole("status");
     }
 
-    it("stays quiet in tone when the deadline is comfortably away", async () => {
-      const notice = await noticeOn(2026, 4, 1); // 19 days out.
+    it("shows both GSTR-1 and GSTR-3B banners", async () => {
+      const notices = await noticesOn(2026, 4, 1);
+      const texts = notices.map((n) => n.textContent);
 
-      expect(notice).toHaveClass("banner-neutral");
-      expect(notice).toHaveTextContent(/19 days left/);
+      expect(texts.some((t) => t.includes("GSTR-1"))).toBe(true);
+      expect(texts.some((t) => t.includes("GSTR-3B"))).toBe(true);
     });
 
-    it("turns to a warning inside a week", async () => {
-      const notice = await noticeOn(2026, 4, 15); // 5 days out.
+    it("stays quiet in tone when the GSTR-3B deadline is comfortably away", async () => {
+      const notices = await noticesOn(2026, 4, 1); // 19 days from GSTR-3B.
+      const gstr3b = notices.find((n) => n.textContent.includes("GSTR-3B"));
 
-      expect(notice).toHaveClass("banner-warn");
-      expect(notice).toHaveTextContent(/5 days left/);
+      expect(gstr3b).toHaveClass("banner-neutral");
+      expect(gstr3b).toHaveTextContent(/19 days left/);
     });
 
-    it("escalates to the overdue styling inside three days", async () => {
-      // Filing needs the books closed first, so three days out is already
-      // the point of no return for most businesses — it gets the same red as
-      // a missed deadline rather than the amber of the week before.
-      const notice = await noticeOn(2026, 4, 18); // 2 days out.
+    it("turns GSTR-3B to a warning inside a week", async () => {
+      const notices = await noticesOn(2026, 4, 15); // 5 days from GSTR-3B.
+      const gstr3b = notices.find((n) => n.textContent.includes("GSTR-3B"));
 
-      expect(notice).toHaveClass("banner-bad");
-      expect(notice).toHaveTextContent(/2 days left/);
+      expect(gstr3b).toHaveClass("banner-warn");
+      expect(gstr3b).toHaveTextContent(/5 days left/);
     });
 
-    it("counts the day itself as still open", async () => {
-      const notice = await noticeOn(2026, 4, 20); // The due date.
+    it("escalates GSTR-3B to the overdue styling inside three days", async () => {
+      const notices = await noticesOn(2026, 4, 18); // 2 days from GSTR-3B.
+      const gstr3b = notices.find((n) => n.textContent.includes("GSTR-3B"));
 
-      expect(notice).toHaveClass("banner-bad");
-      expect(notice).toHaveTextContent(/0 days left/);
-      expect(notice).not.toHaveTextContent(/overdue/);
+      expect(gstr3b).toHaveClass("banner-bad");
+      expect(gstr3b).toHaveTextContent(/2 days left/);
+    });
+
+    it("counts the GSTR-3B day itself as still open", async () => {
+      const notices = await noticesOn(2026, 4, 20);
+      const gstr3b = notices.find((n) => n.textContent.includes("GSTR-3B"));
+
+      expect(gstr3b).toHaveClass("banner-bad");
+      expect(gstr3b).toHaveTextContent(/0 days left/);
+      expect(gstr3b).not.toHaveTextContent(/overdue/);
+    });
+
+    it("shows GSTR-1 as overdue when past the 11th", async () => {
+      const notices = await noticesOn(2026, 4, 14); // 3 days past GSTR-1.
+      const gstr1 = notices.find((n) => n.textContent.includes("GSTR-1"));
+
+      expect(gstr1).toHaveClass("banner-bad");
+      expect(gstr1).toHaveTextContent(/3 days overdue/);
     });
 
     it("says nothing at all when no deadline is known", async () => {
-      // A business registered mid-period has no computed due date yet, and
-      // an empty banner is worse than no banner.
       vi.setSystemTime(new Date(2026, 4, 1));
-      mockDashboard(dashboard({ next_due_date: null }));
+      mockDashboard(dashboard({ next_due_date: null, gstr1_due_date: null }));
       renderPage();
 
       await screen.findByText(/Umang Traders/);

@@ -1,12 +1,59 @@
 import { Link, useParams } from "react-router-dom";
+import Breadcrumb from "../components/Breadcrumb";
+import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
-import ToolsNav from "../components/ToolsNav";
+import SeoHead, { BASE_URL } from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
+import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { findProductRate, searchHSN } from "../lib/hsnData";
+import { findProductRate, getByCode, relatedProducts, searchHSN } from "../lib/hsnData";
 
 function capitalize(str) {
   return str.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function slugify(str) {
+  return str.toLowerCase().replace(/\s+/g, "-");
+}
+
+function exampleAmount(rate) {
+  if (rate === 0) return null;
+  const base = 10000;
+  const tax = (base * rate) / 100;
+  return { base, rate, tax, total: base + tax };
+}
+
+function buildFaqSchema(display, match) {
+  const questions = [
+    {
+      "@type": "Question",
+      name: `What is the GST rate on ${display}?`,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: `The GST rate on ${display} is ${match.rate}% under HSN code ${match.hsn}. ${match.rate > 0 && !match.interstate ? `For intra-state supply: CGST ${match.rate / 2}% + SGST ${match.rate / 2}%. For inter-state supply: IGST ${match.rate}%.` : ""}`,
+      },
+    },
+    {
+      "@type": "Question",
+      name: `What is the HSN code for ${display}?`,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: `The HSN code for ${display} is ${match.hsn}. This code is used on GST invoices to classify ${display.toLowerCase()} for tax purposes.`,
+      },
+    },
+  ];
+  if (match.rate > 0) {
+    const ex = exampleAmount(match.rate);
+    questions.push({
+      "@type": "Question",
+      name: `How to calculate GST on ${display}?`,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: `GST on ${display} is calculated at ${match.rate}%. For example, on a taxable value of ₹${ex.base.toLocaleString("en-IN")}, GST = ₹${ex.tax.toLocaleString("en-IN")}, making the total ₹${ex.total.toLocaleString("en-IN")}.`,
+      },
+    });
+  }
+  return { "@context": "https://schema.org", "@type": "FAQPage", mainEntity: questions };
 }
 
 export default function GstRatePage() {
@@ -16,12 +63,56 @@ export default function GstRatePage() {
 
   const match = findProductRate(product);
   const related = match ? searchHSN(match.product, { limit: 5 }) : searchHSN(display, { limit: 5 });
+  const linked = relatedProducts(product, { limit: 5 });
+  const hsnEntry = match ? getByCode(match.hsn) : null;
+  const example = match ? exampleAmount(match.rate) : null;
+
+  const path = `/gst-rate/${product}`;
+  const seoTitle = match
+    ? `GST Rate for ${display} - HSN Code ${match.hsn} | DoAide`
+    : `GST Rate for ${display} | DoAide`;
+  const seoDesc = match
+    ? `GST on ${display} is ${match.rate}% (HSN ${match.hsn}). CGST ${match.rate / 2}%, SGST ${match.rate / 2}%, IGST ${match.rate}%. Calculate GST, find related HSN codes.`
+    : `Find the GST rate and HSN code for ${display}. Use our free GST calculator and HSN code search.`;
+
+  const jsonLd = match ? [
+    {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      name: display,
+      description: hsnEntry ? hsnEntry.desc : display,
+      category: hsnEntry ? hsnEntry.category : undefined,
+      additionalProperty: [
+        { "@type": "PropertyValue", name: "HSN Code", value: match.hsn },
+        { "@type": "PropertyValue", name: "GST Rate", value: `${match.rate}%` },
+      ],
+    },
+    buildFaqSchema(display, match),
+  ] : [];
+
+  const breadcrumbs = [
+    { name: "Home", url: BASE_URL },
+    { name: "HSN Code Finder", url: `${BASE_URL}/hsn` },
+    { name: `GST on ${display}` },
+  ];
 
   return (
     <div className="tool-page">
+      <SeoHead
+        title={seoTitle}
+        description={seoDesc}
+        path={path}
+        jsonLd={jsonLd}
+        breadcrumbs={breadcrumbs}
+      />
       <ToolsNav />
       <main className="tool-main">
         <div className="tool-container">
+          <Breadcrumb items={[
+            { label: "Home", to: "/" },
+            { label: "HSN Code Finder", to: "/hsn" },
+            { label: `GST on ${display}` },
+          ]} />
           <h1 className="tool-title">GST Rate on {display}</h1>
 
           {match ? (
@@ -43,12 +134,55 @@ export default function GstRatePage() {
                     <dd>{match.rate / 2}%</dd>
                     <dt>SGST</dt>
                     <dd>{match.rate / 2}%</dd>
+                    <dt>IGST</dt>
+                    <dd>{match.rate}%</dd>
+                  </>
+                )}
+                {hsnEntry && (
+                  <>
+                    <dt>Category</dt>
+                    <dd>{hsnEntry.category}</dd>
                   </>
                 )}
               </dl>
+
+              {example && (
+                <section className="rate-example">
+                  <h2>Example GST Calculation</h2>
+                  <table className="hsn-table">
+                    <tbody>
+                      <tr>
+                        <td>Taxable Value</td>
+                        <td className="hsn-rate">₹{example.base.toLocaleString("en-IN")}</td>
+                      </tr>
+                      <tr>
+                        <td>GST @ {example.rate}%</td>
+                        <td className="hsn-rate">₹{example.tax.toLocaleString("en-IN")}</td>
+                      </tr>
+                      {!match.interstate && (
+                        <>
+                          <tr>
+                            <td>  ↳ CGST @ {example.rate / 2}%</td>
+                            <td className="hsn-rate">₹{(example.tax / 2).toLocaleString("en-IN")}</td>
+                          </tr>
+                          <tr>
+                            <td>  ↳ SGST @ {example.rate / 2}%</td>
+                            <td className="hsn-rate">₹{(example.tax / 2).toLocaleString("en-IN")}</td>
+                          </tr>
+                        </>
+                      )}
+                      <tr>
+                        <td><strong>Total</strong></td>
+                        <td className="hsn-rate"><strong>₹{example.total.toLocaleString("en-IN")}</strong></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </section>
+              )}
+
               <p className="rate-calc-link">
                 <Link to={`/calculator?rate=${match.rate}`}>
-                  Calculate tax on {display} →
+                  Calculate GST on {display} →
                 </Link>
               </p>
               <ShareButtons
@@ -92,9 +226,25 @@ export default function GstRatePage() {
             </section>
           )}
 
+          {linked.length > 0 && (
+            <section className="tool-info">
+              <h2>Check GST Rates for Similar Products</h2>
+              <ul className="seo-links">
+                {linked.map((p) => (
+                  <li key={p.product}>
+                    <Link to={`/gst-rate/${slugify(p.product)}`}>
+                      GST on {capitalize(p.product)} — {p.rate}%
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <RelatedTools current={`/gst-rate/${product}`} />
         </div>
       </main>
+      <DoAideFooter />
     </div>
   );
 }

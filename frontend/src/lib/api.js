@@ -414,6 +414,8 @@ export const api = {
 
   reminderSubscribe: (email) =>
     request("/meta/reminder-subscribe", { method: "POST", body: { email }, auth: false }),
+  recentLookups: () =>
+    request("/meta/recent-lookups", { auth: false }),
 
   // ---- Invoices ----
   uploadInvoice(file, invoiceType = "purchase") {

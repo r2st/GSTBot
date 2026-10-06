@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
+import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { categories, byCategory, searchHSN } from "../lib/hsnData";
@@ -90,6 +92,12 @@ export default function HsnFinderPage() {
                     </tbody>
                   </table>
                 )}
+                {results.length > 0 && (
+                  <ShareButtons
+                    path={`/hsn?q=${encodeURIComponent(query.trim())}`}
+                    text={`HSN code for "${query.trim()}" — ${results[0].code} at ${results[0].rate}% GST. Search any product on DoAide GST`}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -132,6 +140,7 @@ export default function HsnFinderPage() {
           <RelatedTools current="/hsn" />
         </div>
       </main>
+      <DoAideFooter />
     </div>
   );
 }

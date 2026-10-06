@@ -193,6 +193,7 @@ CLIENT_FACING = {
     "GSTR2BParseError": "422 from the GSTR-2B import",
     "InvalidGSTIN": "422 through the schema validators, and /meta/gstin's `error`",
     "NoGSTR2BImported": "422 from a reconciliation run",
+    "ConcurrentReconciliation": "409 when another reconciliation is already running",
     "PlanLimitExceeded": "402 on upload",
 }
 

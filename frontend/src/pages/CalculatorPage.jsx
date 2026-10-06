@@ -1,7 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import Breadcrumb from "../components/Breadcrumb";
+import DeadlineBanner from "../components/DeadlineBanner";
+import DoAideFooter from "../components/DoAideFooter";
 import RelatedTools from "../components/RelatedTools";
+import SavedCalculations, { getSavedCalcs, SaveCalcButton } from "../components/SavedCalculations";
+import SavePrompt, { getCalcCount, incrementCalcCount } from "../components/SavePrompt";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
@@ -18,15 +22,22 @@ export default function CalculatorPage() {
   const [rate, setRate] = useState(initial.rate != null ? initial.rate : 18);
   const [interstate, setInterstate] = useState(initial.interstate);
   const [mode, setMode] = useState("exclusive");
+  const [calcCount, setCalcCount] = useState(getCalcCount);
+  const [promptDismissed, setPromptDismissed] = useState(false);
+  const [savedCalcs, setSavedCalcs] = useState(getSavedCalcs);
 
   const parsed = parseFloat(amount);
   const valid = Number.isFinite(parsed) && parsed >= 0;
 
-  const result = valid
-    ? mode === "inclusive"
-      ? reverseCalculate(parsed, rate, { interstate })
-      : calculate(parsed, rate, { interstate })
-    : null;
+  const result = useMemo(
+    () =>
+      valid
+        ? mode === "inclusive"
+          ? reverseCalculate(parsed, rate, { interstate })
+          : calculate(parsed, rate, { interstate })
+        : null,
+    [valid, mode, parsed, rate, interstate],
+  );
 
   useEffect(() => {
     if (valid) {
@@ -40,12 +51,14 @@ export default function CalculatorPage() {
   useEffect(() => {
     if (result) {
       track("gst_calculate", { amount: result.taxable, rate });
+      setCalcCount(incrementCalcCount());
     }
   }, [result, rate]);
 
   return (
     <div className="tool-page">
       <ToolsNav />
+      <DeadlineBanner />
       <main className="tool-main">
         <div className="tool-container">
           <Breadcrumb />
@@ -137,13 +150,25 @@ export default function CalculatorPage() {
                   <strong>{formatINR(result.total)}</strong>
                 </div>
 
-                <ShareButtons
-                  path={calcUrl(result.taxable, rate, interstate)}
-                  text={`GST on ${formatINR(result.taxable)} at ${rate}%: Total ${formatINR(result.total)} — calculated free on DoAide GST`}
-                />
+                <div className="calc-result-actions">
+                  <ShareButtons
+                    path={calcUrl(result.taxable, rate, interstate)}
+                    text={`GST on ${formatINR(result.taxable)} at ${rate}%: Total ${formatINR(result.total)} — calculated free on DoAide GST`}
+                  />
+                  <SaveCalcButton result={result} rate={rate} onSaved={setSavedCalcs} />
+                </div>
               </div>
             )}
           </div>
+
+          {!promptDismissed && (
+            <SavePrompt
+              calcCount={calcCount}
+              onDismiss={() => setPromptDismissed(true)}
+            />
+          )}
+
+          <SavedCalculations calcs={savedCalcs} onUpdate={setSavedCalcs} />
 
           <section className="tool-info">
             <h2>How GST Calculation Works</h2>
@@ -165,6 +190,7 @@ export default function CalculatorPage() {
           <RelatedTools current="/calculator" />
         </div>
       </main>
+      <DoAideFooter />
     </div>
   );
 }

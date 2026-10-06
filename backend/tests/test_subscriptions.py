@@ -40,10 +40,10 @@ class TestPricing:
         data = response.json()
         assert data["tiers"]["pro"]["price_monthly"] == 499_00
 
-    def test_enterprise_tier_costs_1999(self, client):
+    def test_enterprise_tier_costs_2999(self, client):
         response = client.get("/api/v1/subscriptions/pricing")
         data = response.json()
-        assert data["tiers"]["enterprise"]["price_monthly"] == 1999_00
+        assert data["tiers"]["enterprise"]["price_monthly"] == 2999_00
 
     def test_each_tier_has_features(self, client):
         response = client.get("/api/v1/subscriptions/pricing")

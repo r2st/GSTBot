@@ -17,8 +17,13 @@ vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
 
 const mockValidateGstin = vi.fn();
 vi.mock("../lib/api", () => ({
-  api: { validateGstin: (...args) => mockValidateGstin(...args) },
+  api: {
+    validateGstin: (...args) => mockValidateGstin(...args),
+    recentLookups: () => Promise.resolve({ lookups: [] }),
+  },
 }));
+vi.mock("../components/DeadlineBanner", () => ({ default: () => null }));
+vi.mock("../components/RecentLookups", () => ({ default: () => null }));
 
 function renderLookup(route = "/lookup") {
   return render(

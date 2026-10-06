@@ -48,10 +48,16 @@ describe("GstRatePage", () => {
     expect(screen.getAllByText("9%")).toHaveLength(2);
   });
 
+  it("shows IGST rate", () => {
+    renderRate("laptop");
+
+    expect(screen.getByText("IGST")).toBeInTheDocument();
+  });
+
   it("shows calculator link", () => {
     renderRate("laptop");
 
-    expect(screen.getByText(/Calculate tax on Laptop/)).toBeInTheDocument();
+    expect(screen.getByText(/Calculate GST on Laptop/)).toBeInTheDocument();
   });
 
   it("shows share buttons for known product", () => {
@@ -78,5 +84,70 @@ describe("GstRatePage", () => {
 
     expect(screen.getByText("GST Rate on Mobile Phone")).toBeInTheDocument();
     expect(screen.getByText("8517")).toBeInTheDocument();
+  });
+
+  it("shows example GST calculation for taxable products", () => {
+    renderRate("laptop");
+
+    expect(screen.getByText("Example GST Calculation")).toBeInTheDocument();
+    expect(screen.getByText("₹10,000")).toBeInTheDocument();
+    expect(screen.getByText("₹1,800")).toBeInTheDocument();
+    expect(screen.getByText("₹11,800")).toBeInTheDocument();
+  });
+
+  it("does not show example calculation for zero-rate products", () => {
+    renderRate("milk");
+
+    expect(screen.queryByText("Example GST Calculation")).not.toBeInTheDocument();
+  });
+
+  it("shows cross-links to related products", () => {
+    renderRate("laptop");
+
+    expect(screen.getByText("Check GST Rates for Similar Products")).toBeInTheDocument();
+  });
+
+  it("shows breadcrumb navigation", () => {
+    renderRate("laptop");
+
+    expect(screen.getByText("HSN Code Finder")).toBeInTheDocument();
+    expect(screen.getByLabelText("Breadcrumb")).toBeInTheDocument();
+  });
+
+  it("shows product category when available", () => {
+    renderRate("laptop");
+
+    expect(screen.getByText("Category")).toBeInTheDocument();
+    expect(screen.getByText("Electronics")).toBeInTheDocument();
+  });
+
+  it("injects JSON-LD structured data", () => {
+    renderRate("laptop");
+
+    const script = document.getElementById("seo-jsonld-0");
+    expect(script).toBeTruthy();
+    const data = JSON.parse(script.textContent);
+    expect(data["@type"]).toBe("Product");
+    expect(data.name).toBe("Laptop");
+  });
+
+  it("injects FAQPage schema", () => {
+    renderRate("laptop");
+
+    const script = document.getElementById("seo-jsonld-1");
+    expect(script).toBeTruthy();
+    const data = JSON.parse(script.textContent);
+    expect(data["@type"]).toBe("FAQPage");
+    expect(data.mainEntity.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("injects breadcrumb JSON-LD", () => {
+    renderRate("laptop");
+
+    const script = document.getElementById("seo-breadcrumb");
+    expect(script).toBeTruthy();
+    const data = JSON.parse(script.textContent);
+    expect(data["@type"]).toBe("BreadcrumbList");
+    expect(data.itemListElement[0].name).toBe("Home");
   });
 });

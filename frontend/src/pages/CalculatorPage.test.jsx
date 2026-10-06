@@ -5,6 +5,13 @@ import { describe, expect, it, vi } from "vitest";
 import CalculatorPage from "./CalculatorPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+vi.mock("../hooks/useAuth", () => ({ useAuth: () => ({ user: null }) }));
+vi.mock("../components/DeadlineBanner", () => ({ default: () => null }));
+vi.mock("../components/SavedCalculations", () => ({
+  default: () => null,
+  getSavedCalcs: () => [],
+  SaveCalcButton: () => null,
+}));
 vi.mock("../lib/share", () => ({
   fullUrl: (p) => `http://localhost${p}`,
   whatsappUrl: (text, url) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`,

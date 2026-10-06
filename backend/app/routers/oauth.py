@@ -146,7 +146,7 @@ def _complete_oauth_login(user: User | None, provider: str) -> RedirectResponse:
 
 # ── Google ────────────────────────────────────────────────
 
-@router.get("/google", dependencies=[Depends(_oauth_initiate_limit)])
+@router.get("/google", summary="Initiate Google OAuth login", dependencies=[Depends(_oauth_initiate_limit)])
 async def google_login(request: Request):
     if not settings.google_client_id:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Google OAuth not configured")
@@ -156,6 +156,7 @@ async def google_login(request: Request):
 
 @router.get(
     "/google/callback",
+    summary="Handle Google OAuth callback",
     dependencies=[Depends(_oauth_callback_limit)],
 )
 async def google_callback(request: Request, db: Session = Depends(get_db)):
@@ -185,7 +186,7 @@ async def google_callback(request: Request, db: Session = Depends(get_db)):
 
 # ── GitHub ────────────────────────────────────────────────
 
-@router.get("/github", dependencies=[Depends(_oauth_initiate_limit)])
+@router.get("/github", summary="Initiate GitHub OAuth login", dependencies=[Depends(_oauth_initiate_limit)])
 async def github_login(request: Request):
     if not settings.github_client_id:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="GitHub OAuth not configured")
@@ -195,6 +196,7 @@ async def github_login(request: Request):
 
 @router.get(
     "/github/callback",
+    summary="Handle GitHub OAuth callback",
     dependencies=[Depends(_oauth_callback_limit)],
 )
 async def github_callback(request: Request, db: Session = Depends(get_db)):
@@ -241,7 +243,7 @@ async def github_callback(request: Request, db: Session = Depends(get_db)):
 
 # ── Microsoft ─────────────────────────────────────────────
 
-@router.get("/microsoft", dependencies=[Depends(_oauth_initiate_limit)])
+@router.get("/microsoft", summary="Initiate Microsoft OAuth login", dependencies=[Depends(_oauth_initiate_limit)])
 async def microsoft_login(request: Request):
     if not settings.microsoft_client_id:
         raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="Microsoft OAuth not configured")
@@ -251,6 +253,7 @@ async def microsoft_login(request: Request):
 
 @router.get(
     "/microsoft/callback",
+    summary="Handle Microsoft OAuth callback",
     dependencies=[Depends(_oauth_callback_limit)],
 )
 async def microsoft_callback(request: Request, db: Session = Depends(get_db)):

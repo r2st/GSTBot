@@ -33,7 +33,7 @@ describe("GstinPage", () => {
     mockValidateGstin.mockResolvedValue({ valid: true, gstin: "27AAPFU0939F1ZV", state_code: "27", state_name: "Maharashtra", pan: "AAPFU0939F" });
     renderGstin();
 
-    expect(screen.getByText("GSTIN 27AAPFU0939F1ZV")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "GSTIN 27AAPFU0939F1ZV" })).toBeInTheDocument();
   });
 
   it("shows valid result after API call", async () => {
@@ -71,11 +71,11 @@ describe("GstinPage", () => {
     expect(screen.getByText("Could not verify this GSTIN.")).toBeInTheDocument();
   });
 
-  it("shows the lookup-another link", () => {
+  it("shows the verify-another link", () => {
     mockValidateGstin.mockResolvedValue({ valid: true, gstin: "27AAPFU0939F1ZV", state_code: "27", state_name: "Maharashtra", pan: "AAPFU0939F" });
     renderGstin();
 
-    expect(screen.getByText(/Look up another GSTIN/)).toBeInTheDocument();
+    expect(screen.getByText(/Verify another GSTIN/)).toBeInTheDocument();
   });
 
   it("shows share buttons for valid GSTIN", async () => {
@@ -89,5 +89,31 @@ describe("GstinPage", () => {
     renderGstin();
 
     expect(await screen.findByLabelText("Share on WhatsApp")).toBeInTheDocument();
+  });
+
+  it("shows breadcrumb navigation", () => {
+    mockValidateGstin.mockResolvedValue({ valid: true, gstin: "27AAPFU0939F1ZV", state_code: "27", state_name: "Maharashtra", pan: "AAPFU0939F" });
+    renderGstin();
+
+    expect(screen.getByLabelText("Breadcrumb")).toBeInTheDocument();
+    const breadcrumb = screen.getByLabelText("Breadcrumb");
+    expect(breadcrumb.textContent).toContain("GSTIN Lookup");
+  });
+
+  it("injects breadcrumb JSON-LD", async () => {
+    mockValidateGstin.mockResolvedValue({
+      valid: true,
+      gstin: "27AAPFU0939F1ZV",
+      state_code: "27",
+      state_name: "Maharashtra",
+      pan: "AAPFU0939F",
+    });
+    renderGstin();
+    await screen.findByText("Valid GSTIN");
+
+    const script = document.getElementById("seo-breadcrumb");
+    expect(script).toBeTruthy();
+    const data = JSON.parse(script.textContent);
+    expect(data["@type"]).toBe("BreadcrumbList");
   });
 });

@@ -24,7 +24,7 @@ from app.schemas.dashboard import (
 )
 from app.services import gst_calendar, invoice_service, reconciliation
 from app.services import late_fee as late_fee_service
-from app.services.gst_calendar import gstr3b_due_date
+from app.services.gst_calendar import gstr1_due_date, gstr3b_due_date
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -240,6 +240,7 @@ def get_dashboard(
         recent_periods=recent,
         open_alerts=open_alerts,
         next_due_date=due_date,
+        gstr1_due_date=gstr1_due_date(period),
         late_fee_estimate=late_fee_estimate,
         last_reconciliation=(
             {

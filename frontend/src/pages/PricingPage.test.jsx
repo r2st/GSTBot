@@ -12,22 +12,22 @@ vi.mock("../lib/track", () => ({ track: (...args) => mockTrack(...args) }));
 const PRICING_RESPONSE = {
   tiers: {
     free: {
-      name: "Free",
-      price_display: "₹0/month",
+      name: "Free Tools",
+      price_display: "Free forever",
       price_monthly: 0,
-      features: ["50 invoices/month", "GSTR-2B reconciliation"],
+      features: ["GST calculator", "GSTIN lookup & verification", "HSN/SAC code search"],
     },
     pro: {
-      name: "Pro",
+      name: "SMB",
       price_display: "₹499/month",
       price_monthly: 499,
-      features: ["Unlimited lookups", "HSN/SAC search", "Filing reminders", "Excel export"],
+      features: ["GST filing assistance", "Bulk GSTIN lookup", "Saved calculations & history", "Email reports"],
     },
     enterprise: {
-      name: "Enterprise",
-      price_display: "₹1,999/month",
-      price_monthly: 1999,
-      features: ["API access", "Bulk operations", "Priority support", "Custom reports"],
+      name: "CA",
+      price_display: "₹2,999/month",
+      price_monthly: 2999,
+      features: ["Everything in SMB", "Multi-client management", "Bulk filing", "API access"],
     },
   },
 };
@@ -78,27 +78,27 @@ describe("PricingPage", () => {
     mockFetch(PRICING_RESPONSE, SUBSCRIPTION_RESPONSE);
     renderPage();
 
-    expect(await screen.findByText("Free")).toBeInTheDocument();
-    expect(screen.getByText("Pro")).toBeInTheDocument();
-    expect(screen.getByText("Enterprise")).toBeInTheDocument();
+    expect(await screen.findByText("Free Tools")).toBeInTheDocument();
+    expect(screen.getByText("SMB")).toBeInTheDocument();
+    expect(screen.getByText("CA")).toBeInTheDocument();
   });
 
   it("shows prices for each tier", async () => {
     mockFetch(PRICING_RESPONSE, SUBSCRIPTION_RESPONSE);
     renderPage();
 
-    expect(await screen.findByText("₹0/month")).toBeInTheDocument();
+    expect(await screen.findByText("Free forever")).toBeInTheDocument();
     expect(screen.getByText("₹499/month")).toBeInTheDocument();
-    expect(screen.getByText("₹1,999/month")).toBeInTheDocument();
+    expect(screen.getByText("₹2,999/month")).toBeInTheDocument();
   });
 
   it("lists features for each tier", async () => {
     mockFetch(PRICING_RESPONSE, SUBSCRIPTION_RESPONSE);
     renderPage();
 
-    expect(await screen.findByText("50 invoices/month")).toBeInTheDocument();
-    expect(screen.getByText("Unlimited lookups")).toBeInTheDocument();
-    expect(screen.getByText("API access")).toBeInTheDocument();
+    expect(await screen.findByText("GST calculator")).toBeInTheDocument();
+    expect(screen.getByText("GST filing assistance")).toBeInTheDocument();
+    expect(screen.getByText("Multi-client management")).toBeInTheDocument();
   });
 
   it("highlights the Pro tier as most popular", async () => {
@@ -159,7 +159,7 @@ describe("PricingPage", () => {
     mockFetch(PRICING_RESPONSE, SUBSCRIPTION_RESPONSE);
     renderPage();
 
-    await screen.findByText("Free");
+    await screen.findByText("Free Tools");
 
     expect(mockTrack).toHaveBeenCalledWith("pricing_view");
   });

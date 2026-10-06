@@ -28,28 +28,44 @@ function recentPeriodOptions(now = new Date()) {
   return options;
 }
 
-function DueDateNotice({ dueDate }) {
+function deadlineBanner(label, dueDate) {
   const days = daysUntil(dueDate);
   if (days === null) return null;
 
-  // A missed GSTR-3B carries interest and a late fee, so the closer it gets
-  // the louder this is.
   let tone = "neutral";
-  let text = `GSTR-3B due ${dateLabel(dueDate)} — ${days} days left`;
+  let text = `${label} due ${dateLabel(dueDate)} — ${days} days left`;
   if (days < 0) {
     tone = "bad";
-    text = `GSTR-3B was due ${dateLabel(dueDate)} — ${Math.abs(days)} days overdue`;
+    text = `${label} was due ${dateLabel(dueDate)} — ${Math.abs(days)} days overdue`;
   } else if (days <= 3) {
     tone = "bad";
-    text = `GSTR-3B due ${dateLabel(dueDate)} — ${days} days left`;
+    text = `${label} due ${dateLabel(dueDate)} — ${days} days left`;
   } else if (days <= 7) {
     tone = "warn";
   }
 
+  return { tone, text };
+}
+
+function DueDateNotice({ dueDate, gstr1DueDate }) {
+  const gstr1 = deadlineBanner("GSTR-1", gstr1DueDate);
+  const gstr3b = deadlineBanner("GSTR-3B", dueDate);
+
+  if (!gstr1 && !gstr3b) return null;
+
   return (
-    <div className={`banner banner-${tone}`} role="status">
-      {text}
-    </div>
+    <>
+      {gstr1 && (
+        <div className={`banner banner-${gstr1.tone}`} role="status">
+          {gstr1.text}
+        </div>
+      )}
+      {gstr3b && (
+        <div className={`banner banner-${gstr3b.tone}`} role="status">
+          {gstr3b.text}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -372,7 +388,7 @@ export default function DashboardPage() {
 
       {data && (
         <>
-          <DueDateNotice dueDate={data.next_due_date} />
+          <DueDateNotice dueDate={data.next_due_date} gstr1DueDate={data.gstr1_due_date} />
           <LateFeeWarning estimate={data.late_fee_estimate} period={data.period} />
           <OpenAlertsNotice count={data.open_alerts} />
 
