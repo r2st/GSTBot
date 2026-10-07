@@ -410,6 +410,27 @@ const INSTANT_TOOLS = [
     ),
   },
   {
+    to: "/late-fee-calculator",
+    title: "Late Fee Calculator",
+    desc: "Calculate late filing fees for any GST return",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+        <line x1="4" y1="21" x2="20" y2="21" strokeDasharray="2 2" />
+      </svg>
+    ),
+  },
+  {
+    to: "/gstr9-checklist",
+    title: "GSTR-9 Checklist",
+    desc: "Interactive annual return filing checklist",
+    icon: (
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+      </svg>
+    ),
+  },
+  {
     to: "/input-tax-credit",
     title: "ITC Eligibility",
     desc: "Check Input Tax Credit eligibility for purchases",

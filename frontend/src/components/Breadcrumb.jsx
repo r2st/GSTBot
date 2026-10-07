@@ -16,6 +16,8 @@ const ROUTE_LABELS = {
   "/return-calendar": "Return Due Date Calendar",
   "/interest-calculator": "Interest Calculator",
   "/hsn-sac-finder": "HSN/SAC Code Finder",
+  "/late-fee-calculator": "Late Fee Calculator",
+  "/gstr9-checklist": "GSTR-9 Annual Return Checklist",
 };
 
 export default function Breadcrumb({ items }) {

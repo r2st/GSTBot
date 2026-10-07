@@ -76,6 +76,8 @@ const GstRegistrationProcessGuide = lazy(() => import("./pages/guides/GstRegistr
 const GstReturnCalendarGuide = lazy(() => import("./pages/guides/GstReturnCalendarGuide"));
 const GstRatesListGuide = lazy(() => import("./pages/guides/GstRatesListGuide"));
 const TurnoverLimitPage = lazy(() => import("./pages/TurnoverLimitPage"));
+const LateFeeCalculatorPage = lazy(() => import("./pages/LateFeeCalculatorPage"));
+const Gstr9ChecklistPage = lazy(() => import("./pages/Gstr9ChecklistPage"));
 
 function LazyFallback() {
   return (
@@ -188,6 +190,8 @@ export default function App() {
         <Route path="/registration-type-advisor" element={<Lazy><RegistrationTypeAdvisorPage /></Lazy>} />
         <Route path="/rcm-calculator" element={<Lazy><RCMCalculatorPage /></Lazy>} />
         <Route path="/audit-checklist" element={<Lazy><AuditChecklistPage /></Lazy>} />
+        <Route path="/late-fee-calculator" element={<Lazy><LateFeeCalculatorPage /></Lazy>} />
+        <Route path="/gstr9-checklist" element={<Lazy><Gstr9ChecklistPage /></Lazy>} />
         <Route path="/guides/gst-registration-process" element={<Lazy><GstRegistrationProcessGuide /></Lazy>} />
         <Route path="/guides/gst-return-calendar-2026-27" element={<Lazy><GstReturnCalendarGuide /></Lazy>} />
         <Route path="/guides/gst-rates-list-2026" element={<Lazy><GstRatesListGuide /></Lazy>} />

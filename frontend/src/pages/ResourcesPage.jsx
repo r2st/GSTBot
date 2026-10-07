@@ -184,6 +184,27 @@ const TOOLS = [
     ),
   },
   {
+    to: "/late-fee-calculator",
+    title: "Late Fee Calculator",
+    desc: "Calculate late filing fees for GSTR-1, GSTR-3B, GSTR-9, and GSTR-4. CGST/SGST breakup with caps and nil return rates.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+        <line x1="4" y1="21" x2="20" y2="21" strokeDasharray="2 2" />
+      </svg>
+    ),
+  },
+  {
+    to: "/gstr9-checklist",
+    title: "GSTR-9 Annual Return Checklist",
+    desc: "Step-by-step interactive checklist to prepare your GSTR-9 annual return. Track progress across all sections.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+      </svg>
+    ),
+  },
+  {
     to: "/embed",
     title: "Embed GST Widgets",
     desc: "Add free GST calculator, GSTIN lookup, or HSN code finder widgets to your own website with a single line of code.",
