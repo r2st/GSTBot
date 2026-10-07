@@ -42,6 +42,11 @@ const EInvoiceGuide = lazy(() => import("./pages/blog/EInvoiceGuide"));
 const GstPenaltyGuide = lazy(() => import("./pages/blog/GstPenaltyGuide"));
 const CompositionSchemeGuide = lazy(() => import("./pages/blog/CompositionSchemeGuide"));
 const EwayBillBlogGuide = lazy(() => import("./pages/blog/EwayBillGuide"));
+const Gstr1FilingStepByStep = lazy(() => import("./pages/blog/Gstr1FilingStepByStep"));
+const GstRegistrationDocuments = lazy(() => import("./pages/blog/GstRegistrationDocuments"));
+const Gstr1VsGstr3b = lazy(() => import("./pages/blog/Gstr1VsGstr3b"));
+const CompositionVsRegular = lazy(() => import("./pages/blog/CompositionVsRegular"));
+const HowToClaimItc = lazy(() => import("./pages/blog/HowToClaimItc"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -151,6 +156,11 @@ export default function App() {
           <Route path="gst-penalties-interest-late-filing" element={<GstPenaltyGuide />} />
           <Route path="gst-composition-scheme-guide" element={<CompositionSchemeGuide />} />
           <Route path="eway-bill-gst-rules-guide" element={<EwayBillBlogGuide />} />
+          <Route path="how-to-file-gstr-1-step-by-step-2026" element={<Gstr1FilingStepByStep />} />
+          <Route path="gst-registration-documents-required-2026" element={<GstRegistrationDocuments />} />
+          <Route path="gstr-1-vs-gstr-3b-difference" element={<Gstr1VsGstr3b />} />
+          <Route path="composition-scheme-vs-regular-scheme" element={<CompositionVsRegular />} />
+          <Route path="how-to-claim-input-tax-credit-gst" element={<HowToClaimItc />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />

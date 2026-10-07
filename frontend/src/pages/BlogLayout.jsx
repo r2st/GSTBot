@@ -56,6 +56,31 @@ const ARTICLES = [
     title: "E-Way Bill Under GST: Rules, Generation Process & Validity",
     description: "Complete guide to E-Way Bills — when required, how to generate, validity by distance, exemptions, penalties, and common mistakes to avoid.",
   },
+  {
+    slug: "how-to-file-gstr-1-step-by-step-2026",
+    title: "How to File GSTR-1 Online Step by Step 2026",
+    description: "Step-by-step guide to filing GSTR-1 online — login to GST portal, add invoices, verify B2B & B2C details, submit and file with DSC or EVC.",
+  },
+  {
+    slug: "gst-registration-documents-required-2026",
+    title: "GST Registration Documents Required 2026",
+    description: "Complete checklist of documents needed for GST registration — PAN, Aadhaar, address proof, bank details for proprietorship, partnership, and company.",
+  },
+  {
+    slug: "gstr-1-vs-gstr-3b-difference",
+    title: "Difference Between GSTR-1 and GSTR-3B Explained",
+    description: "Key differences between GSTR-1 and GSTR-3B — purpose, due dates, data granularity, ITC impact, and why filing order matters.",
+  },
+  {
+    slug: "composition-scheme-vs-regular-scheme",
+    title: "GST Composition Scheme vs Regular Scheme",
+    description: "Compare Composition and Regular GST schemes — eligibility, tax rates, ITC rules, return filing frequency, and which is better for your business.",
+  },
+  {
+    slug: "how-to-claim-input-tax-credit-gst",
+    title: "How to Claim Input Tax Credit Under GST",
+    description: "Step-by-step guide to claiming ITC — eligibility conditions, blocked credits, time limits, reversal rules, and GSTR-2B reconciliation.",
+  },
 ];
 
 export { ARTICLES };
