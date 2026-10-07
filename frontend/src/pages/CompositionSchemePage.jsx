@@ -48,7 +48,7 @@ const FAQ_SCHEMA = {
       name: "What is the turnover limit for GST Composition Scheme?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "The turnover limit for the GST Composition Scheme is ₹1.5 crore for manufacturers and traders, and ₹50 lakh for service providers. Special category states (NE states and Himachal Pradesh) have a limit of ₹75 lakh.",
+        text: "₹1.5 crore for manufacturers and traders, ₹50 lakh for service providers. Special category states (NE states, Himachal Pradesh) have a limit of ₹75 lakh.",
       },
     },
     {
@@ -72,7 +72,7 @@ const FAQ_SCHEMA = {
       name: "Who cannot opt for the Composition Scheme?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Manufacturers of ice cream, pan masala, and tobacco products; interstate suppliers; e-commerce operators; casual taxable persons; and non-resident taxable persons are not eligible for the Composition Scheme.",
+        text: "Ice cream, pan masala, tobacco manufacturers; interstate suppliers; e-commerce operators; casual taxable persons; and non-resident taxable persons are ineligible.",
       },
     },
     {

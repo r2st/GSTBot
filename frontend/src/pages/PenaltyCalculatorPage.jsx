@@ -45,7 +45,7 @@ const FAQ_SCHEMA = {
       name: "What is the late fee for GSTR-3B?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "The late fee for GSTR-3B is ₹50 per day (₹25 CGST + ₹25 SGST) for regular returns, subject to a maximum of ₹10,000 per return. For nil returns, the late fee is ₹20 per day (₹10 CGST + ₹10 SGST), maximum ₹500.",
+        text: "₹50/day (₹25 CGST + ₹25 SGST) for regular returns, max ₹10,000. For nil returns, ₹20/day (₹10 CGST + ₹10 SGST), max ₹500.",
       },
     },
     {
@@ -61,7 +61,7 @@ const FAQ_SCHEMA = {
       name: "Is there a maximum cap on GST late fees?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Yes. For GSTR-1 and GSTR-3B, the cap is ₹10,000 per return (₹5,000 CGST + ₹5,000 SGST). For nil returns, ₹500. For GSTR-9, it is ₹200 per day with no upper cap, subject to 0.5% of turnover in the state.",
+        text: "Yes. GSTR-1/3B: ₹10,000 per return (₹5,000 CGST + ₹5,000 SGST). Nil returns: ₹500. GSTR-9: ₹200/day, no upper cap, subject to 0.5% of state turnover.",
       },
     },
     {
@@ -77,7 +77,7 @@ const FAQ_SCHEMA = {
       name: "Can GST late fee be waived?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "The government has issued several notifications waiving or reducing late fees for past periods through amnesty schemes. Check the latest CBIC notifications for any ongoing late fee waiver schemes for your return period.",
+        text: "The government periodically issues amnesty schemes waiving or reducing late fees for past periods. Check latest CBIC notifications for any ongoing waivers.",
       },
     },
   ],

@@ -73,7 +73,7 @@ const FAQ_SCHEMA = {
       name: "What is aggregate turnover under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Aggregate turnover includes taxable, exempt, export, and interstate supplies of persons with the same PAN, on an all-India basis. It excludes reverse charge inward supplies and GST (CGST, SGST, IGST, cess).",
+        text: "Includes taxable, exempt, export, and interstate supplies of persons with the same PAN, all-India basis. Excludes reverse charge inward supplies and GST.",
       },
     },
   ],

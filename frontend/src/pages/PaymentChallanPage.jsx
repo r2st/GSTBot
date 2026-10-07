@@ -44,7 +44,7 @@ const FAQ_SCHEMA = {
       name: "What is PMT-06 in GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "PMT-06 is the challan form used for making GST payments online through the GST portal. It allows you to pay tax, interest, penalty, late fees, and cess under the appropriate heads (IGST, CGST, SGST, Cess).",
+        text: "PMT-06 is the GST payment challan form. It lets you pay tax, interest, penalty, late fees, and cess under the appropriate heads (IGST, CGST, SGST, Cess).",
       },
     },
     {

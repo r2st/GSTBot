@@ -71,7 +71,7 @@ const FAQ_SCHEMA = {
       name: "Can ITC be claimed on capital goods?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Yes, ITC on capital goods used for business purposes is available in full in the tax period when the goods are received. Unlike the old regime, there is no requirement to claim it in installments under GST.",
+        text: "Yes, ITC on capital goods for business is available in full in the period when goods are received. No installment requirement under GST unlike the old regime.",
       },
     },
     {

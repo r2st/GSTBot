@@ -47,7 +47,7 @@ const FAQ_SCHEMA = {
       name: "How do I resolve ITC mismatches?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "To resolve mismatches: follow up with suppliers to upload missing invoices, verify amounts with supplier records, check for duplicates, ensure correct GSTIN mapping, and reconcile monthly before filing GSTR-3B.",
+        text: "Follow up with suppliers for missing invoices, verify amounts, check for duplicates, ensure correct GSTIN mapping, and reconcile monthly before filing GSTR-3B.",
       },
     },
     {

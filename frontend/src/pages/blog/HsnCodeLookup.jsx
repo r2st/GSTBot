@@ -1,8 +1,41 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
 
 export default function HsnCodeLookup() {
   usePageTitle("HSN Code Lookup: Everything You Need to Know");
+
+  useEffect(() => {
+    let script = document.getElementById("blog-ld-json");
+    if (!script) {
+      script = document.createElement("script");
+      script.id = "blog-ld-json";
+      script.type = "application/ld+json";
+      document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify([
+      {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        headline: "HSN Code Lookup: Everything You Need to Know",
+        description: "Understand HSN codes, how to find the right code for your goods, and why accurate HSN classification matters for GST compliance.",
+        url: "https://gst.doaide.com/blog/hsn-code-lookup",
+        datePublished: "2026-10-01",
+        dateModified: "2026-10-07",
+        publisher: { "@type": "Organization", name: "DoAide" },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: [
+          { "@type": "Question", name: "What is an HSN code?", acceptedAnswer: { "@type": "Answer", text: "HSN (Harmonised System of Nomenclature) is a globally standardised system to classify goods. Under India's GST, HSN codes determine the applicable tax rate." } },
+          { "@type": "Question", name: "How many digits are required for HSN codes?", acceptedAnswer: { "@type": "Answer", text: "Turnover up to ₹5 crore: 4-digit HSN on B2B invoices. Above ₹5 crore: 6-digit HSN on all invoices. Since April 2021, HSN is mandatory on all GST invoices." } },
+          { "@type": "Question", name: "What is the difference between HSN and SAC codes?", acceptedAnswer: { "@type": "Answer", text: "HSN codes classify goods; SAC (Services Accounting Code) classifies services. Both follow a hierarchical structure and are reported in GSTR-1." } },
+        ],
+      },
+    ]);
+    return () => { script?.remove(); };
+  }, []);
 
   return (
     <article className="blog-article">

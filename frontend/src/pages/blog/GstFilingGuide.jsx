@@ -1,8 +1,41 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
 
 export default function GstFilingGuide() {
   usePageTitle("Complete Guide to GST Filing in India 2026");
+
+  useEffect(() => {
+    let script = document.getElementById("blog-ld-json");
+    if (!script) {
+      script = document.createElement("script");
+      script.id = "blog-ld-json";
+      script.type = "application/ld+json";
+      document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify([
+      {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        headline: "Complete Guide to GST Filing in India 2026",
+        description: "Step-by-step guide to filing GST returns — GSTR-1, GSTR-3B, and GSTR-2B reconciliation explained for Indian businesses.",
+        url: "https://gst.doaide.com/blog/gst-filing-guide-india-2026",
+        datePublished: "2026-10-01",
+        dateModified: "2026-10-07",
+        publisher: { "@type": "Organization", name: "DoAide" },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: [
+          { "@type": "Question", name: "What happens if I miss the GST filing deadline?", acceptedAnswer: { "@type": "Answer", text: "Late filing of GSTR-3B attracts ₹50/day (₹20 for nil), capped at ₹5,000. Interest at 18% p.a. applies on unpaid tax. Subsequent returns are blocked until pending ones are filed." } },
+          { "@type": "Question", name: "Can I revise a filed GST return?", acceptedAnswer: { "@type": "Answer", text: "GSTR-3B cannot be revised once filed. Errors must be corrected in next period's return. GSTR-1 allows amendments in subsequent month's filing." } },
+          { "@type": "Question", name: "Is GSTR-2B mandatory for ITC claims?", acceptedAnswer: { "@type": "Answer", text: "GSTR-2B is auto-generated and is the authoritative document for ITC eligibility under Rule 36(4). Claims exceeding GSTR-2B amounts face scrutiny." } },
+        ],
+      },
+    ]);
+    return () => { script?.remove(); };
+  }, []);
 
   return (
     <article className="blog-article">

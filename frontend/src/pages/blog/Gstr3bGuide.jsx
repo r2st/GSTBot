@@ -32,9 +32,9 @@ export default function Gstr3bGuide() {
         "@type": "FAQPage",
         mainEntity: [
           { "@type": "Question", name: "Can I revise GSTR-3B after filing?", acceptedAnswer: { "@type": "Answer", text: "No, GSTR-3B cannot be revised once filed. Any errors must be corrected in the next month's return through adjustments. This is why accuracy is critical before submission." } },
-          { "@type": "Question", name: "How do I file a nil GSTR-3B?", acceptedAnswer: { "@type": "Answer", text: "If you had no transactions in a month, you still must file a nil GSTR-3B. Log in to the GST portal, go to GSTR-3B, select the period, and file with all zero values. You can also file nil returns via SMS." } },
+          { "@type": "Question", name: "How do I file a nil GSTR-3B?", acceptedAnswer: { "@type": "Answer", text: "You must still file even with no transactions. Log in to GST portal, go to GSTR-3B, select the period, file with all zeros. Nil returns can also be filed via SMS." } },
           { "@type": "Question", name: "What is the late fee for missing GSTR-3B deadline?", acceptedAnswer: { "@type": "Answer", text: "Late fee is ₹50/day (₹25 CGST + ₹25 SGST) for regular returns, capped at ₹5,000. For nil returns, it is ₹20/day (₹10 CGST + ₹10 SGST). Additionally, interest at 18% p.a. applies on unpaid tax." } },
-          { "@type": "Question", name: "Is GSTR-3B auto-populated from GSTR-1?", acceptedAnswer: { "@type": "Answer", text: "Partially. From January 2022, certain tables in GSTR-3B are auto-populated from GSTR-1 and GSTR-2B. However, you should verify all figures before filing as auto-population may not capture all adjustments." } },
+          { "@type": "Question", name: "Is GSTR-3B auto-populated from GSTR-1?", acceptedAnswer: { "@type": "Answer", text: "Partially. Since Jan 2022, some GSTR-3B tables auto-populate from GSTR-1 and GSTR-2B. Verify all figures before filing as auto-population may miss adjustments." } },
           { "@type": "Question", name: "What happens if GSTR-3B and GSTR-1 don't match?", acceptedAnswer: { "@type": "Answer", text: "Mismatches between GSTR-1 and GSTR-3B are flagged by the system and may trigger notices from the tax authority. GSTR-1 shows invoice-level details while GSTR-3B is summary — they should reconcile." } },
         ],
       },

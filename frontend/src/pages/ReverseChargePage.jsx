@@ -44,7 +44,7 @@ const FAQ_SCHEMA = {
       name: "What is Reverse Charge Mechanism (RCM) under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Under RCM, the liability to pay GST shifts from the supplier to the recipient. This applies to specified goods and services listed in notifications under Section 9(3) and Section 9(4) of the CGST Act.",
+        text: "Under RCM, GST liability shifts from supplier to recipient for specified goods and services under Section 9(3) and Section 9(4) of the CGST Act.",
       },
     },
     {
@@ -60,7 +60,7 @@ const FAQ_SCHEMA = {
       name: "Which services attract Reverse Charge under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Services under reverse charge: legal services from advocates, GTA, sponsorship, directors' fees, insurance and recovery agents, import of services, residential property renting by registered persons, and security.",
+        text: "Legal services from advocates, GTA, sponsorship, directors' fees, insurance/recovery agents, import of services, residential renting by registered persons, and security.",
       },
     },
     {
@@ -68,7 +68,7 @@ const FAQ_SCHEMA = {
       name: "Do I need to pay RCM on GTA services?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "It depends. If the GTA charges 5% GST, the recipient pays under reverse charge. However, if the GTA opts to pay GST at 12% under forward charge, the recipient does not need to pay under reverse charge.",
+        text: "If the GTA charges 5% GST, the recipient pays under reverse charge. If the GTA opts for 12% forward charge, the recipient does not pay RCM.",
       },
     },
     {

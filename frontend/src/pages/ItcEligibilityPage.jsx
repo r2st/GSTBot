@@ -52,7 +52,7 @@ const FAQ_SCHEMA = {
       name: "What are blocked credits under Section 17(5)?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Blocked credits include GST on motor vehicles (with exceptions), food, club memberships, personal use, gifts, construction of immovable property (except plant and machinery), and composition scheme purchases.",
+        text: "GST on motor vehicles (with exceptions), food, club memberships, personal use, gifts, construction (except plant/machinery), and composition scheme purchases.",
       },
     },
     {
@@ -60,7 +60,7 @@ const FAQ_SCHEMA = {
       name: "What are the conditions for claiming ITC?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "To claim ITC under Section 16(2): valid tax invoice required, goods/services must be received, supplier must have paid GST, return must be filed, invoice must appear in GSTR-2B, and payment made within 180 days.",
+        text: "Valid tax invoice required, goods/services received, supplier paid GST, return filed, invoice in GSTR-2B, and payment to supplier within 180 days.",
       },
     },
     {
@@ -68,7 +68,7 @@ const FAQ_SCHEMA = {
       name: "Can ITC be claimed on motor vehicles?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "ITC on motor vehicles is blocked under Section 17(5)(a). Exceptions: vehicles for transporting goods, passenger transport (>13 seats), driving training, or vehicles for further supply (dealers/lessors).",
+        text: "Blocked under Section 17(5)(a). Exceptions: vehicles for transporting goods, passenger transport (>13 seats), driving training, or further supply (dealers/lessors).",
       },
     },
     {

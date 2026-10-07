@@ -1,8 +1,41 @@
+import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
 
 export default function GstComplianceChecklist() {
   usePageTitle("GST Compliance Checklist for Small Businesses");
+
+  useEffect(() => {
+    let script = document.getElementById("blog-ld-json");
+    if (!script) {
+      script = document.createElement("script");
+      script.id = "blog-ld-json";
+      script.type = "application/ld+json";
+      document.head.appendChild(script);
+    }
+    script.textContent = JSON.stringify([
+      {
+        "@context": "https://schema.org",
+        "@type": "Article",
+        headline: "GST Compliance Checklist for Small Businesses",
+        description: "A practical checklist for small businesses to stay GST-compliant — from registration to return filing and ITC claims.",
+        url: "https://gst.doaide.com/blog/gst-compliance-checklist-small-business",
+        datePublished: "2026-10-01",
+        dateModified: "2026-10-07",
+        publisher: { "@type": "Organization", name: "DoAide" },
+      },
+      {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: [
+          { "@type": "Question", name: "What is the penalty for GST non-compliance?", acceptedAnswer: { "@type": "Answer", text: "Late filing: ₹50/day (₹20 for nil), max ₹5,000. Non-filing for 6+ months: registration cancellation. Incorrect ITC: reversal + 18% interest." } },
+          { "@type": "Question", name: "How long must GST records be maintained?", acceptedAnswer: { "@type": "Answer", text: "GST law requires businesses to maintain records for at least 6 years (72 months) from the due date of filing the annual return." } },
+          { "@type": "Question", name: "Is the Composition Scheme good for small businesses?", acceptedAnswer: { "@type": "Answer", text: "It simplifies compliance with quarterly returns and flat tax rates (1-6%). But composition dealers cannot claim ITC or sell interstate." } },
+        ],
+      },
+    ]);
+    return () => { script?.remove(); };
+  }, []);
 
   return (
     <article className="blog-article">

@@ -33,7 +33,7 @@ export default function ItcReconciliationGuide() {
         mainEntity: [
           { "@type": "Question", name: "What is the difference between GSTR-2A and GSTR-2B?", acceptedAnswer: { "@type": "Answer", text: "GSTR-2A is dynamic and changes when suppliers file GSTR-1. GSTR-2B is static, generated on the 14th monthly, and is the authoritative document for ITC claims." } },
           { "@type": "Question", name: "Can I claim ITC on invoices not appearing in GSTR-2B?", acceptedAnswer: { "@type": "Answer", text: "No. As per Rule 36(4), ITC can only be claimed on invoices that appear in GSTR-2B. If an invoice is missing, follow up with your supplier to ensure they file their GSTR-1 correctly." } },
-          { "@type": "Question", name: "What is the time limit for claiming ITC?", acceptedAnswer: { "@type": "Answer", text: "ITC must be claimed by the earlier of: (a) 30th November of the year following the financial year, or (b) the date of filing the annual return (GSTR-9). For FY 2025-26, the deadline is 30th November 2026." } },
+          { "@type": "Question", name: "What is the time limit for claiming ITC?", acceptedAnswer: { "@type": "Answer", text: "By the earlier of: 30th November following the financial year, or the date of filing GSTR-9 annual return. For FY 2025-26, the deadline is 30 Nov 2026." } },
           { "@type": "Question", name: "What are blocked ITC credits under Section 17(5)?", acceptedAnswer: { "@type": "Answer", text: "ITC is blocked on motor vehicles, food, health/life insurance (unless mandatory), travel, club memberships, personal use, free samples, and construction of immovable property." } },
         ],
       },

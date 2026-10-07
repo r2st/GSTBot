@@ -77,10 +77,10 @@ const FAQ_SCHEMA = {
     },
     {
       "@type": "Question",
-      name: "What are the mandatory fields in a GST invoice?",
+      name: "What are mandatory fields in a GST invoice?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Mandatory fields: supplier name, address, GSTIN; invoice number and date; buyer details; HSN/SAC code; description, quantity and value; GST rate and amount; place of supply; and total value in figures and words.",
+        text: "Supplier name, address, GSTIN; invoice number and date; buyer details; HSN/SAC code; description, quantity, value; GST rate and amount; place of supply; total in words.",
       },
     },
     {
