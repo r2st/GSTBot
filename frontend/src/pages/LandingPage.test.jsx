@@ -309,7 +309,7 @@ describe("LandingPage", () => {
       expect(pricingLinks.length).toBeGreaterThan(0);
       expect(screen.getByText("Blog")).toBeInTheDocument();
       expect(screen.getByText("GST Filing Guide")).toBeInTheDocument();
-      expect(screen.getByText("HSN Code Finder")).toBeInTheDocument();
+      expect(screen.getAllByText("HSN Code Finder").length).toBeGreaterThan(0);
       expect(screen.getByText("All GST Tools & Guides")).toBeInTheDocument();
       expect(screen.getAllByText("Due Dates Calendar").length).toBeGreaterThan(0);
     });

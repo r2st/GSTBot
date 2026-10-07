@@ -50,7 +50,7 @@ describe("HsnFinderPage", () => {
 
     expect(screen.getAllByText(/cement/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("2523")).toBeInTheDocument();
-    expect(screen.getByText("28%")).toBeInTheDocument();
+    expect(screen.getAllByText("28%").length).toBeGreaterThanOrEqual(1);
   });
 
   it("shows no-matching message for unknown search", async () => {

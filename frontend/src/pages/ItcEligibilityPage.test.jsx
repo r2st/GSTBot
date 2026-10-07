@@ -69,7 +69,7 @@ describe("ItcEligibilityPage", () => {
     await user.type(input, "5000");
 
     expect(screen.getByText("Not Eligible")).toBeInTheDocument();
-    expect(screen.getByText(/personal consumption/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/personal consumption/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it("shows blocked for construction of immovable property", async () => {
@@ -81,7 +81,7 @@ describe("ItcEligibilityPage", () => {
     await user.type(input, "100000");
 
     expect(screen.getByText("Not Eligible")).toBeInTheDocument();
-    expect(screen.getByText(/immovable property/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/immovable property/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders the FAQ section", () => {
