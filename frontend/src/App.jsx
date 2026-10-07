@@ -36,6 +36,8 @@ const HsnCodeLookup = lazy(() => import("./pages/blog/HsnCodeLookup"));
 const GstRegistrationOnline = lazy(() => import("./pages/blog/GstRegistrationOnline"));
 const Gstr3bGuide = lazy(() => import("./pages/blog/Gstr3bGuide"));
 const ItcReconciliationGuide = lazy(() => import("./pages/blog/ItcReconciliationGuide"));
+const GstReturnCalendar = lazy(() => import("./pages/blog/GstReturnCalendar"));
+const EInvoiceGuide = lazy(() => import("./pages/blog/EInvoiceGuide"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -135,6 +137,8 @@ export default function App() {
           <Route path="gst-registration-online-guide" element={<GstRegistrationOnline />} />
           <Route path="gstr-3b-filing-guide" element={<Gstr3bGuide />} />
           <Route path="itc-reconciliation-gstr-2a-guide" element={<ItcReconciliationGuide />} />
+          <Route path="gst-return-filing-calendar-2026-27" element={<GstReturnCalendar />} />
+          <Route path="e-invoice-under-gst-guide" element={<EInvoiceGuide />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />

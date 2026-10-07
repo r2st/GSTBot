@@ -31,6 +31,16 @@ const ARTICLES = [
     title: "ITC Reconciliation Under GST: How to Match GSTR-2A with Purchase Register",
     description: "Detailed guide to ITC reconciliation — match GSTR-2B with purchase register, resolve mismatches, and avoid ITC reversals.",
   },
+  {
+    slug: "gst-return-filing-calendar-2026-27",
+    title: "GST Return Filing Calendar 2026-27: All Due Dates",
+    description: "Complete GST filing calendar for FY 2026-27 — monthly due dates for GSTR-1, GSTR-3B, CMP-08, GSTR-9, with staggered deadlines by state.",
+  },
+  {
+    slug: "e-invoice-under-gst-guide",
+    title: "E-Invoice Under GST: Applicability, Format, and Process",
+    description: "Comprehensive guide to e-invoicing under GST — turnover thresholds, IRN generation, schema format, IRP process, and penalties.",
+  },
 ];
 
 export { ARTICLES };
