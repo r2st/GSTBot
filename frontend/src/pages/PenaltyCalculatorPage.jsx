@@ -53,7 +53,7 @@ const FAQ_SCHEMA = {
       name: "What is the interest rate on late GST payment?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Interest on late payment of GST is charged at 18% per annum on the outstanding tax liability. It is calculated from the day after the due date until the date of actual payment. Interest is charged only on the net cash liability after adjusting ITC.",
+        text: "Interest on late GST payment is 18% per annum on the outstanding tax liability, from the day after the due date until actual payment. It applies only to the net cash liability after adjusting ITC.",
       },
     },
     {
@@ -61,7 +61,7 @@ const FAQ_SCHEMA = {
       name: "Is there a maximum cap on GST late fees?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Yes. For GSTR-1 and GSTR-3B, the maximum late fee is ₹10,000 per return (₹5,000 CGST + ₹5,000 SGST). For nil returns, the cap is ₹500. For GSTR-9 (annual return), the late fee is ₹200 per day with no upper cap, but is subject to 0.5% of turnover in the state.",
+        text: "Yes. For GSTR-1 and GSTR-3B, the cap is ₹10,000 per return (₹5,000 CGST + ₹5,000 SGST). For nil returns, ₹500. For GSTR-9, it is ₹200 per day with no upper cap, subject to 0.5% of turnover in the state.",
       },
     },
     {
@@ -69,7 +69,7 @@ const FAQ_SCHEMA = {
       name: "How is GST penalty different from late fee?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Late fee is charged for delayed filing of returns. Penalty under Sections 122-125 is imposed for offences like tax evasion, incorrect invoicing, or failure to register. Interest is charged on late payment of tax. All three are separate charges.",
+        text: "Late fee is for delayed filing. Penalty under Sections 122-125 is for offences like tax evasion, incorrect invoicing, or failure to register. Interest is on late tax payment. All three are separate.",
       },
     },
     {

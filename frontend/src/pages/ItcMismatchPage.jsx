@@ -31,7 +31,7 @@ const FAQ_SCHEMA = {
       name: "What is ITC mismatch in GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "ITC mismatch occurs when the Input Tax Credit claimed in your purchase register (books of accounts) does not match the ITC available in GSTR-2A/2B. This can happen due to invoices not uploaded by suppliers, amount differences, or timing differences in reporting.",
+        text: "ITC mismatch occurs when the credit claimed in your books does not match the ITC in GSTR-2A/2B. Causes include invoices not uploaded by suppliers, amount differences, or timing gaps in reporting.",
       },
     },
     {
@@ -39,7 +39,7 @@ const FAQ_SCHEMA = {
       name: "Why does ITC mismatch matter?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "ITC mismatches can lead to excess ITC claims being disallowed by the tax department, resulting in demand notices, interest at 18% p.a., and penalties. Regular reconciliation helps identify and resolve mismatches before filing returns.",
+        text: "ITC mismatches can lead to excess claims being disallowed, resulting in demand notices, interest at 18% p.a., and penalties. Regular reconciliation helps resolve mismatches before filing.",
       },
     },
     {
@@ -47,7 +47,7 @@ const FAQ_SCHEMA = {
       name: "How do I resolve ITC mismatches?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "To resolve ITC mismatches: (1) Follow up with suppliers to upload missing invoices, (2) Verify invoice amounts with supplier records, (3) Check for duplicate entries in your books, (4) Ensure correct GSTIN mapping, and (5) Reconcile monthly before filing GSTR-3B.",
+        text: "To resolve mismatches: follow up with suppliers to upload missing invoices, verify amounts with supplier records, check for duplicates, ensure correct GSTIN mapping, and reconcile monthly before filing GSTR-3B.",
       },
     },
     {
@@ -55,7 +55,7 @@ const FAQ_SCHEMA = {
       name: "What is the difference between GSTR-2A and GSTR-2B?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "GSTR-2A is a dynamic statement that changes whenever a supplier files/amends their return. GSTR-2B is a static statement generated monthly on the 14th, based on supplier filings up to that date. GSTR-2B is the authoritative document for ITC claims.",
+        text: "GSTR-2A is dynamic and changes when a supplier files or amends. GSTR-2B is static, generated monthly on the 14th from supplier filings up to that date. GSTR-2B is authoritative for ITC claims.",
       },
     },
     {
@@ -63,7 +63,7 @@ const FAQ_SCHEMA = {
       name: "Can I claim ITC that is not in GSTR-2B?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "As per Section 16(2)(aa), ITC can only be claimed if the invoice details appear in GSTR-2B. If an invoice is missing from GSTR-2B, you should follow up with the supplier to file/correct their GSTR-1 before claiming the credit.",
+        text: "Per Section 16(2)(aa), ITC can only be claimed if the invoice appears in GSTR-2B. If missing, follow up with the supplier to file or correct their GSTR-1 before claiming the credit.",
       },
     },
   ],

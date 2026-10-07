@@ -9,11 +9,11 @@ import { usePageTitle } from "../../hooks/usePageTitle";
 const FAQ_ITEMS = [
   {
     q: "What is GSTR-1?",
-    a: "GSTR-1 is a monthly or quarterly return for reporting all outward supplies (sales) made during the period. It includes B2B invoices, B2C sales, credit/debit notes, export invoices, and advance receipts. Your GSTR-1 data flows into your buyers' GSTR-2B for ITC claims.",
+    a: "GSTR-1 is a monthly or quarterly return for reporting outward supplies (sales). It includes B2B invoices, B2C sales, credit/debit notes, exports, and advance receipts. Your data flows into buyers' GSTR-2B for ITC claims.",
   },
   {
     q: "What is the due date for GSTR-1?",
-    a: "Monthly filers must submit GSTR-1 by the 11th of the following month. Quarterly filers under the QRMP scheme must file by the 13th of the month following the quarter. IFF (Invoice Furnishing Facility) for QRMP filers is due by the 13th of each month.",
+    a: "Monthly filers: 11th of the following month. Quarterly filers under QRMP: 13th of the month after the quarter. IFF (Invoice Furnishing Facility) for QRMP filers is due by the 13th of each month.",
   },
   {
     q: "Can GSTR-1 be revised after filing?",
@@ -21,11 +21,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "What happens if I file GSTR-1 late?",
-    a: "Late filing attracts a penalty of Rs 50 per day (Rs 25 CGST + Rs 25 SGST), capped at Rs 10,000 per return. For nil returns, the penalty is Rs 20 per day (Rs 10 + Rs 10). Additionally, your buyers cannot claim ITC on your invoices until you file.",
+    a: "Late fee: Rs 50/day (Rs 25 CGST + Rs 25 SGST), capped at Rs 10,000. For nil returns: Rs 20/day (Rs 10 + Rs 10). Your buyers also cannot claim ITC on your invoices until you file.",
   },
   {
     q: "What is the difference between GSTR-1 and GSTR-3B?",
-    a: "GSTR-1 reports detailed outward supply data (each invoice). GSTR-3B is a summary return where you declare total output liability, claim ITC, and pay tax. Both must be filed. GSTR-1 feeds your buyers' ITC; GSTR-3B is where you pay your own tax.",
+    a: "GSTR-1 reports detailed outward supply data (each invoice). GSTR-3B is a summary return for declaring liability, claiming ITC, and paying tax. Both must be filed — GSTR-1 feeds buyers' ITC; GSTR-3B is where you pay.",
   },
   {
     q: "Who is eligible for quarterly GSTR-1 under QRMP?",

@@ -48,7 +48,7 @@ describe("HsnFinderPage", () => {
 
     await userEvent.type(screen.getByPlaceholderText(/laptop/), "cement");
 
-    expect(screen.getByText(/cement/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/cement/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("2523")).toBeInTheDocument();
     expect(screen.getByText("28%")).toBeInTheDocument();
   });

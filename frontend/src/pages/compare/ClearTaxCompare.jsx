@@ -30,15 +30,15 @@ const FAQ_ITEMS = [
   },
   {
     q: "How does DoAide GST compare to ClearTax for GST filing?",
-    a: "Both platforms support GSTR-1 and GSTR-3B filing. DoAide GST offers free AI-powered invoice parsing and automatic GSTR-2B reconciliation. ClearTax provides a more established platform but charges for most filing features.",
+    a: "Both support GSTR-1 and GSTR-3B filing. DoAide GST offers free AI invoice parsing and automatic GSTR-2B reconciliation. ClearTax is more established but charges for most filing features.",
   },
   {
     q: "Can I switch from ClearTax to DoAide GST?",
-    a: "Yes. You can start using DoAide GST immediately — no data migration is needed. Upload your invoices and DoAide will parse them automatically. Your GST filing history stays on the GST portal regardless of which software you use.",
+    a: "Yes. Start using DoAide GST immediately — no data migration needed. Upload your invoices and DoAide parses them automatically. Your GST filing history stays on the portal regardless of which software you use.",
   },
   {
     q: "Which is better for small businesses — DoAide GST or ClearTax?",
-    a: "For small businesses, DoAide GST is the better choice because of its generous free tier (50 invoices/month at no cost), AI invoice parsing, and simpler interface. ClearTax's free tools are limited and paid plans start at Rs 7,999 per year.",
+    a: "For small businesses, DoAide GST is better — generous free tier (50 invoices/month), AI invoice parsing, and simpler interface. ClearTax's free tools are limited and paid plans start at Rs 7,999/year.",
   },
   {
     q: "Does DoAide GST support e-invoicing?",

@@ -18,7 +18,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What is the validity of an e-way bill?",
-    a: "For regular vehicles, the e-way bill is valid for 1 day for every 200 km or part thereof. For over-dimensional cargo, it is 1 day for every 100 km. The validity can be extended before expiry if goods cannot reach the destination in time.",
+    a: "For regular vehicles: 1 day per 200 km or part thereof. For over-dimensional cargo: 1 day per 100 km. Validity can be extended before expiry if goods cannot reach the destination in time.",
   },
   {
     q: "Can an e-way bill be cancelled?",
@@ -30,7 +30,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What happens if goods are transported without an e-way bill?",
-    a: "The goods and the vehicle can be detained or seized. A penalty of ₹10,000 or the tax sought to be evaded (whichever is greater) may be imposed. The goods will be released only upon payment of the penalty and applicable tax.",
+    a: "The goods and vehicle can be detained or seized. A penalty of ₹10,000 or the tax sought to be evaded (whichever is greater) may be imposed. Release requires payment of penalty and tax.",
   },
   {
     q: "Do I need an e-way bill for goods sent for job work?",

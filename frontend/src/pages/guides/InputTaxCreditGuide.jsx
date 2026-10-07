@@ -10,11 +10,11 @@ import { usePageTitle } from "../../hooks/usePageTitle";
 const FAQ_ITEMS = [
   {
     q: "What is Input Tax Credit (ITC) under GST?",
-    a: "Input Tax Credit is the credit a business receives for the GST paid on purchases used for business purposes. It allows you to reduce your output tax liability by the amount of GST paid on inputs, reducing the overall tax burden.",
+    a: "ITC is the credit a business receives for GST paid on purchases used for business purposes. It reduces your output tax liability by the GST already paid on inputs, lowering the overall tax burden.",
   },
   {
     q: "Who can claim ITC under GST?",
-    a: "Any registered taxpayer can claim ITC, except those under the composition scheme. You must be registered under GST, use the goods/services for business purposes, and meet all conditions under Section 16(2) of the CGST Act.",
+    a: "Any registered taxpayer except those under the composition scheme. You must be registered, use goods/services for business purposes, and meet all conditions under Section 16(2) of the CGST Act.",
   },
   {
     q: "Can I claim ITC on capital goods?",
@@ -30,7 +30,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Is ITC available on GST paid on insurance premiums?",
-    a: "ITC is blocked on life insurance and health insurance unless the employer is obligated by law to provide it to employees. Motor insurance ITC follows the same rules as motor vehicles — blocked with exceptions for specified categories.",
+    a: "ITC is blocked on life and health insurance unless the employer is legally obligated to provide it. Motor insurance ITC follows the same rules as motor vehicles — blocked with exceptions for specified categories.",
   },
   {
     q: "What is the time limit for claiming ITC?",
@@ -38,7 +38,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How does ITC reversal work for exempt and taxable supplies?",
-    a: "If you make both exempt and taxable supplies, ITC must be proportionally reversed for the exempt portion under Rule 42 (for inputs and input services) and Rule 43 (for capital goods). This is calculated monthly and finalized annually.",
+    a: "If you make both exempt and taxable supplies, ITC must be proportionally reversed for the exempt portion under Rule 42 (inputs and input services) and Rule 43 (capital goods). Calculated monthly, finalized annually.",
   },
 ];
 

@@ -16,6 +16,7 @@ const ALL_TOOLS = [
   { path: "/return-calendar", label: "Return Calendar", desc: "GST return due date calendar" },
   { path: "/interest-calculator", label: "Interest Calculator", desc: "Late payment interest under GST" },
   { path: "/hsn-sac-finder", label: "HSN/SAC Finder", desc: "Search HSN & SAC codes by name" },
+  { path: "/turnover-limit", label: "Turnover Limit", desc: "Check if GST registration needed" },
   { path: "/resources", label: "All GST Tools", desc: "Complete tools & guides hub" },
   { path: "/best-gst-software", label: "Best GST Software", desc: "Top 10 GST tools compared" },
   { path: "/guides", label: "GST Guides", desc: "Step-by-step filing tutorials" },

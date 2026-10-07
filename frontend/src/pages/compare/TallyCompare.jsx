@@ -28,7 +28,7 @@ const FEATURES = [
 const FAQ_ITEMS = [
   {
     q: "Is DoAide GST better than Tally Prime for GST filing?",
-    a: "For GST-specific needs, DoAide GST offers more features for free including AI invoice parsing, GSTIN lookup, and automatic GSTR-2B reconciliation. Tally Prime is a full accounting suite that includes GST but costs Rs 18,000 or more per year.",
+    a: "For GST-specific needs, DoAide GST offers more for free — AI invoice parsing, GSTIN lookup, and automatic GSTR-2B reconciliation. Tally Prime includes GST in a full accounting suite but costs Rs 18,000+/year.",
   },
   {
     q: "Can I use DoAide GST without installing any software?",

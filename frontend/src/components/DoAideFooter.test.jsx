@@ -5,34 +5,39 @@ import DoAideFooter from "./DoAideFooter";
 describe("DoAideFooter", () => {
   it("renders the heading", () => {
     render(<DoAideFooter />);
-    expect(screen.getByText("More from DoAide")).toBeInTheDocument();
+    expect(screen.getByText("More free tools from DoAide")).toBeInTheDocument();
   });
 
-  it("renders all four DoAide tools", () => {
+  it("renders all five DoAide tools", () => {
     render(<DoAideFooter />);
-    expect(screen.getByText("DoAide Invoicer")).toBeInTheDocument();
-    expect(screen.getByText("DoAide Contracts")).toBeInTheDocument();
-    expect(screen.getByText("DoAide Comply")).toBeInTheDocument();
-    expect(screen.getByText("DoAide Salary")).toBeInTheDocument();
+    expect(screen.getByText("Invoicer")).toBeInTheDocument();
+    expect(screen.getByText("Contracts")).toBeInTheDocument();
+    expect(screen.getByText("Comply")).toBeInTheDocument();
+    expect(screen.getByText("Salary")).toBeInTheDocument();
+    expect(screen.getByText("Calculator")).toBeInTheDocument();
   });
 
   it("links to the correct domains", () => {
     render(<DoAideFooter />);
-    expect(screen.getByText("DoAide Invoicer").closest("a")).toHaveAttribute(
+    expect(screen.getByText("Invoicer").closest("a")).toHaveAttribute(
       "href",
       "https://invoicer.doaide.com",
     );
-    expect(screen.getByText("DoAide Contracts").closest("a")).toHaveAttribute(
+    expect(screen.getByText("Contracts").closest("a")).toHaveAttribute(
       "href",
       "https://contracts.doaide.com",
     );
-    expect(screen.getByText("DoAide Comply").closest("a")).toHaveAttribute(
+    expect(screen.getByText("Comply").closest("a")).toHaveAttribute(
       "href",
       "https://comply.doaide.com",
     );
-    expect(screen.getByText("DoAide Salary").closest("a")).toHaveAttribute(
+    expect(screen.getByText("Salary").closest("a")).toHaveAttribute(
       "href",
       "https://salary.doaide.com",
+    );
+    expect(screen.getByText("Calculator").closest("a")).toHaveAttribute(
+      "href",
+      "https://fincalc.doaide.com",
     );
   });
 
@@ -47,7 +52,7 @@ describe("DoAideFooter", () => {
 
   it("has the correct aria label", () => {
     render(<DoAideFooter />);
-    expect(screen.getByRole("contentinfo", { name: "More from DoAide" })).toBeInTheDocument();
+    expect(screen.getByRole("contentinfo", { name: "More free tools from DoAide" })).toBeInTheDocument();
   });
 
   it("shows descriptions for each tool", () => {
@@ -56,5 +61,6 @@ describe("DoAideFooter", () => {
     expect(screen.getByText("Draft & manage business contracts")).toBeInTheDocument();
     expect(screen.getByText("Track all compliance deadlines")).toBeInTheDocument();
     expect(screen.getByText("Payroll & salary slip generation")).toBeInTheDocument();
+    expect(screen.getByText("Financial calculators & tools")).toBeInTheDocument();
   });
 });

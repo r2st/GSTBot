@@ -9,7 +9,7 @@ import { usePageTitle } from "../../hooks/usePageTitle";
 const FAQ_ITEMS = [
   {
     q: "What is GSTR-3B?",
-    a: "GSTR-3B is a monthly self-declaration return where registered taxpayers summarize their output tax liability, claim Input Tax Credit (ITC), and pay the net GST due. Unlike GSTR-1 which has invoice-level detail, GSTR-3B reports aggregate figures.",
+    a: "GSTR-3B is a monthly self-declaration return summarizing output tax liability, ITC claimed, and net GST due. Unlike GSTR-1 which has invoice-level detail, GSTR-3B reports aggregate figures.",
   },
   {
     q: "Can GSTR-3B be revised after filing?",
@@ -17,15 +17,15 @@ const FAQ_ITEMS = [
   },
   {
     q: "What happens if I miss the GSTR-3B deadline?",
-    a: "Late filing attracts a penalty of Rs 50 per day (Rs 25 CGST + Rs 25 SGST), capped at Rs 5,000. For nil returns, the penalty is Rs 20 per day. Additionally, 18% annual interest is charged on unpaid tax from the due date. You cannot file the next period's returns until the current GSTR-3B is filed.",
+    a: "Late fee: Rs 50/day (Rs 25 CGST + Rs 25 SGST), capped at Rs 5,000 (Rs 20/day for nil returns). Plus 18% interest on unpaid tax from the due date. You cannot file the next period until the current GSTR-3B is filed.",
   },
   {
     q: "How is ITC claimed in GSTR-3B?",
-    a: "ITC is claimed in Table 4 of GSTR-3B. You should reconcile your purchase register with GSTR-2B before claiming ITC. Only eligible ITC that appears in your GSTR-2B should be claimed. Blocked credits under Section 17(5) must be excluded.",
+    a: "ITC is claimed in Table 4 of GSTR-3B. Reconcile your purchase register with GSTR-2B before claiming. Only eligible ITC appearing in GSTR-2B should be claimed. Blocked credits under Section 17(5) must be excluded.",
   },
   {
     q: "What is the difference between GSTR-1 and GSTR-3B?",
-    a: "GSTR-1 reports detailed outward supply data (each invoice separately). GSTR-3B is a summary return with aggregate output liability, ITC claim, and tax payment. GSTR-1 feeds your buyers' ITC. GSTR-3B is where you settle your own tax liability.",
+    a: "GSTR-1 reports detailed outward supply data (each invoice). GSTR-3B is a summary return with aggregate output liability, ITC claim, and tax payment. GSTR-1 feeds buyers' ITC; GSTR-3B is where you pay.",
   },
   {
     q: "Can I file GSTR-3B quarterly?",

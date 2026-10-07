@@ -40,7 +40,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Which is better for a small shop — DoAide GST or Busy?",
-    a: "For a small shop focused on GST compliance, DoAide GST is the better choice. It is free, works on any device, and handles GST calculations, filing, and reconciliation. Busy Accounting is better if you need full inventory and accounting alongside GST.",
+    a: "For a small shop, DoAide GST is the better choice — free, works on any device, and handles GST calculations, filing, and reconciliation. Busy is better if you need full inventory and accounting alongside GST.",
   },
   {
     q: "Can I use both DoAide GST and Busy Accounting?",

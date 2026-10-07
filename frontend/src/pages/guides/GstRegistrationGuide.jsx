@@ -9,11 +9,11 @@ import { usePageTitle } from "../../hooks/usePageTitle";
 const FAQ_ITEMS = [
   {
     q: "What is the GST registration threshold in India?",
-    a: "The GST registration threshold is Rs 40 lakhs annual turnover for goods and Rs 20 lakhs for services. For special category states (northeastern and hill states), the threshold is Rs 20 lakhs for goods and Rs 10 lakhs for services.",
+    a: "The threshold is Rs 40 lakh turnover for goods and Rs 20 lakh for services. For special category states (northeastern and hill states), it is Rs 20 lakh for goods and Rs 10 lakh for services.",
   },
   {
     q: "How long does GST registration take?",
-    a: "GST registration typically takes 3 to 7 working days after submitting the application. If the officer requests additional documents, it may take up to 30 days. The TRN (Temporary Reference Number) is generated immediately upon submitting Part A.",
+    a: "GST registration typically takes 3 to 7 working days. If the officer requests additional documents, it may take up to 30 days. The TRN is generated immediately upon submitting Part A of the application.",
   },
   {
     q: "Is GST registration free?",
@@ -25,7 +25,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "What documents are needed for GST registration?",
-    a: "You need PAN card, Aadhaar card, proof of business registration (partnership deed, incorporation certificate, etc.), address proof of business premises (electricity bill, rent agreement), bank account details with cancelled cheque or statement, and passport-size photographs of promoters.",
+    a: "You need PAN, Aadhaar, proof of business registration (partnership deed, incorporation certificate, etc.), address proof (electricity bill, rent agreement), bank details with cancelled cheque, and photos of promoters.",
   },
   {
     q: "Can I have multiple GST registrations?",

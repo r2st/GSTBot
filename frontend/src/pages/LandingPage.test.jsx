@@ -309,17 +309,17 @@ describe("LandingPage", () => {
       expect(pricingLinks.length).toBeGreaterThan(0);
       expect(screen.getByText("Blog")).toBeInTheDocument();
       expect(screen.getByText("GST Filing Guide")).toBeInTheDocument();
-      expect(screen.getByText("HSN Code Lookup")).toBeInTheDocument();
+      expect(screen.getByText("HSN Code Finder")).toBeInTheDocument();
       expect(screen.getByText("All GST Tools & Guides")).toBeInTheDocument();
       expect(screen.getAllByText("Due Dates Calendar").length).toBeGreaterThan(0);
     });
 
-    it("has links to blog articles on doaide.com", () => {
+    it("has links to guides and comparison pages", () => {
       renderLanding();
 
-      expect(screen.getByText("GST Filing Dates Guide")).toBeInTheDocument();
-      expect(screen.getByText("GSTIN Verification Guide")).toBeInTheDocument();
-      expect(screen.getByText("GST Rates & HSN Codes")).toBeInTheDocument();
+      expect(screen.getByText("GST Guides")).toBeInTheDocument();
+      expect(screen.getByText("Best GST Software")).toBeInTheDocument();
+      expect(screen.getByText("GST Filing Guide")).toBeInTheDocument();
     });
 
     it("shows trust signals", () => {

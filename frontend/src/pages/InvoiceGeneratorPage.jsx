@@ -72,7 +72,7 @@ const FAQ_SCHEMA = {
       name: "What is a GST invoice?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "A GST invoice is a document issued by a registered supplier containing details of goods/services supplied, GST charged (CGST, SGST or IGST), supplier and buyer GSTIN, HSN/SAC codes, and other mandatory fields as prescribed under Rule 46 of CGST Rules.",
+        text: "A GST invoice is issued by a registered supplier with details of goods/services, GST charged (CGST, SGST or IGST), supplier and buyer GSTIN, HSN/SAC codes, and other fields per Rule 46 of CGST Rules.",
       },
     },
     {
@@ -80,7 +80,7 @@ const FAQ_SCHEMA = {
       name: "What are the mandatory fields in a GST invoice?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Mandatory fields include: supplier name, address and GSTIN; invoice number and date; buyer name, address and GSTIN (if registered); HSN/SAC code; description, quantity and value of goods/services; GST rate and amount (CGST+SGST or IGST); place of supply; and total invoice value in figures and words.",
+        text: "Mandatory fields: supplier name, address, GSTIN; invoice number and date; buyer details; HSN/SAC code; description, quantity and value; GST rate and amount; place of supply; and total value in figures and words.",
       },
     },
     {
@@ -88,7 +88,7 @@ const FAQ_SCHEMA = {
       name: "When is IGST charged vs CGST+SGST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "IGST is charged on interstate supplies (when supplier and buyer are in different states). CGST+SGST is charged on intrastate supplies (same state). The determination is based on the state codes in the supplier's and buyer's GSTIN.",
+        text: "IGST is charged on interstate supplies (supplier and buyer in different states). CGST+SGST is charged on intrastate supplies (same state). This is determined by the state codes in each party's GSTIN.",
       },
     },
     {
@@ -96,7 +96,7 @@ const FAQ_SCHEMA = {
       name: "Is this GST invoice legally valid?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "This tool generates invoices with all mandatory fields required under GST law. However, the accuracy of the information entered is your responsibility. For legal compliance, ensure all details are correct and maintain proper records.",
+        text: "This tool generates invoices with all mandatory fields under GST law. The accuracy of information entered is your responsibility. Ensure all details are correct and maintain proper records.",
       },
     },
     {

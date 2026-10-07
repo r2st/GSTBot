@@ -63,6 +63,7 @@ const ItcCalculatorPage = lazy(() => import("./pages/ItcCalculatorPage"));
 const GstRegistrationProcessGuide = lazy(() => import("./pages/guides/GstRegistrationProcessGuide"));
 const GstReturnCalendarGuide = lazy(() => import("./pages/guides/GstReturnCalendarGuide"));
 const GstRatesListGuide = lazy(() => import("./pages/guides/GstRatesListGuide"));
+const TurnoverLimitPage = lazy(() => import("./pages/TurnoverLimitPage"));
 
 function LazyFallback() {
   return (
@@ -154,12 +155,13 @@ export default function App() {
         <Route path="/invoice-generator" element={<Lazy><InvoiceGeneratorPage /></Lazy>} />
         <Route path="/reverse-charge" element={<Lazy><ReverseChargePage /></Lazy>} />
         <Route path="/itc-mismatch" element={<Lazy><ItcMismatchPage /></Lazy>} />
+        <Route path="/gstin-validator" element={<Lazy><GstinValidatorPage /></Lazy>} />
+        <Route path="/turnover-limit" element={<Lazy><TurnoverLimitPage /></Lazy>} />
         <Route path="/hsn/:code" element={<Lazy><HsnCodePage /></Lazy>} />
         <Route path="/registration-checker" element={<Lazy><RegistrationCheckerPage /></Lazy>} />
         <Route path="/return-calendar" element={<Lazy><ReturnDueDateCalendarPage /></Lazy>} />
         <Route path="/interest-calculator" element={<Lazy><InterestCalculatorPage /></Lazy>} />
         <Route path="/hsn-sac-finder" element={<Lazy><HsnSacFinderPage /></Lazy>} />
-        <Route path="/gstin-validator" element={<Lazy><GstinValidatorPage /></Lazy>} />
         <Route path="/scheme-comparison" element={<Lazy><SchemeComparisonPage /></Lazy>} />
         <Route path="/payment-challan" element={<Lazy><PaymentChallanPage /></Lazy>} />
         <Route path="/itc-calculator" element={<Lazy><ItcCalculatorPage /></Lazy>} />

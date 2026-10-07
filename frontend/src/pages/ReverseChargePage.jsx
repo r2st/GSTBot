@@ -44,7 +44,7 @@ const FAQ_SCHEMA = {
       name: "What is Reverse Charge Mechanism (RCM) under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Under the Reverse Charge Mechanism, the liability to pay GST shifts from the supplier to the recipient of goods or services. This applies to specified goods and services listed in notifications under Section 9(3) and Section 9(4) of the CGST Act.",
+        text: "Under RCM, the liability to pay GST shifts from the supplier to the recipient. This applies to specified goods and services listed in notifications under Section 9(3) and Section 9(4) of the CGST Act.",
       },
     },
     {
@@ -52,7 +52,7 @@ const FAQ_SCHEMA = {
       name: "Can I claim ITC on GST paid under Reverse Charge?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Yes, the recipient can claim Input Tax Credit on GST paid under reverse charge, provided they are registered under GST, the goods/services are used for business purposes, and they have a valid tax invoice or self-invoice.",
+        text: "Yes, the recipient can claim ITC on GST paid under reverse charge if registered under GST, goods/services are used for business purposes, and they have a valid tax invoice or self-invoice.",
       },
     },
     {
@@ -60,7 +60,7 @@ const FAQ_SCHEMA = {
       name: "Which services attract Reverse Charge under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Services attracting reverse charge include: legal services from advocates, GTA services, sponsorship, directors' fees, insurance agent services, recovery agent services, import of services, renting of residential property by registered persons, and security services from individuals/HUF/partnership firms.",
+        text: "Services under reverse charge: legal services from advocates, GTA, sponsorship, directors' fees, insurance and recovery agents, import of services, residential property renting by registered persons, and security.",
       },
     },
     {
@@ -76,7 +76,7 @@ const FAQ_SCHEMA = {
       name: "How is GST under RCM paid and reported?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "GST under reverse charge must be paid in cash (cannot use ITC for payment). It is reported in GSTR-3B under Table 3.1(d) for liability and Table 4(A)(2) or 4(A)(3) for claiming ITC. A self-invoice must be issued by the recipient.",
+        text: "GST under reverse charge must be paid in cash (ITC cannot be used). Report in GSTR-3B Table 3.1(d) for liability and Table 4(A)(2) or 4(A)(3) for ITC. A self-invoice must be issued by the recipient.",
       },
     },
   ],

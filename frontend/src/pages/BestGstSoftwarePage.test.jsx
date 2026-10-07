@@ -44,7 +44,7 @@ describe("BestGstSoftwarePage", () => {
     renderPage();
     const faqButton = screen.getByText("What is the best free GST software in India?");
     await userEvent.click(faqButton);
-    expect(screen.getByText(/DoAide GST is the best free GST software/)).toBeInTheDocument();
+    expect(screen.getAllByText(/DoAide GST is the best free GST software/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders CTA section", () => {

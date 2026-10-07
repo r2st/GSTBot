@@ -43,7 +43,7 @@ const FAQ_SCHEMA = {
       name: "What is the threshold for e-way bill under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "An e-way bill is required for movement of goods with a consignment value exceeding ₹50,000 (including GST). Some states have lower thresholds for intrastate movement. For handicraft goods and job work, e-way bill may be required regardless of value.",
+        text: "An e-way bill is required when the consignment value exceeds ₹50,000 (including GST). Some states have lower intrastate thresholds. For handicraft goods and job work, it may be required regardless of value.",
       },
     },
     {
@@ -59,7 +59,7 @@ const FAQ_SCHEMA = {
       name: "What is the penalty for not generating an e-way bill?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Goods moved without a valid e-way bill can be detained or seized under Section 129. The penalty is ₹10,000 or the tax amount, whichever is higher. The goods and vehicle can be released on payment of applicable tax and penalty.",
+        text: "Goods moved without a valid e-way bill can be detained or seized under Section 129. The penalty is ₹10,000 or the tax amount, whichever is higher. Release requires payment of tax and penalty.",
       },
     },
     {

@@ -54,7 +54,7 @@ describe("Gstr3bFilingGuide", () => {
 
   it("links to tools", () => {
     renderPage();
-    expect(screen.getByText("GST Calculator")).toBeInTheDocument();
-    expect(screen.getByText("GSTIN Lookup")).toBeInTheDocument();
+    expect(screen.getAllByText("GST Calculator").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("GSTIN Lookup").length).toBeGreaterThanOrEqual(1);
   });
 });

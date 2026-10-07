@@ -35,11 +35,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "Can I switch from Zoho GST to DoAide GST?",
-    a: "Yes. You can start using DoAide GST alongside or instead of Zoho GST. Upload your invoices and DoAide will parse them automatically. Your GST data on the GST portal remains accessible regardless of which software you use.",
+    a: "Yes. Start using DoAide GST alongside or instead of Zoho GST. Upload invoices and DoAide parses them automatically. Your GST data on the portal remains accessible regardless of which software you use.",
   },
   {
     q: "Which is easier to set up — DoAide GST or Zoho GST?",
-    a: "DoAide GST is significantly easier to set up. You can use the free tools instantly without creating an account. The full platform takes minutes to set up. Zoho GST requires setting up Zoho Books first, configuring your chart of accounts, and connecting to the Zoho ecosystem.",
+    a: "DoAide GST is much easier — free tools work instantly with no account. The full platform takes minutes. Zoho GST requires setting up Zoho Books first, configuring your chart of accounts, and joining the ecosystem.",
   },
   {
     q: "Does DoAide GST have a mobile app like Zoho?",

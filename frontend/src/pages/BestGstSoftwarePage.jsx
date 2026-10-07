@@ -44,7 +44,7 @@ const SOFTWARE_LIST = [
     rank: 4, name: "Tally Prime", bestFor: "Best for CAs",
     features: "Full accounting, GST filing, inventory, payroll, banking, TDS",
     pricing: "Rs 18,000/yr+", rating: "4.3",
-    review: "Tally Prime is the most widely used accounting software in India with over 30 years of history. It includes GST filing capabilities alongside full accounting and inventory management. The main drawback is it is desktop-only (Windows), expensive, and lacks modern AI features.",
+    review: "Tally Prime is India's most-used accounting software with 30+ years of history. It includes GST filing alongside full accounting and inventory. Desktop-only (Windows), expensive, and lacks AI features.",
     link: "/compare/tally",
   },
   {
@@ -58,19 +58,19 @@ const SOFTWARE_LIST = [
     rank: 6, name: "Marg ERP", bestFor: "Best for traders & distributors",
     features: "GST billing, inventory, barcode, distribution management, POS",
     pricing: "Rs 8,000/yr+", rating: "4.0",
-    review: "Marg ERP is designed for traders and distributors with strong inventory management and GST billing features. It includes barcode scanning, POS, and distribution management. Best for businesses with complex inventory needs.",
+    review: "Marg ERP is designed for traders and distributors with strong inventory management and GST billing. Includes barcode scanning, POS, and distribution management. Best for complex inventory needs.",
   },
   {
     rank: 7, name: "Vyapar", bestFor: "Best for micro businesses",
     features: "GST invoicing, billing, estimates, payment tracking, reports",
     pricing: "Free / Rs 4,999/yr", rating: "4.2",
-    review: "Vyapar is a simple invoicing and billing app popular with small shopkeepers and freelancers. It offers basic GST invoicing and billing features with a mobile app. The free plan is limited; the paid plan costs Rs 4,999/year.",
+    review: "Vyapar is a simple invoicing and billing app popular with small shopkeepers and freelancers. It offers basic GST invoicing with a mobile app. The free plan is limited; paid costs Rs 4,999/year.",
   },
   {
     rank: 8, name: "myBillBook", bestFor: "Best for billing",
     features: "GST billing, invoicing, estimates, inventory, payment reminders",
     pricing: "Free / Rs 2,999/yr", rating: "4.0",
-    review: "myBillBook focuses on billing and invoicing with built-in GST support. Good for businesses that primarily need invoice generation with GST compliance. Mobile-first design with a simple interface.",
+    review: "MyBillBook focuses on billing and invoicing with built-in GST support. Good for businesses that primarily need invoice generation with GST compliance. Mobile-first with a simple interface.",
   },
   {
     rank: 9, name: "Saral GST", bestFor: "Best for filing-only",
@@ -89,15 +89,15 @@ const SOFTWARE_LIST = [
 const FAQ_ITEMS = [
   {
     q: "What is the best free GST software in India?",
-    a: "DoAide GST is the best free GST software in India. It offers GST calculator, GSTIN lookup, HSN code search, and filing dates calendar for free without signup. The full compliance platform including GSTR-2B reconciliation and filing prep is free for up to 50 invoices per month.",
+    a: "DoAide GST is the best free GST software in India. It offers GST calculator, GSTIN lookup, HSN code search, and filing dates calendar — all free, no signup. The full platform is free for up to 50 invoices per month.",
   },
   {
     q: "Which GST software is best for small businesses?",
-    a: "For small businesses, DoAide GST is the top choice because of its free tier (50 invoices/month), simple interface, and AI-powered invoice parsing. Vyapar and myBillBook are also good options for very simple billing needs.",
+    a: "For small businesses, DoAide GST is the top choice — free tier (50 invoices/month), simple interface, and AI invoice parsing. Vyapar and myBillBook are good options for basic billing.",
   },
   {
     q: "Is DoAide GST better than ClearTax?",
-    a: "For small to medium businesses, DoAide GST offers better value with its free tier and AI features. ClearTax is better suited for large enterprises that need a comprehensive tax compliance suite covering income tax and TDS alongside GST.",
+    a: "For small to medium businesses, DoAide GST offers better value with its free tier and AI features. ClearTax suits large enterprises needing a full tax compliance suite covering income tax and TDS alongside GST.",
   },
   {
     q: "Can I file GST returns for free?",
@@ -105,19 +105,19 @@ const FAQ_ITEMS = [
   },
   {
     q: "What features should I look for in GST software?",
-    a: "Key features to look for: GST calculator, GSTIN verification, HSN code search, GSTR-2B reconciliation, ITC calculation, GSTR-1 and GSTR-3B preparation, e-invoicing support, and filing deadline alerts. AI-powered invoice parsing saves significant time.",
+    a: "Key features: GST calculator, GSTIN verification, HSN code search, GSTR-2B reconciliation, ITC calculation, GSTR-1 and GSTR-3B prep, e-invoicing, and deadline alerts. AI invoice parsing saves significant time.",
   },
   {
     q: "Which GST software do CAs prefer?",
-    a: "Many CAs prefer Tally Prime for its comprehensive accounting features and long history. However, modern CAs are increasingly using web-based tools like DoAide GST for GST-specific work because of AI features and multi-client support. Gen GST is popular for bulk filing.",
+    a: "Many CAs prefer Tally Prime for its accounting depth and long history. Modern CAs increasingly use web tools like DoAide GST for GST work — AI features and multi-client support. Gen GST is popular for bulk filing.",
   },
   {
     q: "Is web-based or desktop GST software better?",
-    a: "Web-based GST software like DoAide GST is better for most businesses because it works on any device, updates automatically, and backs up data in the cloud. Desktop software like Tally has the advantage of offline access but is limited to one machine.",
+    a: "Web-based GST software like DoAide GST works on any device, updates automatically, and backs up data in the cloud. Desktop software like Tally offers offline access but is limited to one machine.",
   },
   {
     q: "How much does GST software cost in India?",
-    a: "GST software in India ranges from free (DoAide GST) to Rs 54,000/year (Tally Prime Gold). Most paid options range from Rs 2,500 to Rs 18,000 per year. DoAide GST offers the best value with a free tier covering 50 invoices/month.",
+    a: "GST software in India ranges from free (DoAide GST) to Rs 54,000/year (Tally Prime Gold). Most paid options cost Rs 2,500 to Rs 18,000 per year. DoAide GST offers the best value with a free tier for 50 invoices/month.",
   },
 ];
 

@@ -149,7 +149,7 @@ describe("DueDatesPage", () => {
     expect(screen.getByText("Understanding GST Filing Deadlines")).toBeInTheDocument();
     expect(screen.getByText("Monthly vs Quarterly Filing")).toBeInTheDocument();
     expect(screen.getByText("Annual Returns")).toBeInTheDocument();
-    expect(screen.getByText(/Composition Scheme/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Composition Scheme/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders JSON-LD FAQ structured data", () => {

@@ -44,7 +44,7 @@ const FAQ_SCHEMA = {
       name: "What is Input Tax Credit (ITC) under GST?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Input Tax Credit (ITC) allows businesses to reduce their GST liability by claiming credit for GST paid on business purchases. It is the backbone of GST's value-added tax mechanism, ensuring tax is levied only on value addition at each stage.",
+        text: "ITC allows businesses to reduce GST liability by claiming credit for GST paid on business purchases. It ensures tax is levied only on value addition at each stage of the supply chain.",
       },
     },
     {
@@ -52,7 +52,7 @@ const FAQ_SCHEMA = {
       name: "What are blocked credits under Section 17(5)?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "Blocked credits include GST paid on motor vehicles (with exceptions), food and beverages, club memberships, personal consumption, gifts and free samples, construction of immovable property (except plant and machinery), and purchases under the composition scheme.",
+        text: "Blocked credits include GST on motor vehicles (with exceptions), food, club memberships, personal use, gifts, construction of immovable property (except plant and machinery), and composition scheme purchases.",
       },
     },
     {
@@ -60,7 +60,7 @@ const FAQ_SCHEMA = {
       name: "What are the conditions for claiming ITC?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "To claim ITC under Section 16(2): you must have a valid tax invoice, goods/services must be received, supplier must have paid GST to government, you must have filed the relevant return, invoice must appear in GSTR-2B, and payment must be made within 180 days.",
+        text: "To claim ITC under Section 16(2): valid tax invoice required, goods/services must be received, supplier must have paid GST, return must be filed, invoice must appear in GSTR-2B, and payment made within 180 days.",
       },
     },
     {
@@ -68,7 +68,7 @@ const FAQ_SCHEMA = {
       name: "Can ITC be claimed on motor vehicles?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "ITC on motor vehicles is generally blocked under Section 17(5)(a). Exceptions include vehicles used for transportation of goods, passenger transport with seating capacity >13, driving training, or vehicles used for further supply (dealers/lessors).",
+        text: "ITC on motor vehicles is blocked under Section 17(5)(a). Exceptions: vehicles for transporting goods, passenger transport (>13 seats), driving training, or vehicles for further supply (dealers/lessors).",
       },
     },
     {

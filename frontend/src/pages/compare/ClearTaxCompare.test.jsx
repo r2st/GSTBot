@@ -23,7 +23,7 @@ describe("ClearTaxCompare", () => {
   it("renders the feature comparison table", () => {
     renderPage();
     expect(screen.getByText("Feature Comparison")).toBeInTheDocument();
-    expect(screen.getByText("GST Calculator")).toBeInTheDocument();
+    expect(screen.getAllByText("GST Calculator").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText("AI Invoice Parsing")).toBeInTheDocument();
   });
 
