@@ -56,6 +56,13 @@ const RegistrationCheckerPage = lazy(() => import("./pages/RegistrationCheckerPa
 const ReturnDueDateCalendarPage = lazy(() => import("./pages/ReturnDueDateCalendarPage"));
 const InterestCalculatorPage = lazy(() => import("./pages/InterestCalculatorPage"));
 const HsnSacFinderPage = lazy(() => import("./pages/HsnSacFinderPage"));
+const GstinValidatorPage = lazy(() => import("./pages/GstinValidatorPage"));
+const SchemeComparisonPage = lazy(() => import("./pages/SchemeComparisonPage"));
+const PaymentChallanPage = lazy(() => import("./pages/PaymentChallanPage"));
+const ItcCalculatorPage = lazy(() => import("./pages/ItcCalculatorPage"));
+const GstRegistrationProcessGuide = lazy(() => import("./pages/guides/GstRegistrationProcessGuide"));
+const GstReturnCalendarGuide = lazy(() => import("./pages/guides/GstReturnCalendarGuide"));
+const GstRatesListGuide = lazy(() => import("./pages/guides/GstRatesListGuide"));
 
 function LazyFallback() {
   return (
@@ -152,6 +159,13 @@ export default function App() {
         <Route path="/return-calendar" element={<Lazy><ReturnDueDateCalendarPage /></Lazy>} />
         <Route path="/interest-calculator" element={<Lazy><InterestCalculatorPage /></Lazy>} />
         <Route path="/hsn-sac-finder" element={<Lazy><HsnSacFinderPage /></Lazy>} />
+        <Route path="/gstin-validator" element={<Lazy><GstinValidatorPage /></Lazy>} />
+        <Route path="/scheme-comparison" element={<Lazy><SchemeComparisonPage /></Lazy>} />
+        <Route path="/payment-challan" element={<Lazy><PaymentChallanPage /></Lazy>} />
+        <Route path="/itc-calculator" element={<Lazy><ItcCalculatorPage /></Lazy>} />
+        <Route path="/guides/gst-registration-process" element={<Lazy><GstRegistrationProcessGuide /></Lazy>} />
+        <Route path="/guides/gst-return-calendar-2026-27" element={<Lazy><GstReturnCalendarGuide /></Lazy>} />
+        <Route path="/guides/gst-rates-list-2026" element={<Lazy><GstRatesListGuide /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
         <Route path="/" element={<Home />} />

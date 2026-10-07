@@ -666,6 +666,28 @@ export default function LandingPage() {
       <main>
         <InstantLookup />
 
+        <section className="popular-tools-section">
+          <h2 className="popular-tools-heading">Popular Tools</h2>
+          <div className="popular-tools-grid">
+            <Link to="/calculator" className="popular-tool-card">
+              <strong>GST Calculator</strong>
+              <span>CGST, SGST, IGST breakdown</span>
+            </Link>
+            <Link to="/lookup" className="popular-tool-card">
+              <strong>GSTIN Lookup</strong>
+              <span>Verify any GST number</span>
+            </Link>
+            <Link to="/penalty-calculator" className="popular-tool-card">
+              <strong>Penalty Calculator</strong>
+              <span>Late filing fees &amp; interest</span>
+            </Link>
+            <Link to="/hsn-sac-finder" className="popular-tool-card">
+              <strong>HSN/SAC Finder</strong>
+              <span>Search codes by product name</span>
+            </Link>
+          </div>
+        </section>
+
         <div className={`landing-split ${vis}`}>
           <div className="landing-left">
             <div className="landing-hero-robot-wrap">
@@ -775,6 +797,9 @@ export default function LandingPage() {
             <Link to="/penalty-calculator">Penalty Calculator</Link>
             <Link to="/eway-bill">E-Way Bill Checker</Link>
             <Link to="/input-tax-credit">ITC Eligibility</Link>
+            <Link to="/gstin-validator">GSTIN Validator</Link>
+            <Link to="/scheme-comparison">Scheme Comparison</Link>
+            <Link to="/itc-calculator">ITC Calculation</Link>
             <Link to="/embed">Embed Widget</Link>
           </div>
           <div className="landing-footer-col">
@@ -790,6 +815,9 @@ export default function LandingPage() {
             <Link to="/blog">Blog</Link>
             <Link to="/best-gst-software">Best GST Software</Link>
             <Link to="/blog/gst-filing-guide-india-2026">GST Filing Guide</Link>
+            <Link to="/guides/gst-registration-process">Registration Guide</Link>
+            <Link to="/guides/gst-return-calendar-2026-27">Return Calendar</Link>
+            <Link to="/guides/gst-rates-list-2026">GST Rates List</Link>
           </div>
           <div className="landing-footer-col">
             <h4>Compare</h4>

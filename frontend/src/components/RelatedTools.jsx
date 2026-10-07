@@ -19,6 +19,10 @@ const ALL_TOOLS = [
   { path: "/resources", label: "All GST Tools", desc: "Complete tools & guides hub" },
   { path: "/best-gst-software", label: "Best GST Software", desc: "Top 10 GST tools compared" },
   { path: "/guides", label: "GST Guides", desc: "Step-by-step filing tutorials" },
+  { path: "/gstin-validator", label: "GSTIN Validator", desc: "Validate GSTIN format & check digit" },
+  { path: "/scheme-comparison", label: "Scheme Comparison", desc: "Regular vs Composition scheme" },
+  { path: "/payment-challan", label: "Payment Challan", desc: "GST PMT-06 challan helper" },
+  { path: "/itc-calculator", label: "ITC Calculator", desc: "Calculate Input Tax Credit amount" },
 ];
 
 export default function RelatedTools({ current }) {

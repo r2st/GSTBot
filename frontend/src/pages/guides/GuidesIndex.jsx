@@ -30,6 +30,21 @@ const GUIDES = [
     title: "E-Way Bill Guide for Businesses",
     desc: "Complete e-way bill guide — when required, how to generate, validity periods, exemptions, penalties, and state-specific rules.",
   },
+  {
+    to: "/guides/gst-registration-process",
+    title: "GST Registration Process Step by Step 2026",
+    desc: "Complete step-by-step guide to GST registration in India 2026. Documents, eligibility, portal walkthrough, and common mistakes.",
+  },
+  {
+    to: "/guides/gst-return-calendar-2026-27",
+    title: "GST Return Filing Calendar FY 2026-27",
+    desc: "All due dates for GSTR-1, GSTR-3B, GSTR-9, CMP-08, and IFF. Monthly and quarterly filing deadlines at a glance.",
+  },
+  {
+    to: "/guides/gst-rates-list-2026",
+    title: "GST Rates List by Product Category 2026",
+    desc: "Complete GST rates list — all rate slabs (0%, 5%, 12%, 18%, 28%) with product categories, service rates, and HSN codes.",
+  },
 ];
 
 const BLOG_ARTICLES = [
@@ -58,6 +73,10 @@ const TOOLS = [
   { to: "/penalty-calculator", title: "Penalty Calculator", desc: "Late filing penalties & interest" },
   { to: "/eway-bill", title: "E-Way Bill Checker", desc: "Check if e-way bill is needed" },
   { to: "/input-tax-credit", title: "ITC Eligibility", desc: "Check Input Tax Credit eligibility" },
+  { to: "/gstin-validator", title: "GSTIN Validator", desc: "Validate GSTIN format & check digit" },
+  { to: "/scheme-comparison", title: "Scheme Comparison", desc: "Regular vs Composition scheme" },
+  { to: "/payment-challan", title: "Payment Challan", desc: "GST PMT-06 challan helper" },
+  { to: "/itc-calculator", title: "ITC Calculator", desc: "Calculate Input Tax Credit amount" },
 ];
 
 const BREADCRUMBS = [
