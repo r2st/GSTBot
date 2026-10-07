@@ -41,6 +41,21 @@ const ARTICLES = [
     title: "E-Invoice Under GST: Applicability, Format, and Process",
     description: "Comprehensive guide to e-invoicing under GST — turnover thresholds, IRN generation, schema format, IRP process, and penalties.",
   },
+  {
+    slug: "gst-penalties-interest-late-filing",
+    title: "GST Penalties and Interest: Complete Guide to Avoiding Late Filing Fines",
+    description: "All GST penalties in one place — late filing fees by return type, interest rates on unpaid tax, invoicing penalties, and practical tips to stay penalty-free.",
+  },
+  {
+    slug: "gst-composition-scheme-guide",
+    title: "GST Composition Scheme: Eligibility, Tax Rates & Benefits",
+    description: "Everything about the Composition Scheme — eligibility, tax rates for manufacturers/traders/services, filing requirements, and a detailed comparison with regular GST.",
+  },
+  {
+    slug: "eway-bill-gst-rules-guide",
+    title: "E-Way Bill Under GST: Rules, Generation Process & Validity",
+    description: "Complete guide to E-Way Bills — when required, how to generate, validity by distance, exemptions, penalties, and common mistakes to avoid.",
+  },
 ];
 
 export { ARTICLES };

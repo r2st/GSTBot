@@ -68,9 +68,9 @@ describe("BlogIndex", () => {
 });
 
 describe("ARTICLES", () => {
-  it("exports eight articles with unique slugs", () => {
-    expect(ARTICLES).toHaveLength(8);
+  it("exports eleven articles with unique slugs", () => {
+    expect(ARTICLES).toHaveLength(11);
     const slugs = ARTICLES.map((a) => a.slug);
-    expect(new Set(slugs).size).toBe(8);
+    expect(new Set(slugs).size).toBe(11);
   });
 });
