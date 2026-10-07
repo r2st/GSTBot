@@ -24,6 +24,9 @@ const ALL_TOOLS = [
   { path: "/scheme-comparison", label: "Scheme Comparison", desc: "Regular vs Composition scheme" },
   { path: "/payment-challan", label: "Payment Challan", desc: "GST PMT-06 challan helper" },
   { path: "/itc-calculator", label: "ITC Calculator", desc: "Calculate Input Tax Credit amount" },
+  { path: "/registration-type-advisor", label: "Registration Advisor", desc: "Find the right GST registration type" },
+  { path: "/rcm-calculator", label: "RCM Calculator", desc: "Reverse charge with ITC tracking" },
+  { path: "/audit-checklist", label: "Audit Checklist", desc: "GST audit compliance tracker" },
 ];
 
 export default function RelatedTools({ current }) {

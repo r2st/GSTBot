@@ -685,6 +685,18 @@ export default function LandingPage() {
               <strong>HSN/SAC Finder</strong>
               <span>Search codes by product name</span>
             </Link>
+            <Link to="/registration-type-advisor" className="popular-tool-card">
+              <strong>Registration Advisor</strong>
+              <span>Regular, Composition, Casual, or NRI</span>
+            </Link>
+            <Link to="/rcm-calculator" className="popular-tool-card">
+              <strong>RCM Calculator</strong>
+              <span>Reverse charge with ITC tracking</span>
+            </Link>
+            <Link to="/audit-checklist" className="popular-tool-card">
+              <strong>Audit Checklist</strong>
+              <span>GSTR-9C compliance tracker</span>
+            </Link>
           </div>
         </section>
 

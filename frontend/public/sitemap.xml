@@ -109,6 +109,24 @@
     <priority>0.9</priority>
   </url>
   <url>
+    <loc>https://gst.doaide.com/registration-type-advisor</loc>
+    <lastmod>2026-10-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://gst.doaide.com/rcm-calculator</loc>
+    <lastmod>2026-10-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://gst.doaide.com/audit-checklist</loc>
+    <lastmod>2026-10-07</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://gst.doaide.com/itc-mismatch</loc>
     <lastmod>2026-10-07</lastmod>
     <changefreq>monthly</changefreq>
