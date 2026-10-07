@@ -33,6 +33,9 @@ const AuthCallbackPage = lazy(() => import("./pages/AuthCallbackPage"));
 const GstComplianceChecklist = lazy(() => import("./pages/blog/GstComplianceChecklist"));
 const GstFilingGuide = lazy(() => import("./pages/blog/GstFilingGuide"));
 const HsnCodeLookup = lazy(() => import("./pages/blog/HsnCodeLookup"));
+const GstRegistrationOnline = lazy(() => import("./pages/blog/GstRegistrationOnline"));
+const Gstr3bGuide = lazy(() => import("./pages/blog/Gstr3bGuide"));
+const ItcReconciliationGuide = lazy(() => import("./pages/blog/ItcReconciliationGuide"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -129,6 +132,9 @@ export default function App() {
           <Route path="gst-filing-guide-india-2026" element={<GstFilingGuide />} />
           <Route path="hsn-code-lookup" element={<HsnCodeLookup />} />
           <Route path="gst-compliance-checklist-small-business" element={<GstComplianceChecklist />} />
+          <Route path="gst-registration-online-guide" element={<GstRegistrationOnline />} />
+          <Route path="gstr-3b-filing-guide" element={<Gstr3bGuide />} />
+          <Route path="itc-reconciliation-gstr-2a-guide" element={<ItcReconciliationGuide />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />

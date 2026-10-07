@@ -16,6 +16,21 @@ const ARTICLES = [
     title: "GST Compliance Checklist for Small Businesses",
     description: "A practical checklist for small businesses to stay GST-compliant — from registration to return filing and ITC claims.",
   },
+  {
+    slug: "gst-registration-online-guide",
+    title: "GST Registration Online: Complete Step-by-Step Guide 2026",
+    description: "Step-by-step guide to GST registration online in India — documents required, portal walkthrough, timeline, and common rejection reasons.",
+  },
+  {
+    slug: "gstr-3b-filing-guide",
+    title: "GSTR-3B Filing: Due Dates, Format, and Common Mistakes",
+    description: "Complete guide to GSTR-3B filing — due dates, format walkthrough, step-by-step process, 8 common mistakes, and late filing penalties.",
+  },
+  {
+    slug: "itc-reconciliation-gstr-2a-guide",
+    title: "ITC Reconciliation Under GST: How to Match GSTR-2A with Purchase Register",
+    description: "Detailed guide to ITC reconciliation — match GSTR-2B with purchase register, resolve mismatches, and avoid ITC reversals.",
+  },
 ];
 
 export { ARTICLES };
