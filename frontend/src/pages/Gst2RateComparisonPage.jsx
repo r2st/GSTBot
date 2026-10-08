@@ -5,6 +5,7 @@ import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
 import SeoHead from "../components/SeoHead";
+import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { allProducts } from "../lib/hsnData";
@@ -113,6 +114,16 @@ export default function Gst2RateComparisonPage() {
                     })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {results.length > 0 && (
+              <div className="calc-result-actions" style={{ marginTop: "1rem" }}>
+                <ShareButtons
+                  path="/rate-comparison"
+                  text={`Compare old vs new GST 2.0 rates for "${query}" — free tool on DoAide GST`}
+                  toolName="GST 2.0 Rate Comparison"
+                />
               </div>
             )}
 

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { track } from "../lib/track";
+import RecentTools from "../components/RecentTools";
+import TrendingTools from "../components/TrendingTools";
 
 const DOAIDE_PRODUCTS = [
   { name: "Docs", url: "https://docs.doaide.com" },
@@ -342,6 +344,9 @@ export default function LandingPage() {
       </header>
 
       <main>
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 1rem" }}>
+          <RecentTools />
+        </div>
         <InstantLookup />
 
         <section className="landing-section" aria-labelledby="features-heading">
@@ -388,6 +393,10 @@ export default function LandingPage() {
         <PopularSearches />
 
         <FaqSection />
+
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: "0 1rem" }}>
+          <TrendingTools />
+        </div>
 
         <section className="landing-cta">
           <h2>Need Automated GST Filing?</h2>

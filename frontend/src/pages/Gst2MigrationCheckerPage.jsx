@@ -5,6 +5,7 @@ import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
 import RelatedTools from "../components/RelatedTools";
 import SeoHead from "../components/SeoHead";
+import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { formatINR } from "../lib/gstCalc";
@@ -136,6 +137,13 @@ export default function Gst2MigrationCheckerPage() {
                 <div className="calc-result-row calc-total">
                   <span>New Total (incl. GST)</span>
                   <strong>{formatINR(result.newTotal)}</strong>
+                </div>
+                <div className="calc-result-actions">
+                  <ShareButtons
+                    path="/migration-checker"
+                    text={`GST 2.0 impact on ${contract.label}: ${result.diff >= 0 ? "+" : ""}${formatINR(result.diff)} — check your contracts free on DoAide GST`}
+                    toolName="GST 2.0 Migration Checker"
+                  />
                 </div>
               </div>
             )}

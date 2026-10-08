@@ -6,6 +6,8 @@ import Shell from "./components/Shell";
 import { SkeletonPanel } from "./components/Skeleton";
 import { useAuth } from "./hooks/useAuth";
 import LandingPage from "./pages/LandingPage";
+import ToolTracker from "./components/ToolTracker";
+import SocialProofBar from "./components/SocialProofBar";
 
 const AlertsPage = lazy(() => import("./pages/AlertsPage"));
 const BlogLayout = lazy(() => import("./pages/BlogLayout"));
@@ -145,6 +147,8 @@ function Lazy({ children }) {
 export default function App() {
   return (
     <Suspense fallback={<LazyFallback />}>
+      <ToolTracker />
+      <SocialProofBar />
       <Routes>
         <Route path="/login" element={<Navigate to="/" replace />} />
         <Route path="/auth/callback" element={<AuthCallbackPage />} />
