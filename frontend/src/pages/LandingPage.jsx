@@ -115,9 +115,10 @@ const HOW_IT_WORKS = [
 ];
 
 const TESTIMONIALS = [
-  { name: "Priya S.", role: "CA, Mumbai", quote: "DoAide GST cut our reconciliation time from 2 days to 20 minutes. The GSTR-2B matching is spot-on." },
-  { name: "Rahul M.", role: "Founder, textile exports", quote: "We were missing ITC on mismatched invoices every month. DoAide caught them all in the first run." },
-  { name: "Anita K.", role: "Accountant, retail chain", quote: "The free plan handles our monthly volume perfectly. Filing GSTR-3B used to be stressful — now it takes minutes." },
+  { name: "Priya S.", role: "CA, Mumbai", stars: 5, quote: "DoAide GST cut our reconciliation time from 2 days to 20 minutes. The GSTR-2B matching is spot-on." },
+  { name: "Rahul M.", role: "Founder, textile exports", stars: 5, quote: "We were missing ITC on mismatched invoices every month. DoAide caught them all in the first run." },
+  { name: "Anita K.", role: "Accountant, retail chain", stars: 5, quote: "The free plan handles our monthly volume perfectly. Filing GSTR-3B used to be stressful — now it takes minutes." },
+  { name: "Suresh Gupta", role: "Tax Consultant, Ahmedabad", stars: 4, quote: "The HSN code finder and penalty calculator are tools I use daily. Clients love the instant GST breakdowns." },
 ];
 
 const FAQ_ITEMS = [
@@ -380,6 +381,11 @@ export default function LandingPage() {
           <div className="landing-testimonials">
             {TESTIMONIALS.map((t) => (
               <blockquote key={t.name} className="landing-testimonial">
+                <div style={{ display: "flex", gap: "2px", marginBottom: "8px" }}>
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <span key={i} style={{ color: i < t.stars ? "var(--brand)" : "var(--ink-faint)", fontSize: "14px" }}>★</span>
+                  ))}
+                </div>
                 <p>&ldquo;{t.quote}&rdquo;</p>
                 <footer>
                   <strong>{t.name}</strong>
