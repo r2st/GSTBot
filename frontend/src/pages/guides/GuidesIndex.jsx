@@ -68,6 +68,16 @@ const BLOG_ARTICLES = [
     title: "GST Compliance Checklist for Small Businesses",
     desc: "Monthly and quarterly GST compliance checklist for small businesses to stay compliant and avoid penalties.",
   },
+  {
+    to: "/blog/difference-between-cgst-sgst-igst",
+    title: "Difference Between CGST, SGST and IGST",
+    desc: "When CGST+SGST vs IGST applies, how rates split, ITC set-off rules, and worked examples.",
+  },
+  {
+    to: "/blog/gst-late-filing-penalty-calculator",
+    title: "GST Late Filing Penalty Calculator",
+    desc: "Calculate late fees and interest for GSTR-1, GSTR-3B, GSTR-9. Current rates, caps, and an interactive calculator.",
+  },
 ];
 
 const TOOLS = [
