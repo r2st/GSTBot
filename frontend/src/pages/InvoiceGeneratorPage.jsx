@@ -9,6 +9,7 @@ import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { formatINR } from "../lib/gstCalc";
+import { gstinShapeError } from "../lib/validate";
 
 const GST_RATES = [0, 0.25, 3, 5, 12, 18, 28];
 
@@ -52,6 +53,18 @@ function numberToWords(num) {
 }
 
 const emptyItem = { description: "", hsn: "", qty: "1", rate: "", gstRate: "18" };
+
+function generateInvoiceNo() {
+  const d = new Date();
+  const yy = String(d.getFullYear()).slice(-2);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const seq = String(Math.floor(Math.random() * 900) + 100);
+  return `INV-${yy}${mm}-${seq}`;
+}
+
+const fieldHint = { fontSize: "0.8rem", marginTop: "4px", minHeight: "1.2em" };
+const fieldError = { ...fieldHint, color: "#ef4444" };
+const fieldOk = { ...fieldHint, color: "#34d399" };
 
 const TOOL_SCHEMA = {
   "@context": "https://schema.org",
@@ -126,7 +139,7 @@ export default function InvoiceGeneratorPage() {
   const [buyer, setBuyer] = useState({
     name: "", address: "", gstin: "", state: "", phone: "", email: "",
   });
-  const [invoiceNo, setInvoiceNo] = useState("");
+  const [invoiceNo, setInvoiceNo] = useState(generateInvoiceNo);
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split("T")[0]);
   const [dueDate, setDueDate] = useState("");
   const [items, setItems] = useState([{ ...emptyItem }]);
@@ -267,7 +280,7 @@ ${invoiceRef.current.innerHTML}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
                 <label className="calc-label">
                   Invoice Number
-                  <input className="calc-input" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="INV-001" />
+                  <input className="calc-input" value={invoiceNo} onChange={(e) => setInvoiceNo(e.target.value)} placeholder="Auto-generated" />
                 </label>
                 <label className="calc-label">
                   Invoice Date
@@ -287,7 +300,12 @@ ${invoiceRef.current.innerHTML}
                 </label>
                 <label className="calc-label">
                   GSTIN
-                  <input className="calc-input" value={seller.gstin} onChange={(e) => updateSeller("gstin", e.target.value.toUpperCase())} placeholder="15-digit GSTIN" maxLength={15} />
+                  <input className="calc-input" value={seller.gstin} onChange={(e) => updateSeller("gstin", e.target.value.toUpperCase())} placeholder="e.g. 27AAPFU0939F1ZV" maxLength={15} style={seller.gstin && gstinShapeError(seller.gstin) ? { borderColor: "#ef4444" } : undefined} />
+                  {seller.gstin && (
+                    <div style={gstinShapeError(seller.gstin) ? fieldError : fieldOk}>
+                      {gstinShapeError(seller.gstin) || "✓ Valid format"}
+                    </div>
+                  )}
                 </label>
                 <label className="calc-label" style={{ gridColumn: "1 / -1" }}>
                   Address
@@ -314,7 +332,12 @@ ${invoiceRef.current.innerHTML}
                 </label>
                 <label className="calc-label">
                   GSTIN
-                  <input className="calc-input" value={buyer.gstin} onChange={(e) => updateBuyer("gstin", e.target.value.toUpperCase())} placeholder="15-digit GSTIN" maxLength={15} />
+                  <input className="calc-input" value={buyer.gstin} onChange={(e) => updateBuyer("gstin", e.target.value.toUpperCase())} placeholder="e.g. 29AABCU9603R1ZM" maxLength={15} style={buyer.gstin && gstinShapeError(buyer.gstin) ? { borderColor: "#ef4444" } : undefined} />
+                  {buyer.gstin && (
+                    <div style={gstinShapeError(buyer.gstin) ? fieldError : fieldOk}>
+                      {gstinShapeError(buyer.gstin) || "✓ Valid format"}
+                    </div>
+                  )}
                 </label>
                 <label className="calc-label" style={{ gridColumn: "1 / -1" }}>
                   Address

@@ -62,18 +62,29 @@ describe("InvoiceGeneratorPage", () => {
     renderPage();
     const sellerName = screen.getAllByPlaceholderText(/business name/i)[0];
     const buyerName = screen.getAllByPlaceholderText(/business name/i)[1];
-    const invoiceInput = screen.getByPlaceholderText("INV-001");
     const descInputs = screen.getAllByPlaceholderText("Item description");
     const rateInputs = screen.getAllByPlaceholderText("0.00");
 
     await userEvent.type(sellerName, "Test Seller");
     await userEvent.type(buyerName, "Test Buyer");
-    await userEvent.type(invoiceInput, "INV-001");
     await userEvent.type(descInputs[0], "Test Item");
     await userEvent.type(rateInputs[0], "1000");
 
     const previewBtn = screen.getByText("Preview Invoice");
     expect(previewBtn).not.toBeDisabled();
+  });
+
+  it("auto-generates an invoice number on load", () => {
+    renderPage();
+    const invoiceInput = screen.getByPlaceholderText("Auto-generated");
+    expect(invoiceInput.value).toMatch(/^INV-\d{4}-\d{3}$/);
+  });
+
+  it("shows GSTIN validation feedback", async () => {
+    renderPage();
+    const gstinInputs = screen.getAllByPlaceholderText(/e\.g\./);
+    await userEvent.type(gstinInputs[0], "INVALID");
+    expect(screen.getByText(/GSTIN is 15 characters/)).toBeInTheDocument();
   });
 
   it("renders FAQ section", () => {
