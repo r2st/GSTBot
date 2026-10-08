@@ -81,6 +81,31 @@ const ARTICLES = [
     title: "How to Claim Input Tax Credit Under GST",
     description: "Step-by-step guide to claiming ITC — eligibility conditions, blocked credits, time limits, reversal rules, and GSTR-2B reconciliation.",
   },
+  {
+    slug: "gst-registration-complete-guide-2026",
+    title: "Complete Guide to GST Registration in India 2026",
+    description: "Everything about GST registration — types, eligibility, documents, online process, timelines, penalties, and post-registration compliance for all business types.",
+  },
+  {
+    slug: "hsn-code-list-2026-complete-guide",
+    title: "HSN Code List 2026 — Complete Guide to HSN Classification",
+    description: "Complete HSN code list with GST rates for 2026. Understand the classification system, find codes for your products, and learn mandatory HSN requirements on invoices.",
+  },
+  {
+    slug: "gst-2-changes-explained-india",
+    title: "GST 2.0 Changes Explained — What's Changing in India's GST System",
+    description: "Complete breakdown of GST 2.0 reforms — rate rationalization, slab restructuring, return simplification, e-invoicing expansion, and what businesses need to prepare for.",
+  },
+  {
+    slug: "how-to-file-gst-returns-online",
+    title: "How to File GST Returns Online — Complete Step-by-Step Guide 2026",
+    description: "Step-by-step guide to filing GSTR-1, GSTR-3B, and GSTR-9 online. Due dates, late fees, QRMP scheme, and common mistakes to avoid.",
+  },
+  {
+    slug: "gst-rates-services-2026",
+    title: "GST Rates for Services 2026 — Complete Rate List with SAC Codes",
+    description: "Complete GST rate list for all services in 2026 with SAC codes. IT, consulting, transport, healthcare, education, restaurants, hotels, and professional services.",
+  },
 ];
 
 export { ARTICLES };

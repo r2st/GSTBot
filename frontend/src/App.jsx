@@ -49,6 +49,11 @@ const GstRegistrationDocuments = lazy(() => import("./pages/blog/GstRegistration
 const Gstr1VsGstr3b = lazy(() => import("./pages/blog/Gstr1VsGstr3b"));
 const CompositionVsRegular = lazy(() => import("./pages/blog/CompositionVsRegular"));
 const HowToClaimItc = lazy(() => import("./pages/blog/HowToClaimItc"));
+const GstRegistrationGuide2026 = lazy(() => import("./pages/blog/GstRegistrationGuide2026"));
+const HsnCodeList2026 = lazy(() => import("./pages/blog/HsnCodeList2026"));
+const Gst2ChangesExplained = lazy(() => import("./pages/blog/Gst2ChangesExplained"));
+const GstReturnFilingOnline = lazy(() => import("./pages/blog/GstReturnFilingOnline"));
+const GstRatesServices2026 = lazy(() => import("./pages/blog/GstRatesServices2026"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -171,6 +176,11 @@ export default function App() {
           <Route path="gstr-1-vs-gstr-3b-difference" element={<Gstr1VsGstr3b />} />
           <Route path="composition-scheme-vs-regular-scheme" element={<CompositionVsRegular />} />
           <Route path="how-to-claim-input-tax-credit-gst" element={<HowToClaimItc />} />
+          <Route path="gst-registration-complete-guide-2026" element={<GstRegistrationGuide2026 />} />
+          <Route path="hsn-code-list-2026-complete-guide" element={<HsnCodeList2026 />} />
+          <Route path="gst-2-changes-explained-india" element={<Gst2ChangesExplained />} />
+          <Route path="how-to-file-gst-returns-online" element={<GstReturnFilingOnline />} />
+          <Route path="gst-rates-services-2026" element={<GstRatesServices2026 />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />
