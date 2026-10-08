@@ -7,15 +7,15 @@ import { copyToClipboard, fullUrl } from "../lib/share";
 import { track } from "../lib/track";
 
 const DOAIDE_PRODUCTS = [
-  { name: "Desk", url: "https://desk.doaide.com" },
-  { name: "Jobs", url: "https://job.doaide.com" },
+  { name: "Docs", url: "https://docs.doaide.com" },
+  { name: "Resume", url: "https://resume.doaide.com" },
   { name: "409A", url: "https://409a.doaide.com" },
   { name: "GST", url: "https://gst.doaide.com" },
+  { name: "Contracts", url: "https://contracts.doaide.com" },
+  { name: "Invoicer", url: "https://invoicer.doaide.com" },
+  { name: "Jobs", url: "https://job.doaide.com" },
+  { name: "Desk", url: "https://desk.doaide.com" },
   { name: "Pulse", url: "https://pulse.doaide.com" },
-  { name: "Med", url: "https://med.doaide.com" },
-  { name: "Realty", url: "https://realty.doaide.com" },
-  { name: "Reach", url: "https://reach.doaide.com" },
-  { name: "Trade", url: "https://trade.doaide.com" },
 ];
 
 const TYPEWRITER_PHRASES = [
@@ -804,6 +804,33 @@ export default function LandingPage() {
         <ReminderSignup />
 
         <ReferralBanner />
+
+        <section className="landing-section" style={{ textAlign: "center" }}>
+          <h2 className="landing-section-title">You Might Also Need</h2>
+          <p className="landing-section-sub" style={{ marginBottom: "1.5rem" }}>More free tools from DoAide for Indian businesses and professionals</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", maxWidth: "800px", margin: "0 auto" }}>
+            <a href="https://docs.doaide.com" target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "1.25rem", borderRadius: "0.75rem", border: "1px solid var(--border)", textDecoration: "none", textAlign: "left", transition: "box-shadow 0.2s" }}>
+              <span style={{ fontSize: "1.5rem" }}>📄</span>
+              <strong style={{ display: "block", marginTop: "0.5rem", color: "var(--fg)" }}>Document Generator</strong>
+              <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>Rent receipts, salary slips, experience letters — free PDF download</span>
+            </a>
+            <a href="https://resume.doaide.com" target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "1.25rem", borderRadius: "0.75rem", border: "1px solid var(--border)", textDecoration: "none", textAlign: "left", transition: "box-shadow 0.2s" }}>
+              <span style={{ fontSize: "1.5rem" }}>📝</span>
+              <strong style={{ display: "block", marginTop: "0.5rem", color: "var(--fg)" }}>Resume Builder</strong>
+              <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>AI resume builder with ATS optimization. Free PDF download</span>
+            </a>
+            <a href="https://409a.doaide.com" target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "1.25rem", borderRadius: "0.75rem", border: "1px solid var(--border)", textDecoration: "none", textAlign: "left", transition: "box-shadow 0.2s" }}>
+              <span style={{ fontSize: "1.5rem" }}>📊</span>
+              <strong style={{ display: "block", marginTop: "0.5rem", color: "var(--fg)" }}>409A Valuations</strong>
+              <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>Independent startup valuations with AI-assisted intake</span>
+            </a>
+          </div>
+          <p style={{ marginTop: "1rem" }}>
+            <a href="https://doaide.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontSize: "0.875rem", textDecoration: "none" }}>
+              Explore all DoAide tools →
+            </a>
+          </p>
+        </section>
 
         <section className="landing-cta">
           <h2>Start Filing GST Returns in Minutes</h2>
