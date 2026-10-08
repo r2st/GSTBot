@@ -3198,6 +3198,25 @@ a:focus-visible {
 .share-whatsapp:hover { color: #25D366 !important; border-color: #25D366; }
 .share-twitter:hover { color: var(--ink-strong) !important; }
 
+/* Social proof */
+.social-proof {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  margin-top: 0.75rem;
+  font-size: 0.75rem;
+  color: var(--ink-muted, rgba(255,255,255,0.4));
+}
+.social-proof-counter {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.social-proof-badges {
+  opacity: 0.8;
+}
+
 /* GST Rate page */
 .rate-hero {
   text-align: center;
