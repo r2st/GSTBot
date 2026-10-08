@@ -119,6 +119,10 @@ const TESTIMONIALS = [
   { name: "Rahul M.", role: "Founder, textile exports", stars: 5, quote: "We were missing ITC on mismatched invoices every month. DoAide caught them all in the first run." },
   { name: "Anita K.", role: "Accountant, retail chain", stars: 5, quote: "The free plan handles our monthly volume perfectly. Filing GSTR-3B used to be stressful — now it takes minutes." },
   { name: "Suresh Gupta", role: "Tax Consultant, Ahmedabad", stars: 4, quote: "The HSN code finder and penalty calculator are tools I use daily. Clients love the instant GST breakdowns." },
+  { name: "Deepak Joshi", role: "Owner, electronics store, Jaipur", stars: 5, quote: "The invoice generator saved us from buying expensive billing software. We create 50+ invoices a month for free." },
+  { name: "Meena R.", role: "Freelance accountant, Chennai", stars: 5, quote: "I handle GST for 12 small businesses. The return calendar and deadline alerts mean I never miss a date anymore." },
+  { name: "Vikram Patel", role: "Startup founder, Bangalore", stars: 5, quote: "We didn't know our interstate invoices needed IGST instead of CGST+SGST. The GSTIN validator caught it before filing." },
+  { name: "Sunita Agarwal", role: "CA firm, Kolkata", stars: 4, quote: "The ITC calculator handles Section 17(5) blocked credits correctly — something even some paid tools get wrong." },
 ];
 
 const FAQ_ITEMS = [
