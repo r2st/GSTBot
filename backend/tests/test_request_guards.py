@@ -116,6 +116,8 @@ class TestSetOffNeedsAToken:
             "/api/v1/auth/github/callback",
             "/api/v1/auth/microsoft",
             "/api/v1/auth/microsoft/callback",
+            # WhatsApp webhook — called by Twilio / WhatsApp servers.
+            "/api/v1/whatsapp/webhook",
         }
 
         def calls(dependant):

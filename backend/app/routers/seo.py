@@ -39,6 +39,7 @@ STATIC_PAGES = [
     "/invoice-generator",
     "/reverse-charge",
     "/itc-mismatch",
+    "/whatsapp",
     "/blog",
     "/blog/gst-filing-guide-india-2026",
     "/blog/hsn-code-lookup",

@@ -42,6 +42,7 @@ from app.routers import (
     seo,
     subscriptions,
     suppliers,
+    whatsapp,
 )
 
 logger = logging.getLogger(__name__)
@@ -370,6 +371,7 @@ def create_app() -> FastAPI:
     application.include_router(alerts.router, prefix=prefix)
     application.include_router(subscriptions.router, prefix=prefix)
     application.include_router(seo.router, prefix=prefix)
+    application.include_router(whatsapp.router, prefix=prefix)
 
     @application.get("/", include_in_schema=False)
     def root() -> dict[str, str | None]:

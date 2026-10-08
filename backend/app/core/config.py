@@ -221,6 +221,16 @@ class Settings(BaseSettings):
     microsoft_client_secret: str = ""
     oauth_redirect_base: str = "http://localhost:3008"
 
+    # ---- WhatsApp Bot ----
+    # Twilio auth token for verifying X-Twilio-Signature. Empty disables
+    # signature checking, which is fine for development and for providers
+    # that authenticate at the network level.
+    whatsapp_twilio_auth_token: str = ""
+    # WhatsApp Cloud API verification token for the GET handshake.
+    whatsapp_verify_token: str = ""
+    # Public base URL for Twilio signature verification behind a proxy.
+    whatsapp_webhook_base_url: str = ""
+
     # ---- Uploads ----
     upload_dir: str = "./data/invoices"
     max_upload_mb: int = 15

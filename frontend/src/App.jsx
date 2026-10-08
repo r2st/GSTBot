@@ -97,6 +97,7 @@ const Gst2RateComparisonPage = lazy(() => import("./pages/Gst2RateComparisonPage
 const Gst2MigrationCheckerPage = lazy(() => import("./pages/Gst2MigrationCheckerPage"));
 const InsuranceSavingsPage = lazy(() => import("./pages/InsuranceSavingsPage"));
 const Gst2GuidePage = lazy(() => import("./pages/guides/Gst2GuidePage"));
+const WhatsAppPage = lazy(() => import("./pages/WhatsAppPage"));
 
 function LazyFallback() {
   return (
@@ -231,6 +232,7 @@ export default function App() {
         <Route path="/rate-comparison" element={<Lazy><Gst2RateComparisonPage /></Lazy>} />
         <Route path="/migration-checker" element={<Lazy><Gst2MigrationCheckerPage /></Lazy>} />
         <Route path="/insurance-savings" element={<Lazy><InsuranceSavingsPage /></Lazy>} />
+        <Route path="/whatsapp" element={<Lazy><WhatsAppPage /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
         <Route path="/widget/hsn" element={<Lazy><HsnWidgetPage /></Lazy>} />

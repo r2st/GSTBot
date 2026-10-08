@@ -503,6 +503,9 @@ UNGATED_MUTATIONS = {
     "/api/v1/meta/reminder-subscribe",
     # Public email capture for filing-deadline reminders.
     "/api/v1/subscribers",
+    # WhatsApp webhook — called by Twilio / WhatsApp servers, authenticated
+    # by webhook signature rather than a bearer token.
+    "/api/v1/whatsapp/webhook",
 }
 
 
