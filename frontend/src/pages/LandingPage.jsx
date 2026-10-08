@@ -1,9 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import AuthForm from "../components/AuthForm";
 import { usePageTitle } from "../hooks/usePageTitle";
-import { api } from "../lib/api";
-import { copyToClipboard, fullUrl } from "../lib/share";
 import { track } from "../lib/track";
 
 const DOAIDE_PRODUCTS = [
@@ -16,13 +13,6 @@ const DOAIDE_PRODUCTS = [
   { name: "Jobs", url: "https://job.doaide.com" },
   { name: "Desk", url: "https://desk.doaide.com" },
   { name: "Pulse", url: "https://pulse.doaide.com" },
-];
-
-const TYPEWRITER_PHRASES = [
-  "Free GST return filing online",
-  "Automated GSTR-2B reconciliation",
-  "Never miss a filing deadline",
-  "ITC calculated in seconds",
 ];
 
 function RobotFace({ size = 32, color }) {
@@ -42,154 +32,6 @@ function RobotFace({ size = 32, color }) {
   );
 }
 
-function HeroRobot({ color }) {
-  return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 100" width="120" height="100" className="landing-hero-robot" aria-hidden="true">
-      <line x1="60" y1="18" x2="60" y2="6" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
-      <circle cx="60" cy="4" r="3" fill={color} className="landing-antenna-glow" />
-      <rect x="25" y="18" width="70" height="55" rx="16" fill={color} />
-      <ellipse cx="42" cy="40" rx="8" ry="10" fill="#0A0A0B" />
-      <ellipse cx="78" cy="40" rx="8" ry="10" fill="#0A0A0B" />
-      <circle cx="44" cy="38" r="3" fill={color} opacity="0.5" />
-      <circle cx="80" cy="38" r="3" fill={color} opacity="0.5" />
-      <path d="M45 60 Q60 72 75 60" stroke="#0A0A0B" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-      <rect x="5" y="30" width="16" height="18" rx="6" fill={color} opacity="0.8" />
-      <rect x="99" y="30" width="16" height="18" rx="6" fill={color} opacity="0.8" />
-    </svg>
-  );
-}
-
-function Typewriter({ phrases }) {
-  const [index, setIndex] = useState(0);
-  const [text, setText] = useState("");
-  const [deleting, setDeleting] = useState(false);
-
-  useEffect(() => {
-    const phrase = phrases[index];
-    let timeout;
-
-    if (!deleting && text === phrase) {
-      timeout = setTimeout(() => setDeleting(true), 2000);
-    } else if (deleting && text === "") {
-      setDeleting(false);
-      setIndex((i) => (i + 1) % phrases.length);
-    } else {
-      const speed = deleting ? 30 : 60;
-      timeout = setTimeout(() => {
-        setText(deleting ? phrase.slice(0, text.length - 1) : phrase.slice(0, text.length + 1));
-      }, speed);
-    }
-
-    return () => clearTimeout(timeout);
-  }, [text, deleting, index, phrases]);
-
-  return (
-    <span className="landing-typewriter" aria-label={phrases[index]}>
-      {text}
-      <span className="landing-cursor" aria-hidden="true">|</span>
-    </span>
-  );
-}
-
-function PipelineGraphic() {
-  return (
-    <div className="landing-pipeline" aria-hidden="true">
-      <svg viewBox="0 0 520 90" xmlns="http://www.w3.org/2000/svg">
-        {/* Connecting lines */}
-        <line x1="78" y1="36" x2="152" y2="36" stroke="rgba(240,180,41,0.2)" strokeWidth="2" />
-        <line x1="218" y1="36" x2="302" y2="36" stroke="rgba(240,180,41,0.2)" strokeWidth="2" />
-        <line x1="368" y1="36" x2="442" y2="36" stroke="rgba(240,180,41,0.2)" strokeWidth="2" />
-
-        {/* Flowing particles along lines */}
-        <circle r="3" fill="#F0B429" opacity="0.8">
-          <animateMotion dur="2s" repeatCount="indefinite" path="M78,36 L152,36" />
-        </circle>
-        <circle r="2" fill="#F7CC5F" opacity="0.5">
-          <animateMotion dur="2s" repeatCount="indefinite" begin="0.5s" path="M78,36 L152,36" />
-        </circle>
-        <circle r="3" fill="#F0B429" opacity="0.8">
-          <animateMotion dur="2s" repeatCount="indefinite" begin="0.7s" path="M218,36 L302,36" />
-        </circle>
-        <circle r="2" fill="#F7CC5F" opacity="0.5">
-          <animateMotion dur="2s" repeatCount="indefinite" begin="1.2s" path="M218,36 L302,36" />
-        </circle>
-        <circle r="3" fill="#F0B429" opacity="0.8">
-          <animateMotion dur="2s" repeatCount="indefinite" begin="1.4s" path="M368,36 L442,36" />
-        </circle>
-        <circle r="2" fill="#F7CC5F" opacity="0.5">
-          <animateMotion dur="2s" repeatCount="indefinite" begin="1.9s" path="M368,36 L442,36" />
-        </circle>
-
-        {/* Stage 1: Upload */}
-        <circle cx="50" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
-        <path d="M44 42V30h8l4 4v8H44z" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
-        <path d="M52 30v4h4" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
-        <line x1="50" y1="40" x2="50" y2="35" stroke="#F0B429" strokeWidth="1.2" strokeLinecap="round" />
-        <path d="M47 37l3-3 3 3" fill="none" stroke="#F0B429" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" />
-        <text x="50" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">Upload</text>
-
-        {/* Stage 2: Match */}
-        <circle cx="190" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
-        <rect x="179" y="26" width="10" height="13" rx="1.5" fill="none" stroke="#F0B429" strokeWidth="1.3" />
-        <rect x="185" y="30" width="10" height="13" rx="1.5" fill="none" stroke="#F0B429" strokeWidth="1.3" />
-        <circle cx="196" cy="42" r="4" fill="none" stroke="#F0B429" strokeWidth="1.3" />
-        <line x1="199" y1="45" x2="202" y2="48" stroke="#F0B429" strokeWidth="1.3" strokeLinecap="round" />
-        <text x="190" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">Match</text>
-
-        {/* Stage 3: Reconcile */}
-        <circle cx="330" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
-        <circle cx="330" cy="35" r="10" fill="none" stroke="#F0B429" strokeWidth="1.3" />
-        <path d="M325 35l3 4 7-9" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        <text x="330" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">Reconcile</text>
-
-        {/* Stage 4: File */}
-        <circle cx="470" cy="36" r="28" fill="rgba(240,180,41,0.06)" stroke="rgba(240,180,41,0.25)" strokeWidth="1.5" />
-        <path d="M462 42V28h10l4 4v10H462z" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
-        <path d="M472 28v4h4" fill="none" stroke="#F0B429" strokeWidth="1.3" strokeLinejoin="round" />
-        <path d="M465 35h8M465 38h5" stroke="#F0B429" strokeWidth="1" strokeLinecap="round" />
-        <circle cx="473" cy="44" r="3.5" fill="none" stroke="#F0B429" strokeWidth="1.2" />
-        <path d="M471 44l1.5 1.5 3-3" fill="none" stroke="#F0B429" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round" />
-        <text x="470" y="78" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="10" fontFamily="'IBM Plex Mono',monospace">File</text>
-      </svg>
-    </div>
-  );
-}
-
-const PARTICLES = [
-  { left: "8%", top: "15%", size: 3, delay: 0, dur: 18 },
-  { left: "22%", top: "65%", size: 2, delay: 3, dur: 22 },
-  { left: "35%", top: "30%", size: 4, delay: 7, dur: 15 },
-  { left: "50%", top: "80%", size: 2, delay: 1, dur: 20 },
-  { left: "65%", top: "20%", size: 3, delay: 5, dur: 17 },
-  { left: "78%", top: "55%", size: 2, delay: 9, dur: 23 },
-  { left: "90%", top: "35%", size: 3, delay: 2, dur: 19 },
-  { left: "15%", top: "85%", size: 2, delay: 6, dur: 21 },
-  { left: "42%", top: "45%", size: 3, delay: 4, dur: 16 },
-  { left: "72%", top: "75%", size: 2, delay: 8, dur: 24 },
-  { left: "88%", top: "10%", size: 4, delay: 10, dur: 14 },
-  { left: "5%", top: "50%", size: 2, delay: 11, dur: 25 },
-];
-
-function ParticleField() {
-  return (
-    <div className="landing-particles" aria-hidden="true">
-      {PARTICLES.map((p, i) => (
-        <div
-          key={i}
-          className="landing-particle"
-          style={{
-            left: p.left,
-            top: p.top,
-            width: p.size,
-            height: p.size,
-            animationDelay: `${p.delay}s`,
-            animationDuration: `${p.dur}s`,
-          }}
-        />
-      ))}
-    </div>
-  );
-}
 
 const FEATURES = [
   {
@@ -334,112 +176,51 @@ function FaqSection() {
   );
 }
 
-const INSTANT_TOOLS = [
+const TOOL_CATEGORIES = [
   {
-    to: "/calculator",
-    title: "GST Calculator",
-    desc: "Calculate CGST, SGST, IGST breakdown instantly",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="4" y="2" width="16" height="20" rx="2" />
-        <line x1="8" y1="6" x2="16" y2="6" />
-        <line x1="8" y1="10" x2="10" y2="10" /><line x1="14" y1="10" x2="16" y2="10" />
-        <line x1="8" y1="14" x2="10" y2="14" /><line x1="14" y1="14" x2="16" y2="14" />
-        <line x1="8" y1="18" x2="16" y2="18" />
-      </svg>
-    ),
+    title: "Calculators",
+    tools: [
+      { to: "/calculator", title: "GST Calculator", desc: "CGST, SGST, IGST breakdown instantly" },
+      { to: "/penalty-calculator", title: "Penalty Calculator", desc: "Late filing penalties & interest" },
+      { to: "/late-fee-calculator", title: "Late Fee Calculator", desc: "Late filing fees for any GST return" },
+      { to: "/interest-calculator", title: "Interest Calculator", desc: "Interest on delayed GST payment" },
+      { to: "/itc-calculator", title: "ITC Calculator", desc: "Calculate eligible Input Tax Credit" },
+      { to: "/rcm-calculator", title: "RCM Calculator", desc: "Reverse charge mechanism with ITC" },
+    ],
   },
   {
-    to: "/lookup",
-    title: "GSTIN Lookup",
-    desc: "Verify any GST number — check validity & state",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="11" cy="11" r="8" />
-        <line x1="21" y1="21" x2="16.65" y2="16.65" />
-      </svg>
-    ),
+    title: "Lookup & Verification",
+    tools: [
+      { to: "/lookup", title: "GSTIN Lookup", desc: "Verify any GST number — check validity & state" },
+      { to: "/hsn", title: "HSN Code Finder", desc: "Search HSN/SAC codes & GST rates" },
+      { to: "/hsn-sac-finder", title: "HSN/SAC Finder", desc: "Search codes by product name" },
+      { to: "/gstin-validator", title: "GSTIN Validator", desc: "Validate format and checksum" },
+      { to: "/registration-checker", title: "Registration Checker", desc: "Check if a business is GST registered" },
+    ],
   },
   {
-    to: "/hsn",
-    title: "HSN Code Finder",
-    desc: "Search HSN/SAC codes & GST rates by product name",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-        <polyline points="14 2 14 8 20 8" />
-        <line x1="8" y1="13" x2="16" y2="13" />
-        <line x1="8" y1="17" x2="13" y2="17" />
-      </svg>
-    ),
+    title: "Compliance & Filing",
+    tools: [
+      { to: "/input-tax-credit", title: "ITC Eligibility", desc: "Check ITC eligibility for any purchase" },
+      { to: "/eway-bill", title: "E-Way Bill Checker", desc: "Check if your shipment needs an e-way bill" },
+      { to: "/reverse-charge", title: "Reverse Charge", desc: "Check RCM applicability" },
+      { to: "/itc-mismatch", title: "ITC Mismatch Finder", desc: "Find mismatches in ITC claims" },
+      { to: "/audit-checklist", title: "Audit Checklist", desc: "GSTR-9C compliance tracker" },
+      { to: "/gstr9-checklist", title: "GSTR-9 Checklist", desc: "Annual return filing checklist" },
+      { to: "/composition-scheme", title: "Composition Scheme", desc: "Check eligibility & benefits" },
+      { to: "/scheme-comparison", title: "Scheme Comparison", desc: "Regular vs Composition scheme" },
+    ],
   },
   {
-    to: "/due-dates",
-    title: "Due Dates Calendar",
-    desc: "Never miss a GST filing deadline — full calendar",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="3" y="4" width="18" height="18" rx="2" />
-        <line x1="16" y1="2" x2="16" y2="6" />
-        <line x1="8" y1="2" x2="8" y2="6" />
-        <line x1="3" y1="10" x2="21" y2="10" />
-      </svg>
-    ),
-  },
-  {
-    to: "/penalty-calculator",
-    title: "Penalty Calculator",
-    desc: "Calculate late filing penalties & interest instantly",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
-    ),
-  },
-  {
-    to: "/eway-bill",
-    title: "E-Way Bill Checker",
-    desc: "Check if your shipment needs an e-way bill",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <rect x="1" y="3" width="15" height="13" rx="2" />
-        <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-        <circle cx="5.5" cy="18.5" r="2.5" /><circle cx="18.5" cy="18.5" r="2.5" />
-      </svg>
-    ),
-  },
-  {
-    to: "/late-fee-calculator",
-    title: "Late Fee Calculator",
-    desc: "Calculate late filing fees for any GST return",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-        <line x1="4" y1="21" x2="20" y2="21" strokeDasharray="2 2" />
-      </svg>
-    ),
-  },
-  {
-    to: "/gstr9-checklist",
-    title: "GSTR-9 Checklist",
-    desc: "Interactive annual return filing checklist",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
-      </svg>
-    ),
-  },
-  {
-    to: "/input-tax-credit",
-    title: "ITC Eligibility",
-    desc: "Check Input Tax Credit eligibility for purchases",
-    icon: (
-      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-        <polyline points="22 4 12 14.01 9 11.01" />
-      </svg>
-    ),
+    title: "Planning & Reference",
+    tools: [
+      { to: "/due-dates", title: "Due Dates Calendar", desc: "Never miss a GST filing deadline" },
+      { to: "/return-calendar", title: "Return Calendar", desc: "Full return due date calendar" },
+      { to: "/invoice-generator", title: "Invoice Generator", desc: "Create GST-compliant invoices" },
+      { to: "/payment-challan", title: "Payment Challan", desc: "Generate GST payment challans" },
+      { to: "/registration-type-advisor", title: "Registration Advisor", desc: "Find the right GST registration type" },
+      { to: "/turnover-limit", title: "Turnover Limit", desc: "Check GST registration threshold" },
+    ],
   },
 ];
 
@@ -460,6 +241,8 @@ function InstantLookup() {
 
   return (
     <section className="landing-instant">
+      <h1 className="landing-hero-title">Free GST Tools for Indian Businesses</h1>
+      <p className="landing-hero-subtitle">25+ free tools — no login required. Calculate GST, verify GSTIN, search HSN codes, and more.</p>
       <form onSubmit={handleSubmit} className="landing-search-box">
         <input
           type="text"
@@ -490,42 +273,24 @@ function InstantLookup() {
           <span>Free to start</span>
         </div>
       </div>
-      <div className="landing-tool-cards">
-        {INSTANT_TOOLS.map((t) => (
-          <Link key={t.to} to={t.to} className="landing-tool-card">
-            <div className="landing-tool-icon">{t.icon}</div>
-            <strong>{t.title}</strong>
-            <span>{t.desc}</span>
-            <span className="landing-tool-free">No signup needed</span>
-          </Link>
-        ))}
-      </div>
+
+      {TOOL_CATEGORIES.map((cat) => (
+        <div key={cat.title} className="landing-category">
+          <h2 className="landing-category-title">{cat.title}</h2>
+          <div className="landing-tool-cards">
+            {cat.tools.map((t) => (
+              <Link key={t.to} to={t.to} className="landing-tool-card">
+                <strong>{t.title}</strong>
+                <span>{t.desc}</span>
+                <span className="landing-tool-cta">Use Now →</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      ))}
     </section>
   );
 }
-
-const WHATS_NEW = [
-  {
-    date: "Oct 2026",
-    title: "GSTR-2B Auto-Reconciliation v2",
-    desc: "Smarter fuzzy matching — catches invoice-number typos and ₹1 rounding differences automatically.",
-  },
-  {
-    date: "Sep 2026",
-    title: "Bulk Invoice Upload",
-    desc: "Upload up to 50 invoices at once. Drag-and-drop PDFs, Excel, or CSV files.",
-  },
-  {
-    date: "Sep 2026",
-    title: "Supplier Compliance Scores",
-    desc: "See which suppliers file on time and which put your ITC at risk — scored from your own data.",
-  },
-  {
-    date: "Aug 2026",
-    title: "GST Filing Due Dates Calendar",
-    desc: "Full-year calendar of GSTR-1, GSTR-3B, and annual return deadlines at a glance.",
-  },
-];
 
 const POPULAR_SEARCHES = [
   { label: "27AAPFU0939F1ZV", desc: "Sample GSTIN — Maharashtra", to: "/gstin/27AAPFU0939F1ZV" },
@@ -535,25 +300,6 @@ const POPULAR_SEARCHES = [
   { label: "HSN 0402", desc: "Milk & cream — 5% GST", to: "/hsn?q=0402" },
   { label: "SAC 9954", desc: "Construction services — 12% GST", to: "/hsn?q=9954" },
 ];
-
-function WhatsNewSection() {
-  return (
-    <section className="landing-section landing-whats-new" aria-labelledby="whats-new-heading">
-      <h2 id="whats-new-heading" className="landing-section-title">What&apos;s New</h2>
-      <div className="landing-updates-list">
-        {WHATS_NEW.map((item) => (
-          <div key={item.title} className="landing-update-item">
-            <span className="landing-update-date">{item.date}</span>
-            <div>
-              <strong>{item.title}</strong>
-              <p>{item.desc}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
 
 function PopularSearches() {
   return (
@@ -572,110 +318,12 @@ function PopularSearches() {
   );
 }
 
-function ReminderSignup() {
-  const [email, setEmail] = useState("");
-  const [status, setStatus] = useState("idle");
-  const [error, setError] = useState("");
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    const trimmed = email.trim();
-    if (!trimmed) return;
-    setStatus("sending");
-    setError("");
-    try {
-      await api.subscribe(trimmed, "landing");
-      setStatus("done");
-      track("reminder_subscribe");
-    } catch (err) {
-      setStatus("idle");
-      setError(err.message || "Something went wrong. Please try again.");
-    }
-  };
-
-  if (status === "done") {
-    return (
-      <section className="landing-reminder" aria-labelledby="reminder-heading">
-        <div className="landing-reminder-success">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-            <polyline points="22 4 12 14.01 9 11.01" />
-          </svg>
-          <p>You&apos;re subscribed! We&apos;ll send you reminders before each GST filing deadline.</p>
-        </div>
-      </section>
-    );
-  }
-
-  return (
-    <section className="landing-reminder" aria-labelledby="reminder-heading">
-      <h2 id="reminder-heading">Join 5,000+ Businesses Using DoAide GST</h2>
-      <p>Get free email reminders before GSTR-1 and GSTR-3B due dates. No account needed.</p>
-      <form onSubmit={handleSubmit} className="landing-reminder-form">
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          placeholder="your@email.com"
-          className="landing-reminder-input"
-          required
-          disabled={status === "sending"}
-        />
-        <button type="submit" className="btn btn-primary" disabled={status === "sending"}>
-          {status === "sending" ? "Subscribing…" : "Get Reminders"}
-        </button>
-      </form>
-      {error && <p className="landing-reminder-error">{error}</p>}
-    </section>
-  );
-}
-
-function ReferralBanner() {
-  const [copied, setCopied] = useState(false);
-  const url = fullUrl("/?ref=invite");
-  const handleCopy = async () => {
-    const ok = await copyToClipboard(url);
-    if (ok) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-  return (
-    <section className="landing-referral">
-      <h2>Invite Your CA or Accountant</h2>
-      <p>Share DoAide GST with your chartered accountant — they can manage all your GST filings in one place.</p>
-      <div className="landing-referral-actions">
-        <a
-          href={`https://wa.me/?text=${encodeURIComponent("Check out DoAide GST — free GST compliance tool for Indian businesses: " + url)}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="btn btn-primary"
-        >
-          Share on WhatsApp
-        </a>
-        <button onClick={handleCopy} className="btn landing-copy-btn">
-          {copied ? "Link copied!" : "Copy invite link"}
-        </button>
-      </div>
-    </section>
-  );
-}
-
 export default function LandingPage() {
-  usePageTitle("Free GST Calculator India | GSTIN Verification & HSN Code Search");
-  const [visible, setVisible] = useState(false);
-
-  useEffect(() => {
-    requestAnimationFrame(() => setVisible(true));
-  }, []);
-
-  const vis = visible ? "landing-visible" : "";
+  usePageTitle("Free GST Tools India | GST Calculator, GSTIN Lookup & HSN Code Search");
 
   return (
     <div className="landing-root">
-      <ParticleField />
-
-      <header className={`landing-header ${vis}`}>
+      <header className="landing-header landing-visible">
         <a href="https://doaide.com" className="landing-brand">
           <RobotFace size={28} color="#F0B429" />
           <span className="landing-brand-text">
@@ -686,73 +334,6 @@ export default function LandingPage() {
 
       <main>
         <InstantLookup />
-
-        <section className="popular-tools-section">
-          <h2 className="popular-tools-heading">Popular Tools</h2>
-          <div className="popular-tools-grid">
-            <Link to="/calculator" className="popular-tool-card">
-              <strong>GST Calculator</strong>
-              <span>CGST, SGST, IGST breakdown</span>
-            </Link>
-            <Link to="/lookup" className="popular-tool-card">
-              <strong>GSTIN Lookup</strong>
-              <span>Verify any GST number</span>
-            </Link>
-            <Link to="/penalty-calculator" className="popular-tool-card">
-              <strong>Penalty Calculator</strong>
-              <span>Late filing fees &amp; interest</span>
-            </Link>
-            <Link to="/hsn-sac-finder" className="popular-tool-card">
-              <strong>HSN/SAC Finder</strong>
-              <span>Search codes by product name</span>
-            </Link>
-            <Link to="/registration-type-advisor" className="popular-tool-card">
-              <strong>Registration Advisor</strong>
-              <span>Regular, Composition, Casual, or NRI</span>
-            </Link>
-            <Link to="/rcm-calculator" className="popular-tool-card">
-              <strong>RCM Calculator</strong>
-              <span>Reverse charge with ITC tracking</span>
-            </Link>
-            <Link to="/audit-checklist" className="popular-tool-card">
-              <strong>Audit Checklist</strong>
-              <span>GSTR-9C compliance tracker</span>
-            </Link>
-          </div>
-        </section>
-
-        <div className={`landing-split ${vis}`}>
-          <div className="landing-left">
-            <div className="landing-hero-robot-wrap">
-              <HeroRobot color="#F0B429" />
-            </div>
-            <h1 className="landing-headline">Free GST Calculator, GSTIN Verification &amp; HSN Code Search for India</h1>
-            <p className="landing-subtitle">
-              Calculate GST instantly, verify any GSTIN number, search HSN codes &amp; rates,
-              and auto-reconcile with GSTR-2B — GSTR-1 and GSTR-3B returns prepared in
-              minutes. The free GST compliance tool for Indian businesses.
-            </p>
-            <div className="landing-typewriter-wrap">
-              <Typewriter phrases={TYPEWRITER_PHRASES} />
-            </div>
-            <PipelineGraphic />
-            <div className="landing-features">
-              <div className="landing-feature">
-                <strong>Free forever</strong>
-                <span>50 invoices/month, full GST compliance</span>
-              </div>
-              <div className="landing-feature">
-                <strong>From ₹499/mo</strong>
-                <span>500+ invoices, priority support</span>
-              </div>
-            </div>
-            <Link to="/pricing" className="landing-pricing-link">View all plans →</Link>
-          </div>
-
-          <div className="landing-right">
-            <AuthForm />
-          </div>
-        </div>
 
         <section className="landing-section" aria-labelledby="features-heading">
           <h2 id="features-heading" className="landing-section-title">Everything You Need for GST Compliance</h2>
@@ -795,52 +376,19 @@ export default function LandingPage() {
           </div>
         </section>
 
-        <WhatsNewSection />
-
         <PopularSearches />
 
         <FaqSection />
 
-        <ReminderSignup />
-
-        <ReferralBanner />
-
-        <section className="landing-section" style={{ textAlign: "center" }}>
-          <h2 className="landing-section-title">You Might Also Need</h2>
-          <p className="landing-section-sub" style={{ marginBottom: "1.5rem" }}>More free tools from DoAide for Indian businesses and professionals</p>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "1rem", maxWidth: "800px", margin: "0 auto" }}>
-            <a href="https://docs.doaide.com" target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "1.25rem", borderRadius: "0.75rem", border: "1px solid var(--border)", textDecoration: "none", textAlign: "left", transition: "box-shadow 0.2s" }}>
-              <span style={{ fontSize: "1.5rem" }}>📄</span>
-              <strong style={{ display: "block", marginTop: "0.5rem", color: "var(--fg)" }}>Document Generator</strong>
-              <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>Rent receipts, salary slips, experience letters — free PDF download</span>
-            </a>
-            <a href="https://resume.doaide.com" target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "1.25rem", borderRadius: "0.75rem", border: "1px solid var(--border)", textDecoration: "none", textAlign: "left", transition: "box-shadow 0.2s" }}>
-              <span style={{ fontSize: "1.5rem" }}>📝</span>
-              <strong style={{ display: "block", marginTop: "0.5rem", color: "var(--fg)" }}>Resume Builder</strong>
-              <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>AI resume builder with ATS optimization. Free PDF download</span>
-            </a>
-            <a href="https://409a.doaide.com" target="_blank" rel="noopener noreferrer" style={{ display: "block", padding: "1.25rem", borderRadius: "0.75rem", border: "1px solid var(--border)", textDecoration: "none", textAlign: "left", transition: "box-shadow 0.2s" }}>
-              <span style={{ fontSize: "1.5rem" }}>📊</span>
-              <strong style={{ display: "block", marginTop: "0.5rem", color: "var(--fg)" }}>409A Valuations</strong>
-              <span style={{ fontSize: "0.8125rem", color: "var(--muted)" }}>Independent startup valuations with AI-assisted intake</span>
-            </a>
-          </div>
-          <p style={{ marginTop: "1rem" }}>
-            <a href="https://doaide.com" target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)", fontSize: "0.875rem", textDecoration: "none" }}>
-              Explore all DoAide tools →
-            </a>
-          </p>
-        </section>
-
         <section className="landing-cta">
-          <h2>Start Filing GST Returns in Minutes</h2>
-          <p>Free forever for up to 50 invoices/month. No credit card required.</p>
+          <h2>Need Automated GST Filing?</h2>
+          <p>Free for up to 50 invoices/month — upload invoices, auto-reconcile GSTR-2B, and prepare returns in minutes.</p>
           <div className="landing-cta-actions">
             <a href="#root" className="btn btn-primary landing-cta-btn" onClick={(e) => { e.preventDefault(); track("signup_click"); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
               Create Free Account
             </a>
-            <Link to="/calculator" className="btn landing-cta-secondary">
-              Try GST Calculator →
+            <Link to="/pricing" className="btn landing-cta-secondary">
+              View Plans →
             </Link>
           </div>
         </section>
