@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function Gstr1FilingStepByStep() {
   usePageTitle("How to File GSTR-1 Online Step by Step 2026");
@@ -44,6 +45,7 @@ export default function Gstr1FilingStepByStep() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="How to File GSTR-1: Step-by-Step Guide 2026" description="File GSTR-1 correctly — outward supply details, table-wise filing guide, quarterly vs monthly, HSN summary requirements, and common errors to avoid." path="/blog/how-to-file-gstr-1-step-by-step-2026" />
       <h1>How to File GSTR-1 Online Step by Step 2026</h1>
       <p className="blog-meta">Updated October 2026 · 10 min read</p>
 

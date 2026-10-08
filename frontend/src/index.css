@@ -4530,6 +4530,27 @@ a:focus-visible {
   color: var(--ink-soft) !important;
   line-height: 1.35;
 }
+.related-tools-recommended {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+.related-tools-highlight {
+  border-color: var(--brand);
+  background: rgba(240, 180, 41, 0.04);
+  position: relative;
+}
+.related-tools-highlight:hover {
+  background: rgba(240, 180, 41, 0.08);
+  border-color: var(--brand);
+}
+.related-tools-arrow {
+  font-size: 0.85rem;
+  color: var(--brand) !important;
+  font-weight: 600;
+  margin-top: auto;
+}
 
 /* Print button */
 .share-print {
@@ -4790,6 +4811,150 @@ a:focus-visible {
   margin-top: 0.75rem;
   max-height: 500px;
   overflow-y: auto;
+}
+
+/* How-it-works step icon */
+.landing-step-icon {
+  margin-bottom: 8px;
+  display: flex;
+  justify-content: center;
+}
+
+/* Demo video placeholder */
+.landing-demo {
+  text-align: center;
+}
+.landing-demo-placeholder {
+  max-width: 640px;
+  margin: 1.5rem auto 0;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  background: var(--glass-feature-bg);
+  border: 2px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+}
+.landing-demo-placeholder:hover {
+  border-color: var(--brand);
+  background: var(--surface-raised);
+}
+.landing-demo-play {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(240, 180, 41, 0.12);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.landing-demo-caption {
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* Conversion CTA inline banner */
+.conversion-cta-inline {
+  margin: 1.5rem 0;
+  padding: 1rem 1.25rem;
+  border-radius: 10px;
+  border: 1px solid var(--brand);
+  background: rgba(240, 180, 41, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.conversion-cta-inline-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  flex: 1;
+  min-width: 200px;
+}
+.conversion-cta-inline-icon {
+  flex-shrink: 0;
+  color: var(--brand);
+  margin-top: 2px;
+}
+.conversion-cta-inline-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.conversion-cta-inline-text strong {
+  font-size: 0.95rem;
+  color: var(--ink-strong);
+}
+.conversion-cta-inline-text span {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+.conversion-cta-inline-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Sticky mobile CTA bar */
+.sticky-mobile-cta {
+  display: none;
+}
+@media (max-width: 767px) {
+  .sticky-mobile-cta {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 999;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.08);
+    align-items: center;
+    gap: 8px;
+    animation: slideUpCta 0.3s ease;
+  }
+  .sticky-mobile-cta-btn {
+    flex: 1;
+    text-align: center;
+    font-weight: 700;
+    padding: 10px 16px !important;
+    font-size: 0.9rem;
+  }
+  .sticky-mobile-cta-close {
+    background: none;
+    border: none;
+    color: var(--ink-soft);
+    font-size: 1.4rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    line-height: 1;
+  }
+  @keyframes slideUpCta {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+  .conversion-cta-inline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .conversion-cta-inline-actions {
+    justify-content: stretch;
+  }
+  .conversion-cta-inline-actions .btn {
+    flex: 1;
+    text-align: center;
+  }
 }
 
 /* Print styles */

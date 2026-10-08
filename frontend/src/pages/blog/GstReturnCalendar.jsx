@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function GstReturnCalendar() {
   usePageTitle("GST Return Filing Calendar 2026-27: All Due Dates");
@@ -44,6 +45,7 @@ export default function GstReturnCalendar() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="GST Return Filing Calendar 2026-27: All Due Dates" description="Complete GST filing calendar for FY 2026-27 — GSTR-1, GSTR-3B, CMP-08, GSTR-9 monthly deadlines with staggered dates by state turnover." path="/blog/gst-return-filing-calendar-2026-27" />
       <h1>GST Return Filing Calendar 2026-27: All Due Dates</h1>
       <p className="blog-meta">Updated October 2026 · 12 min read</p>
 

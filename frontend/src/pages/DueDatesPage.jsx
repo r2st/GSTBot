@@ -1,5 +1,6 @@
 import { useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import { InlineCTA, StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
@@ -273,11 +274,13 @@ export default function DueDatesPage() {
             </p>
           </section>
 
+          <InlineCTA variant="remind" />
           <RelatedTools current="/due-dates" />
           <CrossProductLinks page="due-dates" />
         </div>
       </main>
       <DoAideFooter />
+      <StickyMobileCTA />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(FAQ_SCHEMA) }}

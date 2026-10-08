@@ -120,12 +120,12 @@ const FAQ_SCHEMA = {
     {
       "@type": "Question",
       name: "Who needs a GST audit?",
-      acceptedAnswer: { "@type": "Answer", text: "Every registered taxpayer with aggregate annual turnover exceeding ₹5 crore must get their accounts audited by a Chartered Accountant or Cost Accountant and file Form GSTR-9C (reconciliation statement) along with GSTR-9 (annual return). The audit deadline is December 31 of the following financial year." },
+      acceptedAnswer: { "@type": "Answer", text: "Taxpayers with aggregate annual turnover exceeding ₹5 crore must get accounts audited by a CA or Cost Accountant and file GSTR-9C with GSTR-9. Deadline is December 31 of the following year." },
     },
     {
       "@type": "Question",
       name: "What is GSTR-9C?",
-      acceptedAnswer: { "@type": "Answer", text: "GSTR-9C is a reconciliation statement that reconciles the values declared in the annual return (GSTR-9) with the audited financial statements. It must be self-certified by the taxpayer (from FY 2020-21 onwards) and filed along with GSTR-9." },
+      acceptedAnswer: { "@type": "Answer", text: "GSTR-9C reconciles annual return (GSTR-9) values with audited financial statements. Since FY 2020-21, it must be self-certified by the taxpayer and filed with GSTR-9." },
     },
     {
       "@type": "Question",
@@ -135,7 +135,7 @@ const FAQ_SCHEMA = {
     {
       "@type": "Question",
       name: "What documents are needed for GST audit?",
-      acceptedAnswer: { "@type": "Answer", text: "Key documents include: all GST returns (GSTR-1, 3B, 9), books of accounts, purchase and sales registers, ITC register, e-way bills, credit/debit notes, bank statements, stock register, and all relevant contracts and agreements." },
+      acceptedAnswer: { "@type": "Answer", text: "Key documents: GST returns (GSTR-1, 3B, 9), books of accounts, purchase/sales registers, ITC register, e-way bills, credit/debit notes, bank statements, and stock register." },
     },
   ],
 };

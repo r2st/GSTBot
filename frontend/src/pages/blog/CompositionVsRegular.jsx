@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function CompositionVsRegular() {
   usePageTitle("GST Composition Scheme vs Regular Scheme");
@@ -44,6 +45,7 @@ export default function CompositionVsRegular() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="Composition Scheme vs Regular Scheme: Which is Better?" description="Compare GST composition and regular schemes — tax rates, ITC availability, compliance burden, turnover limits, and which suits your business type." path="/blog/composition-scheme-vs-regular-scheme" />
       <h1>GST Composition Scheme vs Regular Scheme</h1>
       <p className="blog-meta">Updated October 2026 · 9 min read</p>
 

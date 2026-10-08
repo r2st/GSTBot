@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function HsnCodeLookup() {
   usePageTitle("HSN Code Lookup: Everything You Need to Know");
@@ -39,6 +40,7 @@ export default function HsnCodeLookup() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="HSN Code Lookup: Find GST Rates by Product Code" description="How to find the right HSN code for any product. Search HSN codes, understand the classification system, and get correct GST rates for your goods." path="/blog/hsn-code-lookup" />
       <h1>HSN Code Lookup: Everything You Need to Know</h1>
       <p className="blog-meta">Updated October 2026 · 8 min read</p>
 

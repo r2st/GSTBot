@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function GstRegistrationOnline() {
   usePageTitle("GST Registration Online: Complete Step-by-Step Guide 2026");
@@ -44,6 +45,7 @@ export default function GstRegistrationOnline() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="GST Registration Online: Step-by-Step Guide 2026" description="Register for GST online in India — documents required, portal walkthrough, processing timeline, and how to avoid common rejection reasons." path="/blog/gst-registration-online-guide" />
       <h1>GST Registration Online: Complete Step-by-Step Guide 2026</h1>
       <p className="blog-meta">Updated October 2026 · 12 min read</p>
 

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function ItcReconciliationGuide() {
   usePageTitle("ITC Reconciliation Under GST: How to Match GSTR-2A with Purchase Register");
@@ -43,6 +44,7 @@ export default function ItcReconciliationGuide() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="ITC Reconciliation: Match GSTR-2B with Purchase Register" description="Step-by-step ITC reconciliation guide — match GSTR-2B with your purchase register, resolve mismatches, and prevent ITC reversals under GST." path="/blog/itc-reconciliation-gstr-2a-guide" />
       <h1>ITC Reconciliation Under GST: How to Match GSTR-2A with Purchase Register</h1>
       <p className="blog-meta">Updated October 2026 · 11 min read</p>
 

@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import AnimatedCounter from "../components/AnimatedCounter";
+import SeoHead from "../components/SeoHead";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { track } from "../lib/track";
 import BusinessCounter from "../components/BusinessCounter";
@@ -113,9 +115,39 @@ const FEATURES = [
 ];
 
 const HOW_IT_WORKS = [
-  { step: "1", title: "Upload invoices", desc: "Upload your sales and purchase invoices in any format — PDF, Excel, or structured data — or enter them manually." },
-  { step: "2", title: "Auto-reconcile", desc: "DoAide matches your invoices against GSTR-2B, flags mismatches, and calculates eligible ITC." },
-  { step: "3", title: "File returns", desc: "Download your prepared GSTR-1 and GSTR-3B, ready to submit on the GST portal." },
+  {
+    step: "1",
+    title: "Upload invoices",
+    desc: "Upload your sales and purchase invoices in any format — PDF, Excel, or structured data — or enter them manually.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+        <polyline points="17 8 12 3 7 8" />
+        <line x1="12" y1="3" x2="12" y2="15" />
+      </svg>
+    ),
+  },
+  {
+    step: "2",
+    title: "Auto-reconcile",
+    desc: "DoAide matches your invoices against GSTR-2B, flags mismatches, and calculates eligible ITC.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+    ),
+  },
+  {
+    step: "3",
+    title: "File returns",
+    desc: "Download your prepared GSTR-1 and GSTR-3B, ready to submit on the GST portal.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+        <polyline points="22 4 12 14.01 9 11.01" />
+      </svg>
+    ),
+  },
 ];
 
 const TESTIMONIALS = [
@@ -279,12 +311,12 @@ function InstantLookup() {
       </form>
       <div className="landing-trust-bar">
         <div className="landing-trust-item">
-          <strong>12,000+</strong>
-          <span>Businesses</span>
+          <strong><AnimatedCounter end={12000} suffix="+" /></strong>
+          <span>Businesses trust DoAide</span>
         </div>
         <div className="landing-trust-sep" aria-hidden="true" />
         <div className="landing-trust-item">
-          <strong>50,000+</strong>
+          <strong><AnimatedCounter end={50000} suffix="+" /></strong>
           <span>Invoices processed</span>
         </div>
         <div className="landing-trust-sep" aria-hidden="true" />
@@ -375,8 +407,8 @@ export default function LandingPage() {
   return (
     <div className="landing-root">
       <SeoHead
-        title="Free GST Tools India | GST Calculator, GSTIN Lookup & HSN Code Search"
-        description="25+ free GST tools for Indian businesses. Calculate GST, verify GSTIN, search HSN codes, reconcile GSTR-2B, and file returns — no login required."
+        title="Free GST Calculator India | GSTIN Verification & HSN Code Search — DoAide GST"
+        description="India's #1 free GST toolkit — calculate CGST, SGST, IGST instantly, verify any GSTIN, search HSN codes & GST rates, track filing due dates. Trusted by 12,000+ businesses. No sign-up required."
         path="/"
         jsonLd={softwareAppSchema}
       />
@@ -414,14 +446,29 @@ export default function LandingPage() {
 
         <section className="landing-section" aria-labelledby="how-heading">
           <h2 id="how-heading" className="landing-section-title">How It Works</h2>
+          <p className="landing-section-subtitle">Get started in under 2 minutes — no technical setup required.</p>
           <div className="landing-steps">
             {HOW_IT_WORKS.map((s) => (
               <div key={s.step} className="landing-step">
+                <div className="landing-step-icon">{s.icon}</div>
                 <div className="landing-step-num">{s.step}</div>
                 <h3>{s.title}</h3>
                 <p>{s.desc}</p>
               </div>
             ))}
+          </div>
+        </section>
+
+        <section className="landing-section landing-demo" aria-labelledby="demo-heading">
+          <h2 id="demo-heading" className="landing-section-title">See DoAide GST in Action</h2>
+          <p className="landing-section-subtitle">Watch how Indian businesses save hours every month on GST compliance.</p>
+          <div className="landing-demo-placeholder" onClick={() => track("demo_video_click")}>
+            <div className="landing-demo-play" aria-label="Play demo video">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="#F0B429" aria-hidden="true">
+                <polygon points="5 3 19 12 5 21 5 3" />
+              </svg>
+            </div>
+            <p className="landing-demo-caption">2-minute walkthrough: Upload → Reconcile → File</p>
           </div>
         </section>
 

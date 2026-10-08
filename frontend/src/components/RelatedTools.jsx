@@ -27,16 +27,67 @@ const ALL_TOOLS = [
   { path: "/registration-type-advisor", label: "Registration Advisor", desc: "Find the right GST registration type" },
   { path: "/rcm-calculator", label: "RCM Calculator", desc: "Reverse charge with ITC tracking" },
   { path: "/audit-checklist", label: "Audit Checklist", desc: "GST audit compliance tracker" },
+  { path: "/late-fee-calculator", label: "Late Fee Calculator", desc: "Calculate late filing fees for GST returns" },
+  { path: "/gstr9-checklist", label: "GSTR-9 Checklist", desc: "Annual return filing checklist" },
 ];
+
+// Contextual cross-links: which tools are most relevant to which page.
+// Each key maps a tool path to an array of 3-4 related tool paths.
+const RECOMMENDED = {
+  "/calculator": ["/hsn", "/invoice-generator", "/itc-calculator", "/penalty-calculator"],
+  "/lookup": ["/gstin-validator", "/registration-checker", "/hsn", "/calculator"],
+  "/hsn": ["/hsn-sac-finder", "/calculator", "/invoice-generator", "/lookup"],
+  "/due-dates": ["/return-calendar", "/penalty-calculator", "/late-fee-calculator", "/interest-calculator"],
+  "/penalty-calculator": ["/late-fee-calculator", "/interest-calculator", "/due-dates", "/return-calendar"],
+  "/eway-bill": ["/invoice-generator", "/hsn", "/reverse-charge", "/calculator"],
+  "/input-tax-credit": ["/itc-calculator", "/itc-mismatch", "/reverse-charge", "/rcm-calculator"],
+  "/composition-scheme": ["/scheme-comparison", "/registration-checker", "/turnover-limit", "/calculator"],
+  "/invoice-generator": ["/calculator", "/hsn", "/payment-challan", "/eway-bill"],
+  "/reverse-charge": ["/rcm-calculator", "/itc-calculator", "/input-tax-credit", "/calculator"],
+  "/itc-mismatch": ["/input-tax-credit", "/itc-calculator", "/audit-checklist", "/calculator"],
+  "/registration-checker": ["/registration-type-advisor", "/turnover-limit", "/composition-scheme", "/lookup"],
+  "/return-calendar": ["/due-dates", "/penalty-calculator", "/late-fee-calculator", "/interest-calculator"],
+  "/interest-calculator": ["/penalty-calculator", "/late-fee-calculator", "/due-dates", "/payment-challan"],
+  "/hsn-sac-finder": ["/hsn", "/calculator", "/invoice-generator", "/lookup"],
+  "/turnover-limit": ["/registration-checker", "/registration-type-advisor", "/composition-scheme", "/scheme-comparison"],
+  "/gstin-validator": ["/lookup", "/registration-checker", "/calculator", "/hsn"],
+  "/scheme-comparison": ["/composition-scheme", "/turnover-limit", "/registration-checker", "/calculator"],
+  "/payment-challan": ["/calculator", "/interest-calculator", "/penalty-calculator", "/invoice-generator"],
+  "/itc-calculator": ["/input-tax-credit", "/itc-mismatch", "/reverse-charge", "/calculator"],
+  "/registration-type-advisor": ["/registration-checker", "/turnover-limit", "/composition-scheme", "/lookup"],
+  "/rcm-calculator": ["/reverse-charge", "/itc-calculator", "/input-tax-credit", "/calculator"],
+  "/audit-checklist": ["/gstr9-checklist", "/itc-mismatch", "/itc-calculator", "/due-dates"],
+  "/late-fee-calculator": ["/penalty-calculator", "/interest-calculator", "/due-dates", "/return-calendar"],
+  "/gstr9-checklist": ["/audit-checklist", "/due-dates", "/itc-mismatch", "/return-calendar"],
+};
 
 export default function RelatedTools({ current }) {
   const others = ALL_TOOLS.filter((t) => t.path !== current);
+  const recommendedPaths = RECOMMENDED[current] || [];
+  const recommended = recommendedPaths
+    .map((p) => ALL_TOOLS.find((t) => t.path === p))
+    .filter(Boolean);
+  const rest = others.filter((t) => !recommendedPaths.includes(t.path));
 
   return (
     <nav className="related-tools" aria-label="Related GST tools">
+      {recommended.length > 0 && (
+        <>
+          <h2 className="related-tools-heading">People Also Use</h2>
+          <div className="related-tools-recommended">
+            {recommended.map((t) => (
+              <Link key={t.path} to={t.path} className="related-tools-link related-tools-highlight">
+                <strong>{t.label}</strong>
+                <span>{t.desc}</span>
+                <span className="related-tools-arrow" aria-hidden="true">→</span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
       <h2 className="related-tools-heading">More Free GST Tools</h2>
       <div className="related-tools-grid">
-        {others.map((t) => (
+        {rest.map((t) => (
           <Link key={t.path} to={t.path} className="related-tools-link">
             <strong>{t.label}</strong>
             <span>{t.desc}</span>
@@ -46,3 +97,5 @@ export default function RelatedTools({ current }) {
     </nav>
   );
 }
+
+export { ALL_TOOLS, RECOMMENDED };

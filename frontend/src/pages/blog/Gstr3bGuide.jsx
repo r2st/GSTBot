@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function Gstr3bGuide() {
   usePageTitle("GSTR-3B Filing: Due Dates, Format, and Common Mistakes");
@@ -44,6 +45,7 @@ export default function Gstr3bGuide() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="GSTR-3B Filing Guide: Due Dates, Format & Common Mistakes" description="Complete GSTR-3B filing guide — monthly due dates, table-wise format walkthrough, 8 common mistakes to avoid, and late filing penalty calculation." path="/blog/gstr-3b-filing-guide" />
       <h1>GSTR-3B Filing: Due Dates, Format, and Common Mistakes</h1>
       <p className="blog-meta">Updated October 2026 · 10 min read</p>
 

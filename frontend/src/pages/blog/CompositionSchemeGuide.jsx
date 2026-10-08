@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function CompositionSchemeGuide() {
   usePageTitle("GST Composition Scheme: Eligibility, Tax Rates & Benefits for Small Businesses");
 
   return (
     <article className="blog-article">
+      <SeoHead title="GST Composition Scheme: Eligibility, Rates & Benefits" description="Complete guide to GST composition scheme — eligibility criteria, tax rates (1-6%), quarterly filing, benefits for small businesses, and how to opt in." path="/blog/gst-composition-scheme-guide" />
       <h1>GST Composition Scheme: Eligibility, Tax Rates, and Benefits for Small Businesses</h1>
       <p className="blog-meta">Updated October 2026 · 9 min read</p>
 

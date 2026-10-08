@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import { InlineCTA, StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
@@ -46,22 +47,22 @@ const FAQ_SCHEMA = {
     {
       "@type": "Question",
       name: "How to calculate GST under Reverse Charge Mechanism?",
-      acceptedAnswer: { "@type": "Answer", text: "GST under RCM is calculated on the taxable value at the applicable rate. For intra-state supply, it splits into CGST + SGST (each half the rate). For interstate supply, IGST equals the full rate. The recipient pays this in cash — ITC cannot be used for RCM payment, but the paid amount can be claimed as ITC later." },
+      acceptedAnswer: { "@type": "Answer", text: "GST under RCM is calculated on the taxable value at the applicable rate. Intra-state: CGST + SGST (half each). Interstate: full IGST. Must be paid in cash; the paid amount can be claimed as ITC later." },
     },
     {
       "@type": "Question",
       name: "Can ITC be claimed on RCM payments?",
-      acceptedAnswer: { "@type": "Answer", text: "Yes, in most cases. The GST paid under reverse charge can be claimed as ITC in the same month, provided: (1) you are registered under GST, (2) goods/services are used for business, and (3) you have a valid invoice or self-invoice. Exception: renting residential property — no ITC available." },
+      acceptedAnswer: { "@type": "Answer", text: "Yes, in most cases. RCM-paid GST can be claimed as ITC in the same month if you are GST-registered, use goods/services for business, and hold a valid invoice. One exclusion: residential rent — no ITC." },
     },
     {
       "@type": "Question",
       name: "How is RCM reported in GST returns?",
-      acceptedAnswer: { "@type": "Answer", text: "In GSTR-3B: report RCM liability in Table 3.1(d) and claim ITC in Table 4(A)(2) for imports and Table 4(A)(3) for domestic RCM. In GSTR-1: no reporting needed as you are the recipient. A self-invoice must be issued for Section 9(4) supplies." },
+      acceptedAnswer: { "@type": "Answer", text: "GSTR-3B: report RCM liability in Table 3.1(d), claim ITC in 4(A)(2) for imports and 4(A)(3) for domestic RCM. GSTR-1: no reporting needed. Issue a self-invoice for Section 9(4) supplies." },
     },
     {
       "@type": "Question",
       name: "Is RCM applicable on all unregistered dealer purchases?",
-      acceptedAnswer: { "@type": "Answer", text: "No. Section 9(4) RCM applies only to specified categories of goods and services notified by the government, not to all purchases from unregistered dealers. The main categories include certain agricultural products, cement from unregistered manufacturers, and specified professional services." },
+      acceptedAnswer: { "@type": "Answer", text: "No. Section 9(4) RCM applies only to specified categories notified by the government, not all unregistered-dealer purchases. Main categories: certain agricultural products, cement, and specified professional services." },
     },
   ],
 };
@@ -271,11 +272,13 @@ export default function RCMCalculatorPage() {
             <p>Yes, composition dealers must pay RCM on applicable services but cannot claim ITC on such payments since composition dealers are not eligible for ITC.</p>
           </section>
 
+          <InlineCTA variant="save" />
           <RelatedTools current="/rcm-calculator" />
           <CrossProductLinks page="rcm-calculator" />
         </div>
       </main>
       <DoAideFooter />
+      <StickyMobileCTA />
     </div>
   );
 }

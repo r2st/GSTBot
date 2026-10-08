@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function EwayBillGuide() {
   usePageTitle("E-Way Bill Under GST: Rules, Generation Process & Validity");
 
   return (
     <article className="blog-article">
+      <SeoHead title="E-Way Bill Under GST: Rules, Generation & Validity" description="E-way bill guide — when required (₹50,000+ goods movement), how to generate on portal, validity periods, exemptions, and penalties for non-compliance." path="/blog/eway-bill-gst-rules-guide" />
       <h1>E-Way Bill Under GST: Rules, Generation Process, and Validity</h1>
       <p className="blog-meta">Updated October 2026 · 10 min read</p>
 

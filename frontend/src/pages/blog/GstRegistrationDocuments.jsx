@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function GstRegistrationDocuments() {
   usePageTitle("GST Registration Documents Required 2026");
@@ -44,6 +45,7 @@ export default function GstRegistrationDocuments() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="GST Registration Documents Required 2026" description="Complete list of documents needed for GST registration — proprietorship, partnership, company, and LLP. PAN, Aadhaar, address proof, bank details." path="/blog/gst-registration-documents-required-2026" />
       <h1>GST Registration Documents Required 2026</h1>
       <p className="blog-meta">Updated October 2026 · 8 min read</p>
 

@@ -1,11 +1,13 @@
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function GstPenaltyGuide() {
   usePageTitle("GST Penalties and Interest: Complete Guide to Avoiding Late Filing Fines");
 
   return (
     <article className="blog-article">
+      <SeoHead title="GST Penalties & Interest: Avoid Late Filing Fines" description="All GST penalties explained — late filing fees by return type (GSTR-1, 3B, 9), interest rates under Section 50, invoicing penalties, and prevention tips." path="/blog/gst-penalties-interest-late-filing" />
       <h1>GST Penalties and Interest: Complete Guide to Avoiding Late Filing Fines</h1>
       <p className="blog-meta">Updated October 2026 · 10 min read</p>
 

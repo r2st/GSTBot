@@ -4,6 +4,7 @@ import Breadcrumb from "../components/Breadcrumb";
 import DeadlineBanner from "../components/DeadlineBanner";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
+import { InlineCTA, StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import RelatedTools from "../components/RelatedTools";
 import SavedCalculations, { getSavedCalcs, SaveCalcButton } from "../components/SavedCalculations";
@@ -261,11 +262,13 @@ export default function CalculatorPage() {
             </p>
           </section>
 
+          <InlineCTA variant="save" />
           <RelatedTools current="/calculator" />
           <CrossProductLinks page="calculator" />
         </div>
       </main>
       <DoAideFooter />
+      <StickyMobileCTA />
     </div>
   );
 }

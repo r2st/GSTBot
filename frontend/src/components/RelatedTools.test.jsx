@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
-import RelatedTools from "./RelatedTools";
+import RelatedTools, { ALL_TOOLS, RECOMMENDED } from "./RelatedTools";
 
 function renderRelated(current) {
   return render(
@@ -49,5 +49,39 @@ describe("RelatedTools", () => {
     renderRelated("/calculator");
 
     expect(screen.getByRole("navigation", { name: "Related GST tools" })).toBeInTheDocument();
+  });
+
+  it("shows People Also Use section for pages with recommendations", () => {
+    renderRelated("/calculator");
+
+    expect(screen.getByText("People Also Use")).toBeInTheDocument();
+  });
+
+  it("shows recommended tools for calculator page", () => {
+    renderRelated("/calculator");
+
+    expect(screen.getByText("Invoice Generator")).toBeInTheDocument();
+  });
+
+  it("does not show People Also Use when no recommendations exist", () => {
+    renderRelated("/gst-rate/laptop");
+
+    expect(screen.queryByText("People Also Use")).not.toBeInTheDocument();
+  });
+
+  it("recommended tools appear only once on the page", () => {
+    renderRelated("/calculator");
+
+    const links = screen.getAllByText("HSN Code Search");
+    expect(links).toHaveLength(1);
+  });
+
+  it("every recommended path maps to a real tool", () => {
+    const toolPaths = new Set(ALL_TOOLS.map((t) => t.path));
+    for (const [, recs] of Object.entries(RECOMMENDED)) {
+      for (const path of recs) {
+        expect(toolPaths.has(path)).toBe(true);
+      }
+    }
   });
 });

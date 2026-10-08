@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import { InlineCTA, StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
@@ -652,11 +653,13 @@ ${invoiceRef.current.innerHTML}
             </p>
           </section>
 
+          <InlineCTA variant="invoice" />
           <RelatedTools current="/invoice-generator" />
           <CrossProductLinks page="invoice-generator" />
         </div>
       </main>
       <DoAideFooter />
+      <StickyMobileCTA />
     </div>
   );
 }

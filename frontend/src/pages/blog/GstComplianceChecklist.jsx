@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function GstComplianceChecklist() {
   usePageTitle("GST Compliance Checklist for Small Businesses");
@@ -39,6 +40,7 @@ export default function GstComplianceChecklist() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="GST Compliance Checklist for Small Businesses 2026" description="Practical GST compliance checklist for Indian SMBs — registration, invoicing, return filing, ITC claims, and annual return. Stay penalty-free." path="/blog/gst-compliance-checklist-small-business" />
       <h1>GST Compliance Checklist for Small Businesses</h1>
       <p className="blog-meta">Updated October 2026 · 7 min read</p>
 

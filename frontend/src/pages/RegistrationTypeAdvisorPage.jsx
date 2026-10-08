@@ -132,7 +132,7 @@ const FAQ_SCHEMA = {
     {
       "@type": "Question",
       name: "What are the types of GST registration in India?",
-      acceptedAnswer: { "@type": "Answer", text: "There are four main types: Regular (for most businesses), Composition Scheme (for small businesses with simplified compliance), Casual Taxable Person (for temporary interstate supply), and Non-Resident Taxable Person (for non-residents supplying in India)." },
+      acceptedAnswer: { "@type": "Answer", text: "Four main types: Regular (most businesses), Composition Scheme (small businesses, simplified compliance), Casual Taxable Person (temporary interstate supply), and Non-Resident Taxable Person." },
     },
     {
       "@type": "Question",

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function GstFilingGuide() {
   usePageTitle("Complete Guide to GST Filing in India 2026");
@@ -39,6 +40,7 @@ export default function GstFilingGuide() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="Complete Guide to GST Filing in India 2026" description="Step-by-step guide to filing GSTR-1, GSTR-3B returns in India. Learn reconciliation, ITC claims, due dates & avoid penalties. Updated for 2026." path="/blog/gst-filing-guide-india-2026" />
       <h1>Complete Guide to GST Filing in India 2026</h1>
       <p className="blog-meta">Updated October 2026 · 10 min read</p>
 

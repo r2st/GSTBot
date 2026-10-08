@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function HowToClaimItc() {
   usePageTitle("How to Claim Input Tax Credit Under GST");
@@ -44,6 +45,7 @@ export default function HowToClaimItc() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="How to Claim Input Tax Credit Under GST" description="Step-by-step guide to claiming ITC under GST — eligibility conditions, blocked credits under Section 17(5), documentation needed, and reversal rules." path="/blog/how-to-claim-input-tax-credit-gst" />
       <h1>How to Claim Input Tax Credit Under GST</h1>
       <p className="blog-meta">Updated October 2026 · 11 min read</p>
 

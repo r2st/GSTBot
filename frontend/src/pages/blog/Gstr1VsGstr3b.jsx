@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { Link } from "react-router-dom";
 import { usePageTitle } from "../../hooks/usePageTitle";
+import SeoHead from "../../components/SeoHead";
 
 export default function Gstr1VsGstr3b() {
   usePageTitle("Difference Between GSTR-1 and GSTR-3B Explained");
@@ -44,6 +45,7 @@ export default function Gstr1VsGstr3b() {
 
   return (
     <article className="blog-article">
+      <SeoHead title="GSTR-1 vs GSTR-3B: Key Differences Explained" description="Understand the difference between GSTR-1 and GSTR-3B — what each return covers, filing frequency, due dates, and why both are mandatory for compliance." path="/blog/gstr-1-vs-gstr-3b-difference" />
       <h1>Difference Between GSTR-1 and GSTR-3B Explained</h1>
       <p className="blog-meta">Updated October 2026 · 7 min read</p>
 

@@ -1,28 +1,11 @@
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import LandingPage from "./LandingPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
-vi.mock("../lib/share", () => ({
-  copyToClipboard: vi.fn().mockResolvedValue(true),
-  fullUrl: (p) => `http://localhost${p}`,
-}));
-vi.mock("../hooks/useAuth", () => ({
-  useAuth: () => ({
-    user: null,
-    loading: false,
-    login: vi.fn(),
-    register: vi.fn(),
-  }),
-}));
-vi.mock("../lib/api", () => ({
-  api: {
-    reminderSubscribe: vi.fn().mockResolvedValue({ subscribed: true, email: "a@b.com" }),
-    subscribe: vi.fn().mockResolvedValue({ subscribed: true, new: true, message: "Subscribed!" }),
-  },
-}));
+vi.mock("../lib/track", () => ({ track: vi.fn() }));
 
 function renderLanding() {
   return render(
@@ -33,80 +16,38 @@ function renderLanding() {
 }
 
 describe("LandingPage", () => {
-  it("shows the headline in serif font", () => {
+  it("shows the hero headline", () => {
     renderLanding();
 
-    expect(screen.getByText(/Free GST Calculator, GSTIN Verification/)).toBeInTheDocument();
+    expect(screen.getByText("Free GST Tools for Indian Businesses")).toBeInTheDocument();
   });
 
-  it("shows the monospace subtitle", () => {
+  it("shows the hero subtitle", () => {
     renderLanding();
 
     expect(
-      screen.getByText(/Calculate GST instantly/),
+      screen.getByText(/25\+ free tools/),
     ).toBeInTheDocument();
   });
 
-  it("renders the four pipeline stages", () => {
+  it("renders the header brand linking to doaide.com", () => {
     renderLanding();
 
-    expect(screen.getByText("Upload")).toBeInTheDocument();
-    expect(screen.getByText("Match")).toBeInTheDocument();
-    expect(screen.getByText("Reconcile")).toBeInTheDocument();
-    expect(screen.getByText("File")).toBeInTheDocument();
+    const brand = screen.getByText("doaide.com").closest("a");
+    expect(brand).toHaveAttribute("href", "https://doaide.com");
   });
 
-  it("renders the auth form with create-account tab active by default", () => {
-    renderLanding();
-
-    const signIn = screen.getByRole("tab", { name: "Sign in" });
-    const create = screen.getByRole("tab", { name: "Create account" });
-    expect(create).toHaveAttribute("aria-selected", "true");
-    expect(signIn).toHaveAttribute("aria-selected", "false");
-  });
-
-  it("shows a toggle to add GSTIN rather than fields upfront", () => {
-    renderLanding();
-
-    expect(screen.getByText(/Have a GSTIN/)).toBeInTheDocument();
-    expect(screen.queryByLabelText(/GSTIN/)).not.toBeInTheDocument();
-  });
-
-  it("reveals GSTIN fields when the toggle is clicked", async () => {
-    renderLanding();
-
-    await userEvent.click(screen.getByText(/Have a GSTIN/));
-
-    expect(screen.getByLabelText(/GSTIN/)).toBeInTheDocument();
-    expect(screen.getByLabelText(/Legal name/)).toBeInTheDocument();
-  });
-
-  it("shows pricing hints", () => {
-    renderLanding();
-
-    expect(screen.getByText("Free forever")).toBeInTheDocument();
-    expect(screen.getByText(/499/)).toBeInTheDocument();
-  });
-
-  it("renders the footer with all DoAide product links", () => {
+  it("renders the footer with DoAide product links", () => {
     renderLanding();
 
     expect(screen.getByText("Desk")).toBeInTheDocument();
     expect(screen.getByText("Jobs")).toBeInTheDocument();
     expect(screen.getByText("Pulse")).toBeInTheDocument();
-    expect(screen.getByText("Med")).toBeInTheDocument();
-    expect(screen.getByText("Realty")).toBeInTheDocument();
-    expect(screen.getByText("Reach")).toBeInTheDocument();
-    expect(screen.getByText("Trade")).toBeInTheDocument();
     expect(screen.getByText("409A")).toBeInTheDocument();
+    expect(screen.getByText("Resume")).toBeInTheDocument();
+    expect(screen.getByText("Contracts")).toBeInTheDocument();
+    expect(screen.getByText("Invoicer")).toBeInTheDocument();
     expect(screen.getByText("doaide.com")).toBeInTheDocument();
-  });
-
-  it("links to doaide.com from the header brand", () => {
-    renderLanding();
-
-    const brand = screen.getByText("doaide.com").closest("a");
-    expect(brand).toHaveAttribute("href", "https://doaide.com");
   });
 
   describe("feature highlights section", () => {
@@ -114,7 +55,8 @@ describe("LandingPage", () => {
       renderLanding();
 
       expect(screen.getByText("GSTR-2B Reconciliation")).toBeInTheDocument();
-      expect(screen.getByText("ITC Calculator")).toBeInTheDocument();
+      // "ITC Calculator" also appears in the tool categories grid — check that at least one exists
+      expect(screen.getAllByText("ITC Calculator").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("GST Return Filing")).toBeInTheDocument();
       expect(screen.getByText("Deadline Alerts")).toBeInTheDocument();
       expect(screen.getByText("Supplier Tracking")).toBeInTheDocument();
@@ -143,6 +85,32 @@ describe("LandingPage", () => {
       expect(screen.getByText("1")).toBeInTheDocument();
       expect(screen.getByText("2")).toBeInTheDocument();
       expect(screen.getByText("3")).toBeInTheDocument();
+    });
+
+    it("shows the subtitle", () => {
+      renderLanding();
+
+      expect(screen.getByText(/Get started in under 2 minutes/)).toBeInTheDocument();
+    });
+  });
+
+  describe("demo video section", () => {
+    it("renders the demo heading", () => {
+      renderLanding();
+
+      expect(screen.getByText("See DoAide GST in Action")).toBeInTheDocument();
+    });
+
+    it("shows the demo caption", () => {
+      renderLanding();
+
+      expect(screen.getByText(/2-minute walkthrough/)).toBeInTheDocument();
+    });
+
+    it("has a play button", () => {
+      renderLanding();
+
+      expect(screen.getByLabelText("Play demo video")).toBeInTheDocument();
     });
   });
 
@@ -217,9 +185,9 @@ describe("LandingPage", () => {
     it("renders the call to action", () => {
       renderLanding();
 
-      expect(screen.getByText("Start Filing GST Returns in Minutes")).toBeInTheDocument();
+      expect(screen.getByText("Need Automated GST Filing?")).toBeInTheDocument();
       expect(screen.getByText("Create Free Account")).toBeInTheDocument();
-      expect(screen.getByText(/Try GST Calculator/)).toBeInTheDocument();
+      expect(screen.getByText(/View Plans/)).toBeInTheDocument();
     });
   });
 
@@ -232,24 +200,31 @@ describe("LandingPage", () => {
       ).toBeInTheDocument();
     });
 
-    it("shows the trust metrics", () => {
+    it("shows the trust bar with animated counters", () => {
       renderLanding();
 
-      expect(screen.getByText("12,000+")).toBeInTheDocument();
-      expect(screen.getByText("Businesses")).toBeInTheDocument();
-      expect(screen.getByText("50,000+")).toBeInTheDocument();
+      // AnimatedCounter gracefully degrades to formatted values in test env
+      expect(screen.getByText("Businesses trust DoAide")).toBeInTheDocument();
+      expect(screen.getByText("Invoices processed")).toBeInTheDocument();
       expect(screen.getByText("100%")).toBeInTheDocument();
+      expect(screen.getByText("Free to start")).toBeInTheDocument();
     });
 
-    it("renders four tool cards", () => {
+    it("renders tool category sections", () => {
+      renderLanding();
+
+      expect(screen.getByText("Calculators")).toBeInTheDocument();
+      expect(screen.getByText("Lookup & Verification")).toBeInTheDocument();
+      expect(screen.getByText("Compliance & Filing")).toBeInTheDocument();
+      expect(screen.getByText("Planning & Reference")).toBeInTheDocument();
+    });
+
+    it("renders tool cards within categories", () => {
       renderLanding();
 
       const section = document.querySelector(".landing-tool-cards");
       expect(section).not.toBeNull();
       expect(section.textContent).toContain("GST Calculator");
-      expect(section.textContent).toContain("GSTIN Lookup");
-      expect(section.textContent).toContain("HSN Code Finder");
-      expect(section.textContent).toContain("Due Dates Calendar");
     });
 
     it("submits a GSTIN-shaped query to the lookup route", async () => {
@@ -275,29 +250,26 @@ describe("LandingPage", () => {
     });
   });
 
-  describe("ReferralBanner section", () => {
-    it("renders the invite heading", () => {
+  describe("Popular Searches section", () => {
+    it("renders the section heading", () => {
       renderLanding();
 
-      expect(screen.getByText("Invite Your CA or Accountant")).toBeInTheDocument();
+      expect(screen.getByText("Popular GST Lookups")).toBeInTheDocument();
     });
 
-    it("has a WhatsApp share link", () => {
+    it("shows sample GSTIN and HSN codes as links", () => {
       renderLanding();
 
-      expect(screen.getByText("Share on WhatsApp")).toBeInTheDocument();
+      expect(screen.getByText("27AAPFU0939F1ZV")).toBeInTheDocument();
+      expect(screen.getByText("HSN 8471")).toBeInTheDocument();
+      expect(screen.getByText("SAC 9983")).toBeInTheDocument();
     });
 
-    it("has a copy invite link button", () => {
+    it("links popular searches to the right pages", () => {
       renderLanding();
 
-      expect(screen.getByText("Copy invite link")).toBeInTheDocument();
-    });
-
-    it("copies the invite link when clicked", async () => {
-      renderLanding();
-
-      await userEvent.click(screen.getByText("Copy invite link"));
+      const gstinLink = screen.getByText("27AAPFU0939F1ZV").closest("a");
+      expect(gstinLink).toHaveAttribute("href", "/gstin/27AAPFU0939F1ZV");
     });
   });
 
@@ -329,109 +301,14 @@ describe("LandingPage", () => {
       expect(screen.getByText("GST-compliant calculations")).toBeInTheDocument();
       expect(screen.getByText("Your data stays private")).toBeInTheDocument();
     });
-  });
 
-  describe("What's New section", () => {
-    it("renders the section heading", () => {
+    it("has comparison page links", () => {
       renderLanding();
 
-      expect(screen.getByText("What's New")).toBeInTheDocument();
-    });
-
-    it("shows update items with dates and titles", () => {
-      renderLanding();
-
-      expect(screen.getByText("GSTR-2B Auto-Reconciliation v2")).toBeInTheDocument();
-      expect(screen.getByText("Bulk Invoice Upload")).toBeInTheDocument();
-      expect(screen.getByText("Supplier Compliance Scores")).toBeInTheDocument();
-      expect(screen.getByText("Oct 2026")).toBeInTheDocument();
-    });
-  });
-
-  describe("Popular Searches section", () => {
-    it("renders the section heading", () => {
-      renderLanding();
-
-      expect(screen.getByText("Popular GST Lookups")).toBeInTheDocument();
-    });
-
-    it("shows sample GSTIN and HSN codes as links", () => {
-      renderLanding();
-
-      expect(screen.getByText("27AAPFU0939F1ZV")).toBeInTheDocument();
-      expect(screen.getByText("HSN 8471")).toBeInTheDocument();
-      expect(screen.getByText("SAC 9983")).toBeInTheDocument();
-    });
-
-    it("links popular searches to the right pages", () => {
-      renderLanding();
-
-      const gstinLink = screen.getByText("27AAPFU0939F1ZV").closest("a");
-      expect(gstinLink).toHaveAttribute("href", "/gstin/27AAPFU0939F1ZV");
-    });
-  });
-
-  describe("Reminder signup section", () => {
-    it("renders the email capture form", () => {
-      renderLanding();
-
-      expect(screen.getByText(/5,000\+ Businesses Using DoAide GST/)).toBeInTheDocument();
-      expect(screen.getByPlaceholderText("your@email.com")).toBeInTheDocument();
-      expect(screen.getByText("Get Reminders")).toBeInTheDocument();
-    });
-
-    it("submits the email and shows success", async () => {
-      renderLanding();
-
-      await userEvent.type(screen.getByPlaceholderText("your@email.com"), "test@example.com");
-      await userEvent.click(screen.getByText("Get Reminders"));
-
-      expect(await screen.findByText(/You're subscribed/)).toBeInTheDocument();
-    });
-  });
-
-  describe("the typewriter effect", () => {
-    afterEach(() => vi.useRealTimers());
-
-    function tick(n = 1) {
-      for (let i = 0; i < n; i++) act(() => vi.runOnlyPendingTimers());
-    }
-
-    it("types the first phrase one character at a time", () => {
-      vi.useFakeTimers();
-      renderLanding();
-
-      // Each character is one tick; the first phrase is 30 chars.
-      tick(30);
-
-      expect(screen.getByText("Free GST return filing online")).toBeInTheDocument();
-    });
-
-    it("pauses when a phrase is fully typed then starts deleting", () => {
-      vi.useFakeTimers();
-      renderLanding();
-
-      tick(30); // Type the full phrase.
-      tick(1);  // The 2s pause fires → setDeleting(true).
-      tick(1);  // A deletion tick removes a character.
-
-      const el = screen.getByLabelText("Free GST return filing online");
-      // The text is shorter than the full phrase — deletion is underway.
-      expect(el.textContent.length).toBeLessThan("Free GST return filing online".length + 1);
-      expect(el.textContent).toMatch(/Free GST return filing onli/);
-    });
-
-    it("advances to the next phrase after fully deleting the current one", () => {
-      vi.useFakeTimers();
-      renderLanding();
-
-      tick(30); // Type full phrase.
-      tick(1);  // Pause fires → deleting.
-      tick(30); // Delete all 30 chars.
-      tick(1);  // text="" and deleting → resets to next phrase.
-      tick(1);  // First char of the second phrase.
-
-      expect(screen.getByLabelText("Automated GSTR-2B reconciliation")).toBeInTheDocument();
+      expect(screen.getByText("DoAide vs ClearTax")).toBeInTheDocument();
+      expect(screen.getByText("DoAide vs Zoho GST")).toBeInTheDocument();
+      expect(screen.getByText("DoAide vs Tally Prime")).toBeInTheDocument();
+      expect(screen.getByText("DoAide vs Busy")).toBeInTheDocument();
     });
   });
 
