@@ -94,8 +94,8 @@ export default function HsnCodeLookup() {
             heading, then subheading. Use 4 or 6 digits as required by your turnover slab.
           </li>
           <li>
-            <strong>Verify the tax rate</strong> — Each HSN code maps to a GST rate (0%, 5%, 12%,
-            18%, or 28%). Confirm the rate matches your product.
+            <strong>Verify the tax rate</strong> — Each HSN code maps to a GST rate (0%, 5%,
+            18%, or 40% under GST 2.0). Confirm the rate matches your product.
           </li>
           <li>
             <strong>Check for notifications</strong> — The government periodically reclassifies
@@ -117,13 +117,13 @@ export default function HsnCodeLookup() {
           <tbody>
             <tr><td>01–05</td><td>Live animals, animal products</td><td>0–5%</td></tr>
             <tr><td>06–14</td><td>Vegetable products</td><td>0–5%</td></tr>
-            <tr><td>15–24</td><td>Food products, beverages, tobacco</td><td>5–28%</td></tr>
+            <tr><td>15–24</td><td>Food products, beverages, tobacco</td><td>5–40%</td></tr>
             <tr><td>25–27</td><td>Mineral products</td><td>5–18%</td></tr>
-            <tr><td>28–38</td><td>Chemical products</td><td>12–18%</td></tr>
+            <tr><td>28–38</td><td>Chemical products</td><td>5–18%</td></tr>
             <tr><td>39–40</td><td>Plastics and rubber</td><td>18%</td></tr>
-            <tr><td>50–63</td><td>Textiles and garments</td><td>5–12%</td></tr>
+            <tr><td>50–63</td><td>Textiles and garments</td><td>5–18%</td></tr>
             <tr><td>72–83</td><td>Iron, steel, and metal articles</td><td>18%</td></tr>
-            <tr><td>84–85</td><td>Machinery and electronics</td><td>18–28%</td></tr>
+            <tr><td>84–85</td><td>Machinery and electronics</td><td>18%</td></tr>
           </tbody>
         </table>
       </section>

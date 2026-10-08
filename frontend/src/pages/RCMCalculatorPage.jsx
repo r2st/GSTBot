@@ -14,7 +14,7 @@ import { formatINR } from "../lib/gstCalc";
 const RCM_SERVICES = [
   { key: "legal", label: "Legal services — Advocate / Arbitral tribunal", rate: 18, section: "Notification 13/2017", itcEligible: true },
   { key: "gta_5", label: "GTA — Goods Transport Agency (5% RCM)", rate: 5, section: "Notification 13/2017", itcEligible: true },
-  { key: "gta_12", label: "GTA — Forward charge (12%, no RCM)", rate: 0, section: "Forward charge opted", itcEligible: false, forward: true },
+  { key: "gta_12", label: "GTA — Forward charge (18%, no RCM)", rate: 0, section: "Forward charge opted", itcEligible: false, forward: true },
   { key: "sponsor", label: "Sponsorship services", rate: 18, section: "Notification 13/2017", itcEligible: true },
   { key: "director", label: "Director fees / Sitting fees", rate: 18, section: "Notification 13/2017", itcEligible: true },
   { key: "insurance_agent", label: "Insurance agent commission", rate: 18, section: "Notification 13/2017", itcEligible: true },
@@ -24,7 +24,7 @@ const RCM_SERVICES = [
   { key: "renting", label: "Renting residential property (by registered person)", rate: 18, section: "Notification 05/2022", itcEligible: false },
   { key: "security", label: "Security services (individual / HUF / firm)", rate: 18, section: "Notification 29/2018", itcEligible: true },
   { key: "unregistered", label: "Supply from unregistered person (specified categories)", rate: 18, section: "Section 9(4)", itcEligible: true },
-  { key: "cement", label: "Cement received from unregistered manufacturer", rate: 28, section: "Notification 04/2019", itcEligible: true },
+  { key: "cement", label: "Cement received from unregistered manufacturer", rate: 18, section: "Notification 04/2019", itcEligible: true },
   { key: "raw_cotton", label: "Raw cotton from agriculturist", rate: 5, section: "Notification 43/2017", itcEligible: true },
   { key: "silk_yarn", label: "Silk yarn from agriculturist", rate: 5, section: "Notification 43/2017", itcEligible: true },
 ];

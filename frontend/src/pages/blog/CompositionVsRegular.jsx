@@ -71,7 +71,7 @@ export default function CompositionVsRegular() {
             <tbody>
               {[
                 ["Turnover Limit", "₹1.5 crore (₹75L special states)", "No upper limit"],
-                ["Tax Rates", "1%–6% (flat, on turnover)", "5%–28% (on transaction value)"],
+                ["Tax Rates", "1%–6% (flat, on turnover)", "5%–40% (on transaction value)"],
                 ["Input Tax Credit", "Not available", "Fully available"],
                 ["Invoice Type", "Bill of Supply (no tax breakup)", "Tax Invoice (with CGST/SGST/IGST)"],
                 ["Interstate Supply", "Not allowed", "Allowed"],

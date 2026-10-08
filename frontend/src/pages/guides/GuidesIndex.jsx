@@ -43,7 +43,12 @@ const GUIDES = [
   {
     to: "/guides/gst-rates-list-2026",
     title: "GST Rates List by Product Category 2026",
-    desc: "Complete GST rates list — all rate slabs (0%, 5%, 12%, 18%, 28%) with product categories, service rates, and HSN codes.",
+    desc: "Complete GST 2.0 rates list — all rate slabs (0%, 5%, 18%, 40%) with product categories, service rates, and HSN codes. Old 12% and 28% slabs abolished.",
+  },
+  {
+    to: "/guides/gst-2-guide",
+    title: "GST 2.0 Complete Guide",
+    desc: "Everything about GST 2.0 — new rate structure, abolished slabs, insurance at 0%, 40% on tobacco, migration checklist, and impact on businesses.",
   },
 ];
 

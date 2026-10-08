@@ -42,7 +42,7 @@ describe("HsnSacFinderPage", () => {
     const input = screen.getByPlaceholderText(/laptop, cement/);
     await userEvent.type(input, "cement");
     expect(screen.getByText("2523")).toBeInTheDocument();
-    expect(screen.getAllByText("28%").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("18%").length).toBeGreaterThanOrEqual(1);
   });
 
   it("searches by code number", async () => {

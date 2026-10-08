@@ -236,6 +236,17 @@ export default function ItcCalculatorPage() {
               />
             </label>
 
+            <div style={{ padding: "0.75rem 1rem", background: "rgba(245,158,66,0.1)", border: "1px solid rgba(245,158,66,0.3)", borderRadius: "0.5rem", marginTop: "1rem", fontSize: "0.85rem", lineHeight: 1.6 }}>
+              <strong style={{ color: "#f59e42" }}>GST 2.0 — Hard ITC Validation</strong>
+              <p style={{ margin: "0.5rem 0 0" }}>
+                Under GST 2.0, the GST portal now applies <strong>hard blocks</strong> on ITC
+                claims that do not match GSTR-2B. If your claimed ITC exceeds the amount
+                reflected in GSTR-2B, the excess will be <strong>automatically rejected</strong> during
+                GSTR-3B filing — you will not be able to submit the return until the mismatch
+                is resolved. Ensure all supplier invoices appear in your GSTR-2B before claiming ITC.
+              </p>
+            </div>
+
             {result && (
               <div className="calc-result" aria-live="polite">
                 <div className="calc-result-row">

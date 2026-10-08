@@ -268,7 +268,7 @@ export default function InputTaxCreditGuide() {
               </p>
               <h3>Example 2: Blocked Credit</h3>
               <p>
-                XYZ Corp buys a car for ₹15,00,000 + 28% GST (₹4,20,000) for the MD's
+                XYZ Corp buys a car for ₹15,00,000 + 40% GST (₹6,00,000) for the MD's
                 personal use. Even though the company is registered and has a valid invoice,
                 ITC on motor vehicles for personal use is blocked under Section 17(5). No ITC
                 can be claimed.

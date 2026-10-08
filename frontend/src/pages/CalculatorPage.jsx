@@ -82,7 +82,7 @@ export default function CalculatorPage() {
               { "@type": "Question", name: "How do I calculate GST on a product?", acceptedAnswer: { "@type": "Answer", text: "Multiply the taxable amount by the GST rate and divide by 100. Example: 18% GST on ₹10,000 = ₹1,800, total ₹11,800. For intrastate sales, split equally into CGST and SGST (₹900 each)." } },
               { "@type": "Question", name: "What is the difference between GST exclusive and inclusive?", acceptedAnswer: { "@type": "Answer", text: "GST exclusive: price excludes GST, you add it on top. GST inclusive: GST is already in the price, you extract it. Formula: Taxable amount = Total / (1 + GST rate/100)." } },
               { "@type": "Question", name: "When is IGST charged instead of CGST+SGST?", acceptedAnswer: { "@type": "Answer", text: "IGST is charged on interstate supplies (supplier and buyer in different states). CGST+SGST is charged on intrastate supplies (same state). The total GST amount is the same — only the split differs." } },
-              { "@type": "Question", name: "What are the GST rate slabs in India?", acceptedAnswer: { "@type": "Answer", text: "India has 5 GST slabs: 0% (essentials like milk, grains), 5% (sugar, tea, transport), 12% (processed food, medicines), 18% (most goods and services), and 28% (luxury goods, cars, cement, tobacco)." } },
+              { "@type": "Question", name: "What are the GST rate slabs in India?", acceptedAnswer: { "@type": "Answer", text: "Under GST 2.0, India has 3 slabs plus Nil: 0% (essentials, insurance), 5% (necessities), 18% (most goods and services), and 40% (tobacco, luxury). The old 12% and 28% slabs are abolished." } },
             ],
           },
         ]}
@@ -218,14 +218,14 @@ export default function CalculatorPage() {
               state), the tax is split equally between CGST (Central GST) and SGST (State GST).
               For interstate sales, IGST (Integrated GST) applies as a single tax.
             </p>
-            <h3>GST Rate Slabs in India</h3>
+            <h3>GST 2.0 Rate Slabs in India (Effective 2026)</h3>
             <ul>
-              <li><strong>0%</strong> — Essential goods: milk, fresh vegetables, grains, books</li>
-              <li><strong>5%</strong> — Common necessities: sugar, tea, cooking oil, transport</li>
-              <li><strong>12%</strong> — Processed food, medicines, garments above ₹1,000</li>
-              <li><strong>18%</strong> — Most goods and services: electronics, furniture, IT services</li>
-              <li><strong>28%</strong> — Luxury and sin goods: cars, AC, cement, soft drinks, tobacco</li>
+              <li><strong>0% (Nil)</strong> — Essentials: milk, fresh vegetables, grains, books, insurance (health &amp; life)</li>
+              <li><strong>5%</strong> — Common necessities: sugar, tea, cooking oil, transport, cancer drugs</li>
+              <li><strong>18%</strong> — Most goods and services: electronics, furniture, IT services, cement, processed food</li>
+              <li><strong>40%</strong> — Tobacco, aerated drinks, vehicles above ₹20L, bikes above 350cc, premium goods</li>
             </ul>
+            <p><em>The old 12% and 28% slabs have been abolished under GST 2.0. Items previously at 12% moved to 5% or 18%; items at 28% moved to 18% or 40%.</em></p>
           </section>
 
           <section className="tool-info">
@@ -252,8 +252,9 @@ export default function CalculatorPage() {
 
             <h3>What are the GST rate slabs in India?</h3>
             <p>
-              Five slabs: 0% (essentials), 5% (necessities), 12% (processed food, medicines),
-              18% (most goods and services), and 28% (luxury goods, tobacco).
+              Under GST 2.0: 0% (essentials, insurance), 5% (necessities), 18% (most goods
+              and services), and 40% (tobacco, aerated drinks, luxury vehicles). The old 12%
+              and 28% slabs have been abolished.
             </p>
           </section>
 

@@ -62,6 +62,7 @@ VALID_TAX_RATES = (
     Decimal("12"),
     Decimal("18"),
     Decimal("28"),
+    Decimal("40"),
 )
 
 # A number with optional Indian digit grouping and up to two decimals.

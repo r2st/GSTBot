@@ -9,8 +9,8 @@ import {
 } from "./gstCalc";
 
 describe("GST_SLABS", () => {
-  it("contains the twelve official slab rates", () => {
-    expect(GST_SLABS).toEqual([0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 12, 18, 28]);
+  it("contains the eleven GST 2.0 slab rates", () => {
+    expect(GST_SLABS).toEqual([0, 0.1, 0.25, 1, 1.5, 3, 5, 6, 7.5, 18, 40]);
   });
 });
 

@@ -51,11 +51,11 @@ const FAQ_ITEMS = [
   },
   {
     q: "How to calculate GST online for free?",
-    a: "Visit gst.doaide.com/calculator, enter the amount, select the GST rate (5%, 18%, or 40% under GST 2.0), choose inclusive or exclusive mode, and select intra-state or inter-state. The calculator instantly shows the CGST, SGST, or IGST breakdown with total amount.",
+    a: "Visit gst.doaide.com/calculator, enter the amount, select a GST 2.0 rate (5%, 18%, or 40%), choose inclusive or exclusive, and select intra or inter-state. It shows the CGST, SGST, or IGST breakdown.",
   },
   {
     q: "Is DoAide GST Calculator accurate?",
-    a: "Yes. DoAide GST Calculator uses the latest GST 2.0 slab rates published by the Government of India (CBIC). It supports all standard rates including 5%, 18%, and 40%. Results are instant and verified against official formulas.",
+    a: "Yes. DoAide GST Calculator uses the latest GST 2.0 slab rates from CBIC. It supports all standard rates including 5%, 18%, and 40%. Results are instant and verified against official formulas.",
   },
   {
     q: "Do I need to sign up to use a free GST calculator?",

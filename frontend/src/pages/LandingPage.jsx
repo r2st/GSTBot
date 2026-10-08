@@ -222,6 +222,15 @@ const TOOL_CATEGORIES = [
       { to: "/turnover-limit", title: "Turnover Limit", desc: "Check GST registration threshold" },
     ],
   },
+  {
+    title: "GST 2.0 Tools",
+    tools: [
+      { to: "/rate-comparison", title: "Rate Comparison", desc: "Compare old vs new GST 2.0 rates" },
+      { to: "/migration-checker", title: "Migration Checker", desc: "Check if contracts need rate updates" },
+      { to: "/insurance-savings", title: "Insurance Savings", desc: "Calculate insurance GST savings" },
+      { to: "/guides/gst-2-guide", title: "GST 2.0 Guide", desc: "Complete guide to GST 2.0 changes" },
+    ],
+  },
 ];
 
 function InstantLookup() {
@@ -298,7 +307,7 @@ const POPULAR_SEARCHES = [
   { label: "HSN 6109", desc: "T-shirts & vests — 5% GST", to: "/hsn?q=6109" },
   { label: "SAC 9983", desc: "Professional services — 18% GST", to: "/hsn?q=9983" },
   { label: "HSN 0402", desc: "Milk & cream — 5% GST", to: "/hsn?q=0402" },
-  { label: "SAC 9954", desc: "Construction services — 12% GST", to: "/hsn?q=9954" },
+  { label: "SAC 9954", desc: "Construction services — 18% GST", to: "/hsn?q=9954" },
 ];
 
 function PopularSearches() {

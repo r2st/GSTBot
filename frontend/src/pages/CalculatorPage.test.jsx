@@ -115,7 +115,7 @@ describe("CalculatorPage", () => {
     renderCalc();
 
     expect(screen.getByText("How GST Calculation Works")).toBeInTheDocument();
-    expect(screen.getByText("GST Rate Slabs in India")).toBeInTheDocument();
+    expect(screen.getByText(/GST 2\.0 Rate Slabs in India/)).toBeInTheDocument();
   });
 
   it("updates URL when amount changes", async () => {

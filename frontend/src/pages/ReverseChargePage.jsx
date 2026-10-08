@@ -13,7 +13,7 @@ import { formatINR } from "../lib/gstCalc";
 const SERVICE_TYPES = [
   { key: "legal", label: "Legal services (advocate/arbitral tribunal)", rate: 18, section: "Section 9(3) — Notification 13/2017" },
   { key: "gta", label: "Goods Transport Agency (GTA)", rate: 5, section: "Section 9(3) — Notification 13/2017" },
-  { key: "gta_18", label: "GTA (opting for 12% forward charge)", rate: 0, section: "Not applicable — GTA has opted for forward charge", forward: true },
+  { key: "gta_18", label: "GTA (opting for 18% forward charge)", rate: 0, section: "Not applicable — GTA has opted for forward charge", forward: true },
   { key: "sponsor", label: "Sponsorship services", rate: 18, section: "Section 9(3) — Notification 13/2017" },
   { key: "director", label: "Directors' fees / sitting fees", rate: 18, section: "Section 9(3) — Notification 13/2017" },
   { key: "insurance_agent", label: "Insurance agent services", rate: 18, section: "Section 9(3) — Notification 13/2017" },
@@ -68,7 +68,7 @@ const FAQ_SCHEMA = {
       name: "Do I need to pay RCM on GTA services?",
       acceptedAnswer: {
         "@type": "Answer",
-        text: "If the GTA charges 5% GST, the recipient pays under reverse charge. If the GTA opts for 12% forward charge, the recipient does not pay RCM.",
+        text: "If the GTA charges 5% GST, the recipient pays under reverse charge. If the GTA opts for 18% forward charge, the recipient does not pay RCM.",
       },
     },
     {
@@ -272,7 +272,7 @@ export default function ReverseChargePage() {
             <h3>Key RCM Services</h3>
             <ul>
               <li><strong>Legal services:</strong> Any service by an advocate or arbitral tribunal — 18% GST payable by recipient</li>
-              <li><strong>GTA services:</strong> Goods Transport Agency — 5% under RCM (or 12% forward charge if GTA opts)</li>
+              <li><strong>GTA services:</strong> Goods Transport Agency — 5% under RCM (or 18% forward charge if GTA opts)</li>
               <li><strong>Directors&#39; fees:</strong> Services by a director to the company — 18% under RCM</li>
               <li><strong>Sponsorship:</strong> Any sponsorship service — 18% under RCM</li>
               <li><strong>Import of services:</strong> All imported services — IGST under RCM</li>
@@ -316,7 +316,7 @@ export default function ReverseChargePage() {
             <h3>Do I need to pay RCM on GTA services?</h3>
             <p>
               If the GTA charges 5% GST, the recipient pays under reverse charge. However,
-              if the GTA opts to pay at 12% under forward charge (with ITC), the recipient
+              if the GTA opts to pay at 18% under forward charge (with ITC), the recipient
               does not need to pay under reverse charge.
             </p>
 

@@ -84,7 +84,7 @@ export default function CompositionSchemeGuide() {
       <section>
         <h2>Benefits of the Composition Scheme</h2>
         <ul className="blog-checklist">
-          <li><strong>Lower tax rates:</strong> 1-6% compared to standard GST rates of 5-28%</li>
+          <li><strong>Lower tax rates:</strong> 1-6% compared to standard GST rates of 5-40%</li>
           <li><strong>Simplified compliance:</strong> file CMP-08 quarterly and GSTR-4 annually, instead of monthly GSTR-1 and GSTR-3B</li>
           <li><strong>Reduced record-keeping:</strong> no need to maintain detailed invoice-level records for GST purposes</li>
           <li><strong>Lower working capital requirements:</strong> the lower tax rate means less cash locked up in tax payments</li>
@@ -170,7 +170,7 @@ export default function CompositionSchemeGuide() {
             <tr>
               <td>Tax rate</td>
               <td>1-6% of turnover</td>
-              <td>5-28% on value of supply</td>
+              <td>5-40% on value of supply</td>
             </tr>
             <tr>
               <td>Input Tax Credit</td>

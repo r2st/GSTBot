@@ -14,19 +14,21 @@ const SERVICE_RATES = [
   { service: "Restaurant (with AC or licensed to serve alcohol)", rate: "5% (no ITC)" },
   { service: "Outdoor catering", rate: "5% (no ITC)" },
   { service: "Hotel room (up to ₹1,000/night)", rate: "0%" },
-  { service: "Hotel room (₹1,001 - ₹7,500/night)", rate: "12%" },
+  { service: "Hotel room (₹1,001 - ₹7,500/night)", rate: "18%" },
   { service: "Hotel room (above ₹7,500/night)", rate: "18%" },
-  { service: "Transport of goods by road", rate: "5% (no ITC) / 12%" },
+  { service: "Transport of goods by road", rate: "5% (no ITC) / 18%" },
   { service: "Transport of passengers (AC bus, railways)", rate: "5% (no ITC)" },
   { service: "Air travel (economy)", rate: "5% (no ITC)" },
-  { service: "Air travel (business class)", rate: "12%" },
+  { service: "Air travel (business class)", rate: "18%" },
   { service: "IT and software services", rate: "18%" },
   { service: "Professional services (CA, lawyer, consultant)", rate: "18%" },
-  { service: "Financial services (banking, insurance)", rate: "18%" },
+  { service: "Financial services (banking)", rate: "18%" },
+  { service: "Health insurance", rate: "0% (GST 2.0)" },
+  { service: "Life insurance", rate: "0% (GST 2.0)" },
   { service: "Construction (affordable housing)", rate: "1% (no ITC)" },
   { service: "Construction (other residential)", rate: "5% (no ITC)" },
-  { service: "Construction (commercial)", rate: "12%" },
-  { service: "Works contract (government)", rate: "12%" },
+  { service: "Construction (commercial)", rate: "18%" },
+  { service: "Works contract (government)", rate: "18%" },
   { service: "Telecom services", rate: "18%" },
   { service: "Renting of commercial property", rate: "18%" },
   { service: "Renting of residential property (to registered person)", rate: "18% (RCM)" },
@@ -34,24 +36,28 @@ const SERVICE_RATES = [
 
 const FAQ_ITEMS = [
   {
-    q: "How many GST rate slabs are there in India?",
-    a: "India has 5 main slabs: 0%, 5%, 12%, 18%, and 28%. Special rates of 0.25%, 1.5%, and 3% apply to diamonds, gold, and jewellery. A compensation cess applies on top of 28% for luxury goods.",
+    q: "How many GST rate slabs are there in India under GST 2.0?",
+    a: "Under GST 2.0, India has 3 slabs plus Nil: 0% (essentials, insurance), 5% (necessities), 18% (most goods and services), and 40% (tobacco, luxury). Special rates for diamonds, gold, and jewellery continue.",
   },
   {
     q: "How do I find the GST rate for my product?",
     a: "Every product has an HSN code that determines its GST rate. Use our HSN Code Finder to search by name or code. The rate is tied to the HSN code, not the product name.",
   },
   {
-    q: "What is the GST rate on food items?",
-    a: "Fresh foods (milk, fruits, vegetables, grains, eggs) are exempt at 0%. Processed foods are mostly 5-12%. Restaurant food is 5% without ITC since the 2019 simplification.",
+    q: "What happened to the 12% and 28% GST slabs?",
+    a: "The 12% and 28% slabs are abolished under GST 2.0. Items at 12% moved to 5% or 18%; items at 28% moved to 18% or 40%. This simplifies the structure from 5 slabs to 3 plus Nil.",
   },
   {
-    q: "Are there any goods exempt from GST?",
-    a: "Yes. Exempt items include fresh milk, fruits, vegetables, bread, salt, honey, eggs, books, newspapers, and hearing aids. Healthcare and education are also exempt.",
+    q: "What is the GST rate on food items?",
+    a: "Fresh foods (milk, fruits, vegetables, grains, eggs) are exempt at 0%. Processed foods are mostly 5% or 18%. Restaurant food is 5% without ITC since the 2019 simplification.",
+  },
+  {
+    q: "Is GST still applicable on insurance under GST 2.0?",
+    a: "No. Under GST 2.0, health insurance and life insurance have been moved to 0% (Nil). This was one of the major changes in the GST 2.0 rationalization, providing significant relief to policyholders.",
   },
   {
     q: "How often do GST rates change?",
-    a: "The GST Council meets roughly quarterly. Rate changes come via CBIC notifications from a specified date. Major rate rationalization happens 1-2 times per year.",
+    a: "The GST Council meets roughly quarterly. Rate changes come via CBIC notifications from a specified date. Major rate rationalization like GST 2.0 happens based on Council recommendations.",
   },
 ];
 
@@ -89,7 +95,7 @@ export default function GstRatesListGuide() {
     <div className="tool-page">
       <SeoHead
         title="GST Rates List by Product Category 2026 — Complete Guide"
-        description="Complete GST rates list for India 2026. All GST rate slabs (0%, 5%, 12%, 18%, 28%) with product categories, HSN codes, and service rates. Updated with latest council changes."
+        description="Complete GST 2.0 rates list for India 2026. All GST rate slabs (0%, 5%, 18%, 40%) with product categories, HSN codes, and service rates. Old 12% and 28% slabs abolished. Updated with latest council changes."
         path="/guides/gst-rates-list-2026"
         jsonLd={[ARTICLE_SCHEMA, FAQ_SCHEMA]}
         breadcrumbs={BREADCRUMBS}
@@ -105,29 +111,28 @@ export default function GstRatesListGuide() {
           </p>
 
           <section className="tool-info">
-            <h2>GST Rate Slabs Overview</h2>
+            <h2>GST 2.0 Rate Slabs Overview</h2>
             <div style={{ overflowX: "auto" }}>
               <table className="comparison-table">
                 <thead>
                   <tr><th>Rate</th><th>Category</th><th>Examples</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td><strong>0%</strong></td><td>Exempt / Essential</td><td>Fresh food, milk, bread, books, healthcare</td></tr>
+                  <tr><td><strong>0% (Nil)</strong></td><td>Exempt / Essential</td><td>Fresh food, milk, bread, books, healthcare, insurance (health &amp; life)</td></tr>
                   <tr><td><strong>0.25%</strong></td><td>Precious stones</td><td>Rough diamonds</td></tr>
                   <tr><td><strong>1.5%</strong></td><td>Precious metals</td><td>Gold bars, silver bars</td></tr>
                   <tr><td><strong>3%</strong></td><td>Jewellery</td><td>Gold jewellery, silver articles</td></tr>
-                  <tr><td><strong>5%</strong></td><td>Common necessities</td><td>Sugar, tea, spices, transport, economy hotels</td></tr>
-                  <tr><td><strong>12%</strong></td><td>Standard goods</td><td>Processed food, medicines, smartphones</td></tr>
-                  <tr><td><strong>18%</strong></td><td>Most goods &amp; services</td><td>Electronics, furniture, IT, financial services</td></tr>
-                  <tr><td><strong>28%</strong></td><td>Luxury &amp; sin goods</td><td>Cars, AC, cement, soft drinks, tobacco</td></tr>
-                  <tr><td><strong>28% + Cess</strong></td><td>Demerit goods</td><td>Aerated drinks, luxury cars, tobacco products</td></tr>
+                  <tr><td><strong>5%</strong></td><td>Common necessities</td><td>Sugar, tea, spices, transport, cancer drugs</td></tr>
+                  <tr><td><strong>18%</strong></td><td>Most goods &amp; services</td><td>Electronics, furniture, IT, financial services, cement, processed food, smartphones</td></tr>
+                  <tr><td><strong>40%</strong></td><td>Premium &amp; demerit goods</td><td>Tobacco, aerated drinks, vehicles above ₹20L, bikes above 350cc, luxury goods</td></tr>
                 </tbody>
               </table>
             </div>
+            <p><em>The old 12% and 28% slabs have been abolished under GST 2.0. Items previously at 12% moved to 5% or 18%; items at 28% moved to 18% or 40%. Compensation cess on tobacco eliminated from Feb 2026.</em></p>
           </section>
 
           <section className="tool-info">
-            <h2>0% GST — Exempt Goods</h2>
+            <h2>0% GST — Exempt Goods &amp; Services</h2>
             <ul>
               <li>Fresh fruits and vegetables</li>
               <li>Milk (unprocessed), curd, lassi, buttermilk</li>
@@ -139,6 +144,9 @@ export default function GstRatesListGuide() {
               <li>Books, newspapers, periodicals</li>
               <li>Hearing aids</li>
               <li>Educational services, healthcare services</li>
+              <li><strong>Health insurance (GST 2.0)</strong></li>
+              <li><strong>Life insurance (GST 2.0)</strong></li>
+              <li><strong>33 life-saving medicines (GST 2.0)</strong></li>
             </ul>
             <p>
               Note: Since July 2022, pre-packaged and labelled food items (cereals, pulses,
@@ -158,23 +166,8 @@ export default function GstRatesListGuide() {
               <li>Fertilizers</li>
               <li>Transport services (passenger)</li>
               <li>Economy air travel</li>
-              <li>Small restaurants (₹5% without ITC)</li>
-            </ul>
-          </section>
-
-          <section className="tool-info">
-            <h2>12% GST Items</h2>
-            <ul>
-              <li>Processed food (frozen, preserved)</li>
-              <li>Medicines and pharmaceutical preparations</li>
-              <li>Smartphones and mobile phones</li>
-              <li>Sewing machines</li>
-              <li>Apparel above ₹1,000</li>
-              <li>Umbrella</li>
-              <li>Diagnostic kits and reagents</li>
-              <li>Business class air travel</li>
-              <li>Hotel rooms ₹1,001-₹7,500/night</li>
-              <li>Works contract (government)</li>
+              <li>Small restaurants (5% without ITC)</li>
+              <li><strong>Cancer drugs (moved from 12% under GST 2.0)</strong></li>
             </ul>
           </section>
 
@@ -187,28 +180,29 @@ export default function GstRatesListGuide() {
               <li>Instant coffee, pasta, cornflakes, soups</li>
               <li>Detergent, shampoo, cosmetics</li>
               <li>IT services, consulting, professional services</li>
-              <li>Financial services, insurance</li>
+              <li>Financial services (banking)</li>
               <li>Telecom services</li>
-              <li>Hotel rooms above ₹7,500/night</li>
+              <li>Hotel rooms above ₹1,000/night</li>
               <li>Renting of commercial property</li>
+              <li><strong>Processed food, medicines, smartphones (moved from 12% under GST 2.0)</strong></li>
+              <li><strong>Cement, air conditioners (moved from 28% under GST 2.0)</strong></li>
             </ul>
           </section>
 
           <section className="tool-info">
-            <h2>28% GST Items + Cess</h2>
+            <h2>40% GST — Premium &amp; Demerit Goods (GST 2.0)</h2>
             <ul>
-              <li>Motor cars, SUVs, luxury vehicles (+ cess 1-22%)</li>
-              <li>Air conditioners</li>
-              <li>Cement</li>
-              <li>Aerated drinks and energy drinks (+ 12% cess)</li>
-              <li>Tobacco products — cigarettes, gutka, pan masala (+ cess up to 290%)</li>
+              <li>Tobacco products — cigarettes, gutka, pan masala</li>
+              <li>Aerated drinks and energy drinks</li>
+              <li>Motor vehicles above ₹20 lakh</li>
+              <li>Motorcycles above 350cc</li>
               <li>Luxury goods — yachts, aircraft for personal use</li>
               <li>Gambling, betting, lottery</li>
-              <li>Movie tickets above ₹100</li>
             </ul>
             <p>
-              Compensation Cess is levied on top of 28% GST on luxury and sin goods to
-              compensate states for revenue loss during the GST transition.
+              Under GST 2.0, the old 28% slab has been abolished. Most items moved to 18%, while
+              premium and demerit goods now attract 40% GST. Compensation cess on tobacco was
+              eliminated from February 2026.
             </p>
           </section>
 
@@ -246,12 +240,17 @@ export default function GstRatesListGuide() {
           </section>
 
           <section className="tool-info">
-            <h2>Recent GST Rate Changes 2026</h2>
+            <h2>GST 2.0 Rate Changes 2026</h2>
             <ul>
-              <li>The GST Council continues to meet quarterly to review and rationalize rates</li>
-              <li>Rate changes are published via CBIC notifications on cbic.gov.in</li>
-              <li>All rates on this page are updated to reflect the latest notifications as of October 2026</li>
-              <li>Subscribe below to get notified when rates change</li>
+              <li><strong>12% slab abolished</strong> — items moved to 5% or 18%</li>
+              <li><strong>28% slab abolished</strong> — items moved to 18% or 40%</li>
+              <li><strong>New 40% slab</strong> — tobacco, aerated drinks, vehicles above ₹20L, bikes above 350cc</li>
+              <li><strong>Insurance at 0%</strong> — health and life insurance moved from 18% to Nil</li>
+              <li><strong>Cancer drugs at 5%</strong> — reduced from 12%</li>
+              <li><strong>33 life-saving medicines</strong> — moved to Nil rate</li>
+              <li><strong>Compensation cess on tobacco</strong> — eliminated from February 2026</li>
+              <li><strong>Leasing without operator</strong> — same rate as underlying goods</li>
+              <li>All rates on this page are updated to reflect GST 2.0 as of October 2026</li>
             </ul>
           </section>
 
