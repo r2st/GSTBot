@@ -55,6 +55,7 @@ const HsnCodeList2026 = lazy(() => import("./pages/blog/HsnCodeList2026"));
 const Gst2ChangesExplained = lazy(() => import("./pages/blog/Gst2ChangesExplained"));
 const GstReturnFilingOnline = lazy(() => import("./pages/blog/GstReturnFilingOnline"));
 const GstRatesServices2026 = lazy(() => import("./pages/blog/GstRatesServices2026"));
+const CgstSgstIgstDifference = lazy(() => import("./pages/blog/CgstSgstIgstDifference"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -183,6 +184,7 @@ export default function App() {
           <Route path="gst-2-changes-explained-india" element={<Gst2ChangesExplained />} />
           <Route path="how-to-file-gst-returns-online" element={<GstReturnFilingOnline />} />
           <Route path="gst-rates-services-2026" element={<GstRatesServices2026 />} />
+          <Route path="difference-between-cgst-sgst-igst" element={<CgstSgstIgstDifference />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />
