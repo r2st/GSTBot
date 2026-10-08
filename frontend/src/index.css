@@ -193,8 +193,8 @@ a {
   align-items: center;
   justify-content: center;
   padding: 0.4rem;
-  min-width: 34px;
-  min-height: 34px;
+  min-width: 44px;
+  min-height: 44px;
 }
 .shell-business {
   display: flex;
@@ -310,7 +310,10 @@ a {
 
 /* ---- Buttons ---- */
 .btn {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
   padding: 0.5rem 0.9rem;
   border: 1px solid transparent;
   border-radius: var(--radius);
@@ -349,6 +352,7 @@ a {
 input,
 select {
   padding: 0.5rem 0.65rem;
+  min-height: 44px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   font: inherit;
@@ -1037,6 +1041,12 @@ select[aria-invalid="true"]:focus {
   .landing-footer-col {
     align-items: center;
   }
+  .landing-footer-col a {
+    padding: 0.35rem 0;
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
 }
 @media (max-width: 768px) {
   .landing-features-grid { gap: 12px; }
@@ -1045,6 +1055,17 @@ select[aria-invalid="true"]:focus {
   .landing-section { padding: 32px 16px; }
   .landing-faq { padding: 32px 16px; }
   .landing-cta { padding: 32px 16px; }
+  .landing-trust-bar { flex-wrap: wrap; gap: 0.75rem; }
+  .landing-trust-sep { display: none; }
+  .landing-trust-bar { justify-content: space-around; }
+  .landing-tool-card { min-height: 44px; padding: 0.85rem 1rem; flex-direction: row; gap: 0.5rem; text-align: left; }
+  .landing-tool-card strong { font-size: 0.85rem; }
+  .landing-tool-cta { display: none; }
+  .landing-cta-btn { width: 100%; text-align: center; }
+  .landing-cta-secondary { width: 100%; text-align: center; }
+  .landing-cta-actions { flex-direction: column; }
+  .landing-faq-q { min-height: 44px; padding: 12px 0; font-size: 0.95rem; }
+  .landing-footer-nav { grid-template-columns: 1fr; gap: 1.5rem; }
 }
 
 /* Auth tabs */
@@ -1965,8 +1986,8 @@ a:focus-visible {
    below is what turns it into a drawer. */
 .nav-toggle {
   display: none;
-  width: 42px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2048,6 +2069,9 @@ a:focus-visible {
   }
   .nav-link {
     padding: 0.7rem 0.75rem;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
   }
   .nav-scrim {
     display: block;
@@ -4087,16 +4111,17 @@ a:focus-visible {
     min-width: 0;
   }
   .tools-nav-links::-webkit-scrollbar { display: none; }
-  .tools-nav-link { white-space: nowrap; font-size: 0.78rem; padding: 0.3rem 0.5rem; }
+  .tools-nav-link { white-space: nowrap; font-size: 0.82rem; padding: 0.5rem 0.65rem; min-height: 44px; display: inline-flex; align-items: center; }
   .tools-nav-brand { font-size: 0.95rem; margin-right: 0.5rem; }
-  .tools-nav-cta { font-size: 0.78rem; padding: 0.35rem 0.75rem; white-space: nowrap; }
+  .tools-nav-cta { font-size: 0.82rem; padding: 0.5rem 0.85rem; white-space: nowrap; min-height: 44px; display: inline-flex; align-items: center; }
   .tool-main { padding: 1.5rem 1rem 3rem; }
   .tool-title { font-size: 1.4rem; }
   .calc-card { padding: 1rem; }
-  .landing-tool-cards { grid-template-columns: repeat(2, 1fr); max-width: 400px; }
+  .landing-tool-cards { grid-template-columns: 1fr; max-width: 400px; }
   .hsn-cat-grid { grid-template-columns: repeat(2, 1fr); }
   .landing-search-box { flex-direction: column; }
-  .landing-search-btn { border-radius: 0; }
+  .landing-search-input { min-height: 48px; font-size: 1rem; }
+  .landing-search-btn { border-radius: 0; min-height: 48px; font-size: 1rem; }
   .share-buttons { justify-content: center; }
   .compare-container { padding: 0 0.5rem; }
   .compare-pricing-grid { grid-template-columns: 1fr; }
