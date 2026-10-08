@@ -8,6 +8,7 @@ import { useAuth } from "./hooks/useAuth";
 import LandingPage from "./pages/LandingPage";
 import ToolTracker from "./components/ToolTracker";
 import SocialProofBar from "./components/SocialProofBar";
+import ReferralBanner from "./components/ReferralBanner";
 
 const AlertsPage = lazy(() => import("./pages/AlertsPage"));
 const BlogLayout = lazy(() => import("./pages/BlogLayout"));
@@ -317,6 +318,7 @@ export default function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <InstallPrompt />
+      <ReferralBanner />
     </Suspense>
   );
 }

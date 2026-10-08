@@ -66,6 +66,40 @@ export const TOOL_MAP = {
   '/insurance-savings': 'Insurance Savings',
 };
 
+export function trackReferral() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('ref') === 'share') {
+      const key = 'doaide_referral_count';
+      const count = parseInt(localStorage.getItem(key) || '0', 10);
+      localStorage.setItem(key, String(count + 1));
+      const url = new URL(window.location);
+      url.searchParams.delete('ref');
+      window.history.replaceState({}, '', url.pathname + url.search);
+    }
+  } catch {}
+}
+
+export function getReferralCount() {
+  try {
+    return parseInt(localStorage.getItem('doaide_referral_count') || '0', 10);
+  } catch { return 0; }
+}
+
+export function shouldShowReferralBanner() {
+  try {
+    const dismissed = localStorage.getItem('doaide_referral_dismissed');
+    if (!dismissed) return true;
+    return Date.now() - parseInt(dismissed, 10) > 7 * 24 * 60 * 60 * 1000;
+  } catch { return true; }
+}
+
+export function dismissReferralBanner() {
+  try {
+    localStorage.setItem('doaide_referral_dismissed', String(Date.now()));
+  } catch {}
+}
+
 export const TRENDING_TOOLS = [
   { name: 'Income Tax Calculator', url: 'https://tax.doaide.com/income-tax-calculator', product: 'TaxFile', icon: '🧮' },
   { name: 'Premium Calculator', url: 'https://insurekit.doaide.com/premium-calculator', product: 'InsureKit', icon: '₹' },
