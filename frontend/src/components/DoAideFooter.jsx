@@ -18,6 +18,24 @@ const DOAIDE_TOOLS = [
     desc: "Independent startup valuations",
   },
   {
+    icon: "\u{1F6E1}️",
+    name: "InsureKit",
+    url: "https://insure.doaide.com",
+    desc: "LIC insurance calculators & tools",
+  },
+  {
+    icon: "\u{1F4B0}",
+    name: "TaxFile",
+    url: "https://tax.doaide.com",
+    desc: "Income tax & financial calculators",
+  },
+  {
+    icon: "\u{1F4C8}",
+    name: "Pulse",
+    url: "https://pulse.doaide.com",
+    desc: "Newsletter growth & email tools",
+  },
+  {
     icon: "\u{1F9FE}",
     name: "Invoicer",
     url: "https://invoicer.doaide.com",
@@ -28,6 +46,12 @@ const DOAIDE_TOOLS = [
     name: "Contracts",
     url: "https://contracts.doaide.com",
     desc: "Draft & manage business contracts",
+  },
+  {
+    icon: "\u{1F3E0}",
+    name: "HomeNex",
+    url: "https://homenex.aiknol.com",
+    desc: "AI CRM for real estate agents",
   },
 ];
 
