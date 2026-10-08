@@ -84,7 +84,7 @@ describe("LandingPage", () => {
 
       expect(screen.getByText("1")).toBeInTheDocument();
       expect(screen.getByText("2")).toBeInTheDocument();
-      expect(screen.getByText("3")).toBeInTheDocument();
+      expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(1);
     });
 
     it("shows the subtitle", () => {

@@ -355,6 +355,12 @@
     <priority>0.8</priority>
   </url>
   <url>
+    <loc>https://gst.doaide.com/gstr2b-reconciliation</loc>
+    <lastmod>2026-10-08</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
     <loc>https://gst.doaide.com/gst-rate/cement</loc>
     <lastmod>2026-10-07</lastmod>
     <changefreq>monthly</changefreq>

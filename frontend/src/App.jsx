@@ -100,6 +100,7 @@ const Gst2MigrationCheckerPage = lazy(() => import("./pages/Gst2MigrationChecker
 const InsuranceSavingsPage = lazy(() => import("./pages/InsuranceSavingsPage"));
 const Gst2GuidePage = lazy(() => import("./pages/guides/Gst2GuidePage"));
 const WhatsAppPage = lazy(() => import("./pages/WhatsAppPage"));
+const Gstr2bReconciliationPage = lazy(() => import("./pages/Gstr2bReconciliationPage"));
 
 function LazyFallback() {
   return (
@@ -229,6 +230,7 @@ export default function App() {
         <Route path="/audit-checklist" element={<Lazy><AuditChecklistPage /></Lazy>} />
         <Route path="/late-fee-calculator" element={<Lazy><LateFeeCalculatorPage /></Lazy>} />
         <Route path="/gstr9-checklist" element={<Lazy><Gstr9ChecklistPage /></Lazy>} />
+        <Route path="/gstr2b-reconciliation" element={<Lazy><Gstr2bReconciliationPage /></Lazy>} />
         <Route path="/guides/gst-registration-process" element={<Lazy><GstRegistrationProcessGuide /></Lazy>} />
         <Route path="/guides/gst-return-calendar-2026-27" element={<Lazy><GstReturnCalendarGuide /></Lazy>} />
         <Route path="/guides/gst-rates-list-2026" element={<Lazy><GstRatesListGuide /></Lazy>} />

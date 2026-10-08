@@ -1,9 +1,12 @@
 import { useMemo, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import { InlineCTA, StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
+import ExitIntentPopup from "../components/ExitIntentPopup";
 import RelatedTools from "../components/RelatedTools";
+import SaveResultsCTA from "../components/SaveResultsCTA";
 import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -225,6 +228,9 @@ export default function CompositionSchemePage() {
             )}
           </div>
 
+          {result && (
+            <SaveResultsCTA resultSummary={`Composition Scheme: ${result.eligible ? "Eligible" : "Not Eligible"}${result.taxRate ? ` at ${result.taxRate.label}` : ""}`} />
+          )}
           <EmailCapture
             source="composition-scheme"
             heading="Stay updated on GST scheme changes"
@@ -321,11 +327,14 @@ export default function CompositionSchemePage() {
             </p>
           </section>
 
+          <InlineCTA variant="save" />
           <RelatedTools current="/composition-scheme" />
           <CrossProductLinks page="composition-scheme" />
         </div>
       </main>
       <DoAideFooter />
+      <StickyMobileCTA />
+      <ExitIntentPopup />
     </div>
   );
 }

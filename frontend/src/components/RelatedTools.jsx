@@ -29,6 +29,7 @@ const ALL_TOOLS = [
   { path: "/audit-checklist", label: "Audit Checklist", desc: "GST audit compliance tracker" },
   { path: "/late-fee-calculator", label: "Late Fee Calculator", desc: "Calculate late filing fees for GST returns" },
   { path: "/gstr9-checklist", label: "GSTR-9 Checklist", desc: "Annual return filing checklist" },
+  { path: "/gstr2b-reconciliation", label: "GSTR-2B Reconciliation", desc: "Match purchase register with GSTR-2B" },
 ];
 
 // Contextual cross-links: which tools are most relevant to which page.
@@ -59,6 +60,7 @@ const RECOMMENDED = {
   "/audit-checklist": ["/gstr9-checklist", "/itc-mismatch", "/itc-calculator", "/due-dates"],
   "/late-fee-calculator": ["/penalty-calculator", "/interest-calculator", "/due-dates", "/return-calendar"],
   "/gstr9-checklist": ["/audit-checklist", "/due-dates", "/itc-mismatch", "/return-calendar"],
+  "/gstr2b-reconciliation": ["/itc-mismatch", "/itc-calculator", "/input-tax-credit", "/audit-checklist"],
 };
 
 export default function RelatedTools({ current }) {

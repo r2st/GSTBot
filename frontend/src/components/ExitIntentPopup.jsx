@@ -1,0 +1,74 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../hooks/useAuth";
+import { track } from "../lib/track";
+
+const DISMISS_KEY = "gstbot_exit_popup_dismissed";
+
+function wasDismissed() {
+  try {
+    const ts = localStorage.getItem(DISMISS_KEY);
+    if (!ts) return false;
+    return Date.now() - parseInt(ts, 10) < 3 * 24 * 60 * 60 * 1000;
+  } catch {
+    return false;
+  }
+}
+
+export default function ExitIntentPopup() {
+  const { user } = useAuth();
+  const [visible, setVisible] = useState(false);
+
+  useEffect(() => {
+    if (user || wasDismissed()) return;
+    let shown = false;
+
+    const onMouseLeave = (e) => {
+      if (shown) return;
+      if (e.clientY <= 0) {
+        shown = true;
+        setVisible(true);
+        track("exit_intent_shown");
+      }
+    };
+
+    document.addEventListener("mouseout", onMouseLeave);
+    return () => document.removeEventListener("mouseout", onMouseLeave);
+  }, [user]);
+
+  if (!visible) return null;
+
+  const dismiss = () => {
+    setVisible(false);
+    try { localStorage.setItem(DISMISS_KEY, String(Date.now())); } catch { /* localStorage unavailable */ }
+  };
+
+  return (
+    <div className="exit-popup-overlay" onClick={dismiss} role="dialog" aria-modal="true" aria-label="Filing reminder signup">
+      <div className="exit-popup" onClick={(e) => e.stopPropagation()}>
+        <button className="exit-popup-close" onClick={dismiss} aria-label="Close">×</button>
+        <div className="exit-popup-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#D4AF37" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 8A6 6 0 106 8c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 01-3.46 0" />
+          </svg>
+        </div>
+        <h2 className="exit-popup-title">Never Miss a GST Filing Deadline</h2>
+        <p className="exit-popup-desc">
+          Get free email reminders before GSTR-1 and GSTR-3B due dates.
+          No account required — just your email.
+        </p>
+        <Link
+          to="/?register=1&reminders=1"
+          className="btn btn-primary exit-popup-btn"
+          onClick={() => { track("exit_intent_signup"); dismiss(); }}
+        >
+          Get Free Filing Reminders
+        </Link>
+        <button className="exit-popup-skip" onClick={dismiss}>
+          No thanks, I&apos;ll remember on my own
+        </button>
+      </div>
+    </div>
+  );
+}

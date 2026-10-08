@@ -205,6 +205,17 @@ const TOOLS = [
     ),
   },
   {
+    to: "/gstr2b-reconciliation",
+    title: "GSTR-2B Reconciliation",
+    desc: "Match your purchase register with GSTR-2B to find mismatches, missing invoices, and ITC at risk. Free, no login needed.",
+    icon: (
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="#F0B429" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" />
+        <path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" />
+      </svg>
+    ),
+  },
+  {
     to: "/embed",
     title: "Embed GST Widgets",
     desc: "Add free GST calculator, GSTIN lookup, or HSN code finder widgets to your own website with a single line of code.",

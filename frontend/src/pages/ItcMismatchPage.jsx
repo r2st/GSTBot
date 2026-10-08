@@ -1,9 +1,12 @@
 import { useCallback, useMemo, useState } from "react";
 import Breadcrumb from "../components/Breadcrumb";
+import { StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
+import ExitIntentPopup from "../components/ExitIntentPopup";
 import RelatedTools from "../components/RelatedTools";
+import SaveResultsCTA from "../components/SaveResultsCTA";
 import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -300,6 +303,9 @@ export default function ItcMismatchPage() {
             )}
           </div>
 
+          {analysis && (
+            <SaveResultsCTA resultSummary={`ITC Mismatch: ${analysis.matched} matched, ${analysis.mismatched} mismatched, ${formatINR(analysis.excessClaimed)} at risk`} />
+          )}
           <EmailCapture
             source="itc-mismatch"
             heading="Automate your ITC reconciliation"
@@ -389,6 +395,8 @@ export default function ItcMismatchPage() {
         </div>
       </main>
       <DoAideFooter />
+      <StickyMobileCTA />
+      <ExitIntentPopup />
     </div>
   );
 }

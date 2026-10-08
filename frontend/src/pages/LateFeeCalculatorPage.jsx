@@ -4,8 +4,10 @@ import { InlineCTA, StickyMobileCTA } from "../components/ConversionCTA";
 import CrossProductLinks from "../components/CrossProductLinks";
 import DoAideFooter from "../components/DoAideFooter";
 import EmailCapture from "../components/EmailCapture";
+import ExitIntentPopup from "../components/ExitIntentPopup";
 import PrintButton from "../components/PrintButton";
 import RelatedTools from "../components/RelatedTools";
+import SaveResultsCTA from "../components/SaveResultsCTA";
 import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
@@ -240,6 +242,9 @@ export default function LateFeeCalculatorPage() {
             </div>
           </section>
 
+          {result && result.days > 0 && (
+            <SaveResultsCTA resultSummary={`GST Late Fee: ${formatINR(result.lateFee)} (${result.days} days late) for ${RETURN_TYPES.find(r => r.key === returnType)?.label}`} />
+          )}
           <EmailCapture context="late-fee-calculator" />
           <InlineCTA variant="remind" />
           <RelatedTools
@@ -254,6 +259,7 @@ export default function LateFeeCalculatorPage() {
           <CrossProductLinks />
           <DoAideFooter />
           <StickyMobileCTA />
+          <ExitIntentPopup />
         </div>
       </main>
     </div>
