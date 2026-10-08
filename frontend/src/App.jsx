@@ -56,6 +56,7 @@ const Gst2ChangesExplained = lazy(() => import("./pages/blog/Gst2ChangesExplaine
 const GstReturnFilingOnline = lazy(() => import("./pages/blog/GstReturnFilingOnline"));
 const GstRatesServices2026 = lazy(() => import("./pages/blog/GstRatesServices2026"));
 const CgstSgstIgstDifference = lazy(() => import("./pages/blog/CgstSgstIgstDifference"));
+const GstLatePenaltyCalculator = lazy(() => import("./pages/blog/GstLatePenaltyCalculator"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -185,6 +186,7 @@ export default function App() {
           <Route path="how-to-file-gst-returns-online" element={<GstReturnFilingOnline />} />
           <Route path="gst-rates-services-2026" element={<GstRatesServices2026 />} />
           <Route path="difference-between-cgst-sgst-igst" element={<CgstSgstIgstDifference />} />
+          <Route path="gst-late-filing-penalty-calculator" element={<GstLatePenaltyCalculator />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />
