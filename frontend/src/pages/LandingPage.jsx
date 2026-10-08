@@ -454,6 +454,8 @@ export default function LandingPage() {
             <Link to="/guides/gst-registration-process">Registration Guide</Link>
             <Link to="/guides/gst-return-calendar-2026-27">Return Calendar</Link>
             <Link to="/guides/gst-rates-list-2026">GST Rates List</Link>
+            <Link to="/blog/difference-between-cgst-sgst-igst">CGST vs SGST vs IGST</Link>
+            <Link to="/blog/gst-late-filing-penalty-calculator">Penalty Calculator Guide</Link>
           </div>
           <div className="landing-footer-col">
             <h4>Compare</h4>

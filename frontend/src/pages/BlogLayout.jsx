@@ -106,6 +106,16 @@ const ARTICLES = [
     title: "GST Rates for Services 2026 — Complete Rate List with SAC Codes",
     description: "Complete GST rate list for all services in 2026 with SAC codes. IT, consulting, transport, healthcare, education, restaurants, hotels, and professional services.",
   },
+  {
+    slug: "difference-between-cgst-sgst-igst",
+    title: "Difference Between CGST, SGST and IGST — Explained with Examples",
+    description: "Understand when CGST+SGST vs IGST applies, how rates split, ITC set-off rules, and worked examples for interstate and intrastate supplies.",
+  },
+  {
+    slug: "gst-late-filing-penalty-calculator",
+    title: "GST Late Filing Penalty Calculator 2026",
+    description: "Calculate GST late filing penalties and interest for GSTR-1, GSTR-3B, GSTR-9. Current rates, caps, worked examples, and an interactive calculator.",
+  },
 ];
 
 export { ARTICLES };
