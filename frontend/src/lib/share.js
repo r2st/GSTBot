@@ -51,6 +51,13 @@ export function embedSnippet(tool, { width = "100%", height = "400" } = {}) {
 }
 
 export function widgetEmbedSnippet(tool, { theme = "dark", rate = 18, width } = {}) {
+  if (tool === "hsn") {
+    const params = new URLSearchParams();
+    if (theme) params.set("theme", theme);
+    const qs = params.toString();
+    const src = `${origin()}/widget/hsn${qs ? `?${qs}` : ""}`;
+    return `<iframe src="${src}" width="${width || "100%"}" height="420" frameborder="0" style="border:1px solid #e5e7eb;border-radius:8px;" title="DoAide HSN Code Finder"></iframe>`;
+  }
   if (tool !== "calculator") {
     return embedSnippet(tool);
   }

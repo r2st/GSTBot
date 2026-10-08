@@ -52,6 +52,7 @@ const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
 const BusyCompare = lazy(() => import("./pages/compare/BusyCompare"));
 const BestGstSoftwarePage = lazy(() => import("./pages/BestGstSoftwarePage"));
+const BestGstTools = lazy(() => import("./pages/compare/BestGstTools"));
 const GuidesIndex = lazy(() => import("./pages/guides/GuidesIndex"));
 const GstRegistrationGuide = lazy(() => import("./pages/guides/GstRegistrationGuide"));
 const Gstr1FilingGuide = lazy(() => import("./pages/guides/Gstr1FilingGuide"));
@@ -83,6 +84,7 @@ const GstRatesListGuide = lazy(() => import("./pages/guides/GstRatesListGuide"))
 const TurnoverLimitPage = lazy(() => import("./pages/TurnoverLimitPage"));
 const LateFeeCalculatorPage = lazy(() => import("./pages/LateFeeCalculatorPage"));
 const Gstr9ChecklistPage = lazy(() => import("./pages/Gstr9ChecklistPage"));
+const HsnWidgetPage = lazy(() => import("./pages/HsnWidgetPage"));
 
 function LazyFallback() {
   return (
@@ -174,6 +176,7 @@ export default function App() {
         <Route path="/compare/tally" element={<Lazy><TallyCompare /></Lazy>} />
         <Route path="/compare/busy" element={<Lazy><BusyCompare /></Lazy>} />
         <Route path="/best-gst-software" element={<Lazy><BestGstSoftwarePage /></Lazy>} />
+        <Route path="/compare/best-gst-tools" element={<Lazy><BestGstTools /></Lazy>} />
         <Route path="/guides" element={<Lazy><GuidesIndex /></Lazy>} />
         <Route path="/guides/gst-registration" element={<Lazy><GstRegistrationGuide /></Lazy>} />
         <Route path="/guides/how-to-file-gstr-1" element={<Lazy><Gstr1FilingGuide /></Lazy>} />
@@ -207,6 +210,7 @@ export default function App() {
         <Route path="/guides/gst-rates-list-2026" element={<Lazy><GstRatesListGuide /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
+        <Route path="/widget/hsn" element={<Lazy><HsnWidgetPage /></Lazy>} />
         <Route path="/" element={<Home />} />
         <Route
           path="/invoices"
