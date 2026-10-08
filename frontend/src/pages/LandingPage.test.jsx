@@ -434,4 +434,40 @@ describe("LandingPage", () => {
       expect(screen.getByLabelText("Automated GSTR-2B reconciliation")).toBeInTheDocument();
     });
   });
+
+  describe("Deadline Countdown section", () => {
+    it("renders the deadline countdown heading", () => {
+      renderLanding();
+      expect(screen.getByText("GST Filing Deadline Countdown")).toBeInTheDocument();
+    });
+
+    it("shows GSTR-1 and GSTR-3B deadlines", () => {
+      renderLanding();
+      expect(screen.getByText("GSTR-1")).toBeInTheDocument();
+      expect(screen.getByText("GSTR-3B")).toBeInTheDocument();
+    });
+  });
+
+  describe("Business Counter section", () => {
+    it("renders the business counter", () => {
+      vi.useFakeTimers();
+      renderLanding();
+      act(() => { vi.advanceTimersByTime(2000); });
+      expect(screen.getByText(/businesses this month/)).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+  });
+
+  describe("GST News section", () => {
+    it("renders the news heading", () => {
+      renderLanding();
+      expect(screen.getByText(/GST News/)).toBeInTheDocument();
+    });
+
+    it("shows news items with tags", () => {
+      renderLanding();
+      expect(screen.getByText("Rate Change")).toBeInTheDocument();
+      expect(screen.getByText("Compliance")).toBeInTheDocument();
+    });
+  });
 });

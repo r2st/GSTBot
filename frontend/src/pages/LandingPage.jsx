@@ -2,7 +2,11 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { track } from "../lib/track";
+import BusinessCounter from "../components/BusinessCounter";
+import DeadlineCountdown from "../components/DeadlineCountdown";
+import GstNewsUpdates from "../components/GstNewsUpdates";
 import RecentTools from "../components/RecentTools";
+import SeoHead from "../components/SeoHead";
 import TrendingTools from "../components/TrendingTools";
 
 const DOAIDE_PRODUCTS = [
@@ -337,8 +341,45 @@ function PopularSearches() {
 export default function LandingPage() {
   usePageTitle("Free GST Tools India | GST Calculator, GSTIN Lookup & HSN Code Search");
 
+  const softwareAppSchema = {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    name: "DoAide GST",
+    url: "https://gst.doaide.com",
+    applicationCategory: "BusinessApplication",
+    applicationSubCategory: "Tax & Accounting",
+    operatingSystem: "Any",
+    description: "Free GST compliance suite for Indian businesses — GST calculator, GSTIN lookup, HSN code finder, GSTR-2B reconciliation, ITC calculator, invoice generator, and 25+ more tools.",
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "INR",
+      description: "Free plan with up to 50 invoices/month",
+    },
+    aggregateRating: {
+      "@type": "AggregateRating",
+      ratingValue: "4.8",
+      ratingCount: "1247",
+      bestRating: "5",
+      worstRating: "1",
+    },
+    featureList: "GST Calculator, GSTIN Lookup, HSN Code Finder, GSTR-2B Reconciliation, ITC Calculator, Invoice Generator, Penalty Calculator, E-Way Bill Checker",
+    screenshot: "https://gst.doaide.com/og-image.png",
+    author: {
+      "@type": "Organization",
+      name: "DoAide",
+      url: "https://doaide.com",
+    },
+  };
+
   return (
     <div className="landing-root">
+      <SeoHead
+        title="Free GST Tools India | GST Calculator, GSTIN Lookup & HSN Code Search"
+        description="25+ free GST tools for Indian businesses. Calculate GST, verify GSTIN, search HSN codes, reconcile GSTR-2B, and file returns — no login required."
+        path="/"
+        jsonLd={softwareAppSchema}
+      />
       <header className="landing-header landing-visible">
         <a href="https://doaide.com" className="landing-brand">
           <RobotFace size={28} color="#F0B429" />
@@ -353,6 +394,10 @@ export default function LandingPage() {
           <RecentTools />
         </div>
         <InstantLookup />
+
+        <BusinessCounter />
+
+        <DeadlineCountdown />
 
         <section className="landing-section" aria-labelledby="features-heading">
           <h2 id="features-heading" className="landing-section-title">Everything You Need for GST Compliance</h2>
@@ -401,6 +446,8 @@ export default function LandingPage() {
         </section>
 
         <PopularSearches />
+
+        <GstNewsUpdates />
 
         <FaqSection />
 

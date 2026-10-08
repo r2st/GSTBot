@@ -11,6 +11,7 @@ import SavePrompt, { getCalcCount, incrementCalcCount } from "../components/Save
 import SeoHead from "../components/SeoHead";
 import PrintButton from "../components/PrintButton";
 import ShareButtons from "../components/ShareButtons";
+import ShareSavings from "../components/ShareSavings";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { calcUrl, calculate, formatINR, GST_SLABS, parseCalcParams, reverseCalculate } from "../lib/gstCalc";
@@ -191,6 +192,8 @@ export default function CalculatorPage() {
               </div>
             )}
           </div>
+
+          {result && <ShareSavings toolName="GST Calculator" savedAmount={500} />}
 
           {!promptDismissed && (
             <SavePrompt

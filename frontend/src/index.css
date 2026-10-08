@@ -4846,3 +4846,227 @@ a:focus-visible {
     color: #000 !important;
   }
 }
+
+/* ── Deadline Countdown ── */
+.deadline-countdown {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+.deadline-countdown-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.deadline-countdown-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  text-align: center;
+  transition: box-shadow 0.2s;
+}
+.deadline-countdown-card:hover {
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+}
+.deadline-countdown-urgent {
+  border-color: #EF4444;
+  background: linear-gradient(135deg, rgba(239,68,68,0.05), transparent);
+}
+.deadline-countdown-type {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted, #888);
+  margin-bottom: 0.5rem;
+}
+.deadline-countdown-timer {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 6px;
+}
+.deadline-countdown-num {
+  font-size: 2.5rem;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--accent);
+}
+.deadline-countdown-urgent .deadline-countdown-num {
+  color: #EF4444;
+}
+.deadline-countdown-label {
+  font-size: 0.9rem;
+  color: var(--text-muted, #888);
+}
+.deadline-countdown-hours {
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+  margin-top: 4px;
+}
+.deadline-countdown-date {
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+  margin-top: 0.5rem;
+}
+.deadline-countdown-badge {
+  display: inline-block;
+  margin-top: 0.5rem;
+  padding: 2px 10px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fff;
+  background: #EF4444;
+  border-radius: 999px;
+  animation: landing-pulse 1.5s ease infinite;
+}
+.deadline-countdown-cta {
+  text-align: center;
+  margin-top: 1rem;
+}
+
+/* ── Share Savings ── */
+.share-savings {
+  margin: 1.5rem 0;
+}
+.share-savings-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  background: linear-gradient(135deg, #25D366 0%, #128C7E 100%);
+  border-radius: 12px;
+  padding: 1rem 1.25rem;
+  flex-wrap: wrap;
+}
+.share-savings-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: #fff;
+}
+.share-savings-text strong {
+  font-size: 0.95rem;
+}
+.share-savings-text span {
+  font-size: 0.8rem;
+  opacity: 0.9;
+}
+.share-savings-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 18px;
+  background: #fff;
+  color: #25D366;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: transform 0.15s, box-shadow 0.15s;
+  white-space: nowrap;
+}
+.share-savings-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* ── GST News ── */
+.gst-news {
+  max-width: 900px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+.gst-news-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.gst-news-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  text-decoration: none;
+  color: inherit;
+  transition: box-shadow 0.2s, transform 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.gst-news-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+}
+.gst-news-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gst-news-tag {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: #fff;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.gst-news-date {
+  font-size: 0.75rem;
+  color: var(--text-muted, #888);
+}
+.gst-news-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.3;
+  margin: 0;
+}
+.gst-news-summary {
+  font-size: 0.8rem;
+  color: var(--text-muted, #888);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* ── Business Counter ── */
+.business-counter {
+  max-width: 900px;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+}
+.business-counter-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 0.75rem 1.25rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  flex-wrap: wrap;
+}
+.business-counter-text {
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+.business-counter-text strong {
+  color: var(--accent);
+  font-size: 1rem;
+}
+.business-counter-badge {
+  font-size: 0.7rem;
+  color: var(--text-muted, #888);
+  padding-left: 10px;
+  border-left: 1px solid var(--border);
+}
+
+@media (max-width: 600px) {
+  .deadline-countdown-grid { grid-template-columns: 1fr 1fr; }
+  .share-savings-inner { flex-direction: column; text-align: center; }
+  .gst-news-grid { grid-template-columns: 1fr; }
+  .business-counter-badge { border-left: none; padding-left: 0; }
+}
