@@ -39,11 +39,22 @@ function ogImageUrl(title, subtitle) {
   return `${API_BASE}/seo/og-image?${params.toString()}`;
 }
 
+function setCanonical(url) {
+  let el = document.querySelector('link[rel="canonical"]');
+  if (!el) {
+    el = document.createElement("link");
+    el.setAttribute("rel", "canonical");
+    document.head.appendChild(el);
+  }
+  el.setAttribute("href", url);
+}
+
 export default function SeoHead({ title, description, path, jsonLd, breadcrumbs, ogImage }) {
   useEffect(() => {
     const url = `${BASE_URL}${path}`;
     const image = ogImage || ogImageUrl(title, description?.slice(0, 80));
 
+    setCanonical(url);
     setMeta("description", description, "name");
     setMeta("og:title", title);
     setMeta("og:description", description);

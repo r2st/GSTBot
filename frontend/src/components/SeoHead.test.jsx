@@ -77,4 +77,21 @@ describe("SeoHead", () => {
     expect(document.getElementById("seo-jsonld-0")).toBeTruthy();
     expect(document.getElementById("seo-jsonld-1")).toBeTruthy();
   });
+
+  it("sets the canonical link element", () => {
+    render(<Wrapper title="T" description="d" path="/calculator" />);
+
+    const link = document.querySelector('link[rel="canonical"]');
+    expect(link).toBeTruthy();
+    expect(link.getAttribute("href")).toBe("https://gst.doaide.com/calculator");
+  });
+
+  it("updates the canonical link on re-render with a new path", () => {
+    const { rerender } = render(<Wrapper title="T" description="d" path="/calculator" />);
+
+    rerender(<Wrapper title="T" description="d" path="/lookup" />);
+
+    const link = document.querySelector('link[rel="canonical"]');
+    expect(link.getAttribute("href")).toBe("https://gst.doaide.com/lookup");
+  });
 });
