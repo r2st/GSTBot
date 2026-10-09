@@ -40,6 +40,7 @@ from app.routers import (
     misc,
     oauth,
     reconciliation,
+    referrals,
     seo,
     subscriptions,
     suppliers,
@@ -371,6 +372,7 @@ def create_app() -> FastAPI:
     application.include_router(suppliers.router, prefix=prefix)
     application.include_router(alerts.router, prefix=prefix)
     application.include_router(subscriptions.router, prefix=prefix)
+    application.include_router(referrals.router, prefix=prefix)
     application.include_router(seo.router, prefix=prefix)
     application.include_router(advisor.router, prefix=prefix)
     application.include_router(whatsapp.router, prefix=prefix)

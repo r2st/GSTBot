@@ -687,6 +687,14 @@ export const api = {
   usage: (period) =>
     request(`/subscriptions/usage${period ? `?period=${encodeURIComponent(period)}` : ""}`),
 
+  // ---- Referrals (CA referral program) ----
+  trackReferral: (referral_code) =>
+    request("/referrals/track", { method: "POST", body: { referral_code }, auth: false }),
+  referralLeaderboard: () =>
+    request("/referrals/leaderboard", { auth: false }),
+  myReferralCode: () => request("/referrals/my-code"),
+  myReferralStats: () => request("/referrals/my-stats"),
+
   // ---- Background jobs (operational, not tenant data) ----
   /**
    * Worker reachability, broker queue depth, and scheduled-job heartbeats.

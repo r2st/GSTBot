@@ -47,6 +47,9 @@ class User(Base, TimestampMixin):
         SAEnum(UserRole, native_enum=False, length=20), default=UserRole.OWNER, nullable=False
     )
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
+    referral_code: Mapped[str | None] = mapped_column(
+        String(64), index=True, unique=True, nullable=True
+    )
 
     business: Mapped[Business] = relationship(back_populates="users")
 

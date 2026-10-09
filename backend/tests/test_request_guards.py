@@ -122,6 +122,9 @@ class TestSetOffNeedsAToken:
             "/api/v1/feedback",
             # AI advisor chatbot — public, proxied through the backend.
             "/api/v1/advisor/ask",
+            # CA referral program — tracking and leaderboard are public.
+            "/api/v1/referrals/track",
+            "/api/v1/referrals/leaderboard",
         }
 
         def calls(dependant):

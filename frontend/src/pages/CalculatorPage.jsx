@@ -185,7 +185,10 @@ export default function CalculatorPage() {
                 <div className="calc-result-actions">
                   <ShareButtons
                     path={calcUrl(result.taxable, rate, interstate)}
-                    text={`GST on ${formatINR(result.taxable)} at ${rate}%: Total ${formatINR(result.total)} — calculated free on DoAide GST`}
+                    text={result.interstate
+                      ? `✅ GST calculated: ${formatINR(result.taxable)} | IGST: ${formatINR(result.igst)} | Total: ${formatINR(result.total)} | Calculate yours free →`
+                      : `✅ GST calculated: ${formatINR(result.taxable)} | CGST: ${formatINR(result.cgst)} SGST: ${formatINR(result.sgst)} | Total: ${formatINR(result.total)} | Calculate yours free →`
+                    }
                   />
                   <SaveCalcButton result={result} rate={rate} onSaved={setSavedCalcs} />
                   <PrintButton label="Print Result" />

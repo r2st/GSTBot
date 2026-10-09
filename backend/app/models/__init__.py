@@ -13,6 +13,7 @@ from app.models.reconciliation_run import (
     ReconciliationRun,
     ReconciliationStatus,
 )
+from app.models.referral import Referral
 from app.models.subscriber import Subscriber
 from app.models.subscription import Subscription, SubscriptionStatus, SubscriptionTier
 from app.models.supplier import RiskLevel, Supplier
@@ -36,6 +37,7 @@ __all__ = [
     "MembershipRole",
     "ReconciliationRun",
     "ReconciliationStatus",
+    "Referral",
     "ReturnStatus",
     "ReturnType",
     "RiskLevel",

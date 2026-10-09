@@ -510,6 +510,8 @@ UNGATED_MUTATIONS = {
     "/api/v1/feedback",
     # AI advisor chatbot — public, no session exists.
     "/api/v1/advisor/ask",
+    # CA referral tracking — public, records a visit by hashed IP.
+    "/api/v1/referrals/track",
 }
 
 

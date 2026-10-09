@@ -69,14 +69,24 @@ export const TOOL_MAP = {
 export function trackReferral() {
   try {
     const params = new URLSearchParams(window.location.search);
-    if (params.get('ref') === 'share') {
+    const ref = params.get('ref');
+    if (!ref) return;
+
+    if (ref === 'share') {
       const key = 'doaide_referral_count';
       const count = parseInt(localStorage.getItem(key) || '0', 10);
       localStorage.setItem(key, String(count + 1));
-      const url = new URL(window.location);
-      url.searchParams.delete('ref');
-      window.history.replaceState({}, '', url.pathname + url.search);
+    } else if (ref.startsWith('CA-')) {
+      fetch('/api/v1/referrals/track', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ referral_code: ref }),
+      }).catch(() => {});
     }
+
+    const url = new URL(window.location);
+    url.searchParams.delete('ref');
+    window.history.replaceState({}, '', url.pathname + url.search);
   } catch {}
 }
 

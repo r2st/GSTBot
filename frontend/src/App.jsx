@@ -102,6 +102,7 @@ const CompositionSchemeCheckerPage = lazy(() => import("./pages/CompositionSchem
 const Gst2MigrationCheckerPage = lazy(() => import("./pages/Gst2MigrationCheckerPage"));
 const InsuranceSavingsPage = lazy(() => import("./pages/InsuranceSavingsPage"));
 const Gst2GuidePage = lazy(() => import("./pages/guides/Gst2GuidePage"));
+const ReferralPage = lazy(() => import("./pages/ReferralPage"));
 const WhatsAppPage = lazy(() => import("./pages/WhatsAppPage"));
 const Gstr2bReconciliationPage = lazy(() => import("./pages/Gstr2bReconciliationPage"));
 
@@ -242,6 +243,7 @@ export default function App() {
         <Route path="/tools/composition-scheme-checker" element={<Lazy><CompositionSchemeCheckerPage /></Lazy>} />
         <Route path="/migration-checker" element={<Lazy><Gst2MigrationCheckerPage /></Lazy>} />
         <Route path="/insurance-savings" element={<Lazy><InsuranceSavingsPage /></Lazy>} />
+        <Route path="/referrals" element={<Lazy><ReferralPage /></Lazy>} />
         <Route path="/whatsapp" element={<Lazy><WhatsAppPage /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />
