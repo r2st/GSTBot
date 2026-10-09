@@ -1,4 +1,4 @@
-# Deploying GSTBot
+# Deploying GSTIndia
 
 Target: the shared Hetzner box (Ubuntu 24.04, aarch64, 4 GB) that also runs
 GoSumo, Documedic, Herald and the knol stack, serving `gst.doaide.com`.
@@ -29,8 +29,8 @@ TLS one.
 
 **Postgres and Redis are shared.** Redis has no isolation between numbered
 databases, and db0 (GoSumo's BullMQ), db1 (Herald's Celery broker) and db3/4/5
-(CAFlow) are taken, so GSTBot uses db6/7/8. Port 8000 is taken as well, by
-`authmatic-agent` — GSTBot's API is on 3008 and the SPA on 3009, following the
+(CAFlow) are taken, so GSTIndia uses db6/7/8. Port 8000 is taken as well, by
+`authmatic-agent` — GSTIndia's API is on 3008 and the SPA on 3009, following the
 300x convention the other products on the box use.
 
 ## Layout on the server
@@ -55,7 +55,7 @@ Run as root. Each step is safe to repeat.
 **1. Packages**
 
 Python, Node, Postgres, Redis and Docker are already on this box for the other
-products. The one thing GSTBot adds:
+products. The one thing GSTIndia adds:
 
 ```sh
 apt update && apt install -y tesseract-ocr python3.12-venv
@@ -487,5 +487,5 @@ gives back every row, including the paths of files that are no longer there.
 
 **Isolation from the other products.** Postgres, Redis and the edge are shared.
 A `FLUSHALL`, a runaway connection count, or a bad `/opt/knol/Caddyfile` edit
-takes out more than GSTBot. That is a trade the box was already making before
+takes out more than GSTIndia. That is a trade the box was already making before
 this app arrived; it is worth knowing rather than discovering.

@@ -1,4 +1,4 @@
-# GSTBot — AI GST Compliance for Indian SMBs
+# GSTIndia — AI GST Compliance for Indian SMBs
 
 ## Problem
 
@@ -106,7 +106,7 @@ Week 4: Alerts, supplier scoring, polish + deploy
 | Zoho GST | Part of larger suite, not standalone |
 | TallyPrime | Desktop-only, no AI, no auto-reconciliation |
 | Masters India | Enterprise-focused |
-| **GSTBot** | Affordable, AI-powered, standalone, mobile-friendly |
+| **GSTIndia** | Affordable, AI-powered, standalone, mobile-friendly |
 
 ## Success Metrics
 

@@ -5,7 +5,7 @@ Two reversal rules need a fact about a purchase that matching cannot supply.
 Rule 37 reverses the credit on an invoice left unpaid 180 days after its date,
 so whether the supplier has been paid is a per-invoice fact, not something that
 can be inferred from a payments ledger the product does not hold. ``paid_at``
-is nullable and NULL means "unpaid as far as GSTBot knows" — which is the
+is nullable and NULL means "unpaid as far as GSTIndia knows" — which is the
 honest default for a business that has not told us otherwise, and the one that
 errs toward flagging exposure rather than hiding it.
 

@@ -1,6 +1,6 @@
 """Multi-GSTIN access: listing, linking, unlinking, and X-Business-Id.
 
-A GSTBot sign-up is one GSTIN, so a company or a practice with several
+A GSTIndia sign-up is one GSTIN, so a company or a practice with several
 registrations ends up with several separate logins. This is the router that
 lets one of those logins reach the others — see app/routers/businesses.py —
 and the tests below cover the three moving parts: proving you hold the other

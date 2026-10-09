@@ -71,7 +71,7 @@ function QRPlaceholder() {
 }
 
 export default function WhatsAppPage() {
-  usePageTitle("WhatsApp Bot — GSTBot by DoAide");
+  usePageTitle("WhatsApp Bot — GSTIndia by DoAide");
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
@@ -99,7 +99,7 @@ export default function WhatsAppPage() {
                 <path d="M12 19Q16 22 20 19" stroke="#0A0A0B" strokeWidth="1.2" fill="none" strokeLinecap="round" />
               </svg>
             </span>
-            GSTBot
+            GSTIndia
           </Link>
           <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
             <Link to="/calculator" className="landing-nav-link">Calculator</Link>
@@ -116,7 +116,7 @@ export default function WhatsAppPage() {
               </svg>
             </span>
             <h1 style={{ fontSize: 32, fontWeight: 700, margin: 0 }}>
-              GSTBot on WhatsApp
+              GSTIndia on WhatsApp
             </h1>
           </div>
 

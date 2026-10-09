@@ -2,7 +2,7 @@
 
 ``test_end_to_end.py`` drives the product up to the export and stops there,
 which is where the user leaves for the portal. This file starts there — at the
-one event GSTBot cannot observe. Nothing in the API knows a return was filed
+one event GSTIndia cannot observe. Nothing in the API knows a return was filed
 until the business says so, and almost everything the product does afterwards
 turns on that one fact: the filing status screen, the deadline alerts, the late
 fee, and whether tomorrow's sweep nags about a return that is already done.

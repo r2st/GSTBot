@@ -1,4 +1,4 @@
-# GSTBot
+# GSTIndia
 
 AI GST compliance for Indian SMBs: invoice ingestion, GSTR-2B reconciliation, ITC
 calculation, filing preparation, and deadline alerting. FastAPI + React +

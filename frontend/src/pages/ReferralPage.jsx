@@ -82,7 +82,7 @@ function MyReferralPanel() {
     }
   };
 
-  const shareText = `I use DoAide GSTBot for free GST calculations, GSTIN verification & filing prep. Try it:`;
+  const shareText = `I use DoAide GSTIndia for free GST calculations, GSTIN verification & filing prep. Try it:`;
 
   return (
     <div className="calc-card">
@@ -162,7 +162,7 @@ export default function ReferralPage() {
     <div className="tool-page">
       <SeoHead
         title="CA Referral Program — Refer Clients & Top the Leaderboard"
-        description="Refer your clients to DoAide GSTBot and earn recognition. Get a unique referral link, track visits, and compete on the CA leaderboard."
+        description="Refer your clients to DoAide GSTIndia and earn recognition. Get a unique referral link, track visits, and compete on the CA leaderboard."
         path="/referrals"
       />
       <ToolsNav />

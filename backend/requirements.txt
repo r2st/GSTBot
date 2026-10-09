@@ -1,4 +1,4 @@
-# GSTBot backend — runtime dependencies.
+# GSTIndia backend — runtime dependencies.
 # Dev/test extras live in requirements-dev.txt.
 
 fastapi>=0.115

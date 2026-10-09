@@ -16,8 +16,8 @@ the same code path the server runs.
 What makes this deployment unusual, and what most of the cross-checks below
 exist for: **the box is shared**. Caddy is a container belonging to another
 product, Postgres and Redis are shared clusters, and the ports are allocated
-across four applications. So the failure mode is not only "GSTBot is
-misconfigured" but "GSTBot collides with something already running" — a
+across four applications. So the failure mode is not only "GSTIndia is
+misconfigured" but "GSTIndia collides with something already running" — a
 duplicated Redis database, a port another product owns, a bind address the
 containerised edge cannot reach. Those are the assertions with teeth here.
 """
@@ -767,9 +767,9 @@ class TestTheEnvironmentTemplate:
         # Postgres ships with max_connections=100 and reserves 3 for
         # superusers. Exceeding it does not degrade — it refuses connections,
         # which is an outage. And this cluster is shared, so the budget is not
-        # ours alone: two thirds is the most GSTBot may claim of a stock
+        # ours alone: two thirds is the most GSTIndia may claim of a stock
         # configuration before somebody raises max_connections deliberately.
-        assert ours <= 65, f"GSTBot alone would hold {ours} of ~97 connections"
+        assert ours <= 65, f"GSTIndia alone would hold {ours} of ~97 connections"
 
 
 # ---------------------------------------------------------------------------
@@ -1414,7 +1414,7 @@ class TestTheBackupJob:
 
     def test_it_dumps_one_database_and_not_the_cluster(self, commands):
         # Postgres here is shared with Herald and HomeNex. `pg_dumpall` would
-        # write their tables into a file owned by GSTBot's service account,
+        # write their tables into a file owned by GSTIndia's service account,
         # which is a data-sharing incident dressed as a backup.
         assert "pg_dumpall" not in commands
         assert "pg_dump " in commands

@@ -422,7 +422,7 @@ def format_response(parsed: ParsedMessage) -> str:
 
 def _help_text() -> str:
     return (
-        "\U0001f916 *GSTBot by DoAide*\n"
+        "\U0001f916 *GSTIndia by DoAide*\n"
         "\n"
         "I can help you with GST queries! Try:\n"
         "\n"

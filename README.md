@@ -1,4 +1,4 @@
-# GSTBot
+# GSTIndia
 
 GST compliance for Indian SMBs. Ingests invoices, reconciles them against
 GSTR-2B, computes the ITC position, prepares GSTR-1/3B for filing, and warns

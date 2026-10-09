@@ -422,7 +422,7 @@ class TestABusinessSignsUpAndFilesItsFirstReturn:
 class TestASupplierWhoDidNotFile:
     """The invoice is in the books and not in the portal's 2B.
 
-    This is the leak GSTBot exists to find, and it has to be visible from
+    This is the leak GSTIndia exists to find, and it has to be visible from
     every screen a user might be on — not only from the reconciliation report
     that discovered it.
     """

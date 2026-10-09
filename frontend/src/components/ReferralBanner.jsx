@@ -8,10 +8,10 @@ import {
 } from "../lib/doaideViral";
 
 const SITE_URL = "https://gst.doaide.com";
-const PRODUCT_NAME = "GSTBot";
+const PRODUCT_NAME = "GSTIndia";
 const CTA_TEXT = "Know a CA or tax professional?";
 const SHARE_TEXT =
-  "I use GSTBot for GST calculations, GSTIN lookup & filing — it's free! Try it:";
+  "I use GSTIndia for GST calculations, GSTIN lookup & filing — it's free! Try it:";
 
 const WHATSAPP_SVG = (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">

@@ -1,7 +1,7 @@
 [project]
 name = "gstbot-backend"
 version = "0.1.0"
-description = "GSTBot — AI GST compliance for Indian SMBs (FastAPI backend)"
+description = "GSTIndia — AI GST compliance for Indian SMBs (FastAPI backend)"
 requires-python = ">=3.11"
 # Runtime dependencies are pinned in requirements.txt, which is what the
 # deployment installs. Kept there rather than duplicated here so there is one

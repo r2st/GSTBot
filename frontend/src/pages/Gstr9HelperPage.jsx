@@ -341,7 +341,7 @@ export default function Gstr9HelperPage() {
           <EmailCapture
             source="gstr9-helper"
             heading="Automate your GSTR-9 filing"
-            subtext="GSTBot auto-fills your annual return from uploaded invoices — sign up free."
+            subtext="GSTIndia auto-fills your annual return from uploaded invoices — sign up free."
             buttonLabel="Start Free"
             compact
           />

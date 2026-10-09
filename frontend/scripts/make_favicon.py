@@ -1,4 +1,4 @@
-"""Draw the GSTBot favicon: a receipt with a check mark, in the brand green.
+"""Draw the GSTIndia favicon: a receipt with a check mark, in the brand green.
 
 Run it to regenerate frontend/public/, so the icons are not four binaries with
 no source:
