@@ -96,6 +96,7 @@ const LateFeeCalculatorPage = lazy(() => import("./pages/LateFeeCalculatorPage")
 const Gstr9ChecklistPage = lazy(() => import("./pages/Gstr9ChecklistPage"));
 const HsnWidgetPage = lazy(() => import("./pages/HsnWidgetPage"));
 const Gst2RateComparisonPage = lazy(() => import("./pages/Gst2RateComparisonPage"));
+const CompositionSchemeCheckerPage = lazy(() => import("./pages/CompositionSchemeCheckerPage"));
 const Gst2MigrationCheckerPage = lazy(() => import("./pages/Gst2MigrationCheckerPage"));
 const InsuranceSavingsPage = lazy(() => import("./pages/InsuranceSavingsPage"));
 const Gst2GuidePage = lazy(() => import("./pages/guides/Gst2GuidePage"));
@@ -236,6 +237,7 @@ export default function App() {
         <Route path="/guides/gst-rates-list-2026" element={<Lazy><GstRatesListGuide /></Lazy>} />
         <Route path="/guides/gst-2-guide" element={<Lazy><Gst2GuidePage /></Lazy>} />
         <Route path="/rate-comparison" element={<Lazy><Gst2RateComparisonPage /></Lazy>} />
+        <Route path="/tools/composition-scheme-checker" element={<Lazy><CompositionSchemeCheckerPage /></Lazy>} />
         <Route path="/migration-checker" element={<Lazy><Gst2MigrationCheckerPage /></Lazy>} />
         <Route path="/insurance-savings" element={<Lazy><InsuranceSavingsPage /></Lazy>} />
         <Route path="/whatsapp" element={<Lazy><WhatsAppPage /></Lazy>} />

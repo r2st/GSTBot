@@ -251,6 +251,7 @@ const TOOL_CATEGORIES = [
       { to: "/gstr9-checklist", title: "GSTR-9 Checklist", desc: "Annual return filing checklist" },
       { to: "/composition-scheme", title: "Composition Scheme", desc: "Check eligibility & benefits" },
       { to: "/scheme-comparison", title: "Scheme Comparison", desc: "Regular vs Composition scheme" },
+      { to: "/tools/composition-scheme-checker", title: "Composition Checker", desc: "Eligibility, tax rate & quarterly estimate" },
     ],
   },
   {

@@ -5,6 +5,7 @@ const TOOLS = [
   { path: "/lookup", label: "GSTIN Lookup" },
   { path: "/hsn", label: "HSN Finder" },
   { path: "/due-dates", label: "Due Dates" },
+  { path: "/tools/composition-scheme-checker", label: "Composition Checker" },
   { path: "/resources", label: "All Tools" },
 ];
 
