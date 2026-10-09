@@ -6,9 +6,9 @@ import Shell from "./components/Shell";
 import { SkeletonPanel } from "./components/Skeleton";
 import { useAuth } from "./hooks/useAuth";
 import LandingPage from "./pages/LandingPage";
+import FeedbackWidget from "./components/FeedbackWidget";
 import ToolTracker from "./components/ToolTracker";
 import SocialProofBar from "./components/SocialProofBar";
-import FeedbackWidget from "./components/FeedbackWidget";
 import ReferralBanner from "./components/ReferralBanner";
 
 const AlertsPage = lazy(() => import("./pages/AlertsPage"));
