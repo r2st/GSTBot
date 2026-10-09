@@ -1,4 +1,14 @@
 import { useCallback, useRef, useState } from "react";
+import { track } from "../lib/track";
+
+const SUGGESTED_QUESTIONS = [
+  "What is the GST rate for IT services?",
+  "How do I claim Input Tax Credit?",
+  "When is the GSTR-3B due date?",
+  "What is reverse charge mechanism?",
+  "Do I need GST registration?",
+  "What are blocked ITC credits under Section 17(5)?",
+];
 
 export default function GstAdvisor() {
   const [open, setOpen] = useState(false);
@@ -16,14 +26,7 @@ export default function GstAdvisor() {
     });
   }, []);
 
-  const handleSend = useCallback(async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-
-    const userMsg = { role: "user", text };
-    const next = [...messages, userMsg];
-    setMessages(next);
-    setInput("");
+  const sendMessage = useCallback(async (text, history) => {
     setError(null);
     setLoading(true);
     scrollToBottom();
@@ -34,7 +37,7 @@ export default function GstAdvisor() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
-          history: messages.map((m) => ({ role: m.role, text: m.text })),
+          history: history.map((m) => ({ role: m.role, text: m.text })),
         }),
       });
 
@@ -52,7 +55,30 @@ export default function GstAdvisor() {
       setLoading(false);
       scrollToBottom();
     }
-  }, [input, loading, messages, scrollToBottom]);
+  }, [scrollToBottom]);
+
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+
+    const userMsg = { role: "user", text };
+    const next = [...messages, userMsg];
+    setMessages(next);
+    setInput("");
+    track("advisor_send", { source: "input" });
+    await sendMessage(text, messages);
+  }, [input, loading, messages, sendMessage]);
+
+  const handleSuggestionClick = useCallback((question) => {
+    if (loading) return;
+    const userMsg = { role: "user", text: question };
+    setMessages((prev) => {
+      const next = [...prev, userMsg];
+      sendMessage(question, prev);
+      return next;
+    });
+    track("advisor_send", { source: "suggestion", question });
+  }, [loading, sendMessage]);
 
   const handleKeyDown = useCallback(
     (e) => {
@@ -70,7 +96,7 @@ export default function GstAdvisor() {
         <button
           type="button"
           className="advisor-float"
-          onClick={() => setOpen(true)}
+          onClick={() => { setOpen(true); track("advisor_open"); }}
           aria-label="Open GST AI Advisor"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
@@ -84,7 +110,12 @@ export default function GstAdvisor() {
       {open && (
         <div className="advisor-panel" role="dialog" aria-label="GST AI Advisor">
           <div className="advisor-header">
-            <span className="advisor-title">GST AI Advisor</span>
+            <span className="advisor-title">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ marginRight: 6, verticalAlign: -2 }}>
+                <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
+              </svg>
+              GST AI Advisor
+            </span>
             <button
               type="button"
               className="advisor-close"
@@ -99,9 +130,21 @@ export default function GstAdvisor() {
               <div className="advisor-welcome">
                 <p className="advisor-welcome-title">Ask me anything about GST</p>
                 <p className="advisor-welcome-hint">
-                  Try: &quot;What is the GST rate for IT services?&quot; or
-                  &quot;How do I claim ITC?&quot;
+                  Get instant answers on GST rates, ITC claims, filing deadlines, and compliance.
                 </p>
+                <div className="advisor-suggestions">
+                  {SUGGESTED_QUESTIONS.map((q) => (
+                    <button
+                      key={q}
+                      type="button"
+                      className="advisor-suggestion"
+                      onClick={() => handleSuggestionClick(q)}
+                      disabled={loading}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {messages.map((m, i) => (
@@ -146,3 +189,5 @@ export default function GstAdvisor() {
     </>
   );
 }
+
+export { SUGGESTED_QUESTIONS };

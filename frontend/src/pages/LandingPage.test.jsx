@@ -82,8 +82,8 @@ describe("LandingPage", () => {
     it("shows step numbers", () => {
       renderLanding();
 
-      expect(screen.getByText("1")).toBeInTheDocument();
-      expect(screen.getByText("2")).toBeInTheDocument();
+      expect(screen.getAllByText("1").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getAllByText("2").length).toBeGreaterThanOrEqual(1);
       expect(screen.getAllByText("3").length).toBeGreaterThanOrEqual(1);
     });
 
@@ -210,6 +210,15 @@ describe("LandingPage", () => {
       expect(screen.getByText("Free to start")).toBeInTheDocument();
     });
 
+    it("shows compliance trust badges", () => {
+      renderLanding();
+
+      expect(screen.getAllByText("GST-compliant calculations").length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByText("Updated for FY 2026-27")).toBeInTheDocument();
+      expect(screen.getByText("No login required")).toBeInTheDocument();
+      expect(screen.getByText("Results in seconds")).toBeInTheDocument();
+    });
+
     it("renders tool category sections", () => {
       renderLanding();
 
@@ -298,7 +307,7 @@ describe("LandingPage", () => {
       renderLanding();
 
       expect(screen.getByText("256-bit SSL encrypted")).toBeInTheDocument();
-      expect(screen.getByText("GST-compliant calculations")).toBeInTheDocument();
+      expect(screen.getAllByText("GST-compliant calculations").length).toBeGreaterThanOrEqual(1);
       expect(screen.getByText("Your data stays private")).toBeInTheDocument();
     });
 

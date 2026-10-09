@@ -142,4 +142,59 @@ describe("GstAdvisor", () => {
 
     expect(screen.queryByText("Ask me anything about GST")).not.toBeInTheDocument();
   });
+
+  it("shows suggested question chips in the welcome state", async () => {
+    renderAdvisor();
+    await userEvent.click(screen.getByLabelText("Open GST AI Advisor"));
+
+    expect(screen.getByText("What is the GST rate for IT services?")).toBeInTheDocument();
+    expect(screen.getByText("How do I claim Input Tax Credit?")).toBeInTheDocument();
+    expect(screen.getByText("When is the GSTR-3B due date?")).toBeInTheDocument();
+    expect(screen.getByText("What is reverse charge mechanism?")).toBeInTheDocument();
+    expect(screen.getByText("Do I need GST registration?")).toBeInTheDocument();
+    expect(screen.getByText("What are blocked ITC credits under Section 17(5)?")).toBeInTheDocument();
+  });
+
+  it("sends a message when a suggested question is clicked", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({ reply: "The GSTR-3B is due on the 20th of each month." }),
+      }),
+    );
+
+    renderAdvisor();
+    await userEvent.click(screen.getByLabelText("Open GST AI Advisor"));
+    await userEvent.click(screen.getByText("When is the GSTR-3B due date?"));
+
+    expect(screen.getByText("When is the GSTR-3B due date?")).toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(screen.getByText("The GSTR-3B is due on the 20th of each month.")).toBeInTheDocument();
+    });
+
+    expect(global.fetch).toHaveBeenCalledWith(
+      "/api/v1/advisor/ask",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("hides suggested questions after the first message is sent", async () => {
+    global.fetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({ reply: "Sure!" }),
+      }),
+    );
+
+    renderAdvisor();
+    await userEvent.click(screen.getByLabelText("Open GST AI Advisor"));
+    expect(screen.getByText("How do I claim Input Tax Credit?")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("How do I claim Input Tax Credit?"));
+
+    expect(screen.queryByText("Do I need GST registration?")).not.toBeInTheDocument();
+  });
 });

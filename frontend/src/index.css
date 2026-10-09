@@ -3618,6 +3618,25 @@ a:focus-visible {
   height: 28px;
   background: var(--line);
 }
+.landing-compliance-badges {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 2rem;
+}
+.landing-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: var(--glass);
+  font-size: 0.78rem;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
 .landing-tool-free {
   font-size: 0.65rem;
   color: var(--good) !important;
@@ -5026,6 +5045,47 @@ a:focus-visible {
 }
 
 /* Sticky mobile CTA bar */
+.sticky-tools-banner {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 98;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.1);
+  animation: slideUpCta 0.3s ease;
+}
+.sticky-tools-banner-inner {
+  max-width: 900px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+}
+.sticky-tools-banner-text {
+  flex: 1;
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+.sticky-tools-banner-text strong { color: var(--ink); }
+.sticky-tools-banner-btn { white-space: nowrap; }
+.sticky-tools-banner-close {
+  background: none;
+  border: none;
+  color: var(--ink-soft);
+  font-size: 1.3rem;
+  cursor: pointer;
+  padding: 4px 6px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  .sticky-tools-banner-inner { flex-wrap: wrap; gap: 8px; }
+  .sticky-tools-banner-text { min-width: 100%; }
+}
 .sticky-mobile-cta {
   display: none;
 }
@@ -5567,7 +5627,32 @@ a:focus-visible {
 .advisor-welcome-hint {
   font-size: 13px;
   line-height: 1.5;
+  margin-bottom: 14px;
 }
+.advisor-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 4px;
+}
+.advisor-suggestion {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+  text-align: left;
+  line-height: 1.4;
+}
+.advisor-suggestion:hover {
+  background: var(--glass-hover, rgba(240, 180, 41, 0.08));
+  border-color: var(--brand);
+}
+.advisor-suggestion:disabled { opacity: 0.5; cursor: default; }
 .advisor-msg {
   margin-bottom: 10px;
   display: flex;

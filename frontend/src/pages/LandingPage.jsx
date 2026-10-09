@@ -6,6 +6,7 @@ import DeadlineCountdown from "../components/DeadlineCountdown";
 import GstNewsUpdates from "../components/GstNewsUpdates";
 import RecentTools from "../components/RecentTools";
 import SeoHead from "../components/SeoHead";
+import StickyToolsBanner from "../components/StickyToolsBanner";
 import TrendingTools from "../components/TrendingTools";
 import { usePageTitle } from "../hooks/usePageTitle";
 import { track } from "../lib/track";
@@ -325,6 +326,35 @@ function InstantLookup() {
           <span>Free to start</span>
         </div>
       </div>
+      <div className="landing-compliance-badges">
+        <div className="landing-badge">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+          <span>GST-compliant calculations</span>
+        </div>
+        <div className="landing-badge">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
+            <polyline points="22 4 12 14.01 9 11.01" />
+          </svg>
+          <span>Updated for FY 2026-27</span>
+        </div>
+        <div className="landing-badge">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="3" y="11" width="18" height="11" rx="2" />
+            <path d="M7 11V7a5 5 0 0110 0v4" />
+          </svg>
+          <span>No login required</span>
+        </div>
+        <div className="landing-badge">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="var(--good)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span>Results in seconds</span>
+        </div>
+      </div>
 
       {TOOL_CATEGORIES.map((cat) => (
         <div key={cat.title} className="landing-category">
@@ -516,6 +546,7 @@ export default function LandingPage() {
         </section>
       </main>
 
+      <StickyToolsBanner />
       <footer className="landing-footer">
         <div className="landing-footer-nav">
           <div className="landing-footer-col">
