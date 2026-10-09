@@ -105,6 +105,12 @@ const Gst2GuidePage = lazy(() => import("./pages/guides/Gst2GuidePage"));
 const ReferralPage = lazy(() => import("./pages/ReferralPage"));
 const WhatsAppPage = lazy(() => import("./pages/WhatsAppPage"));
 const Gstr2bReconciliationPage = lazy(() => import("./pages/Gstr2bReconciliationPage"));
+const AdvisorPage = lazy(() => import("./pages/AdvisorPage"));
+const TdsCalculatorPage = lazy(() => import("./pages/TdsCalculatorPage"));
+const PlaceOfSupplyPage = lazy(() => import("./pages/PlaceOfSupplyPage"));
+const RefundCalculatorPage = lazy(() => import("./pages/RefundCalculatorPage"));
+const EInvoiceGeneratorPage = lazy(() => import("./pages/EInvoiceGeneratorPage"));
+const Gstr9HelperPage = lazy(() => import("./pages/Gstr9HelperPage"));
 
 function LazyFallback() {
   return (
@@ -244,6 +250,12 @@ export default function App() {
         <Route path="/migration-checker" element={<Lazy><Gst2MigrationCheckerPage /></Lazy>} />
         <Route path="/insurance-savings" element={<Lazy><InsuranceSavingsPage /></Lazy>} />
         <Route path="/referrals" element={<Lazy><ReferralPage /></Lazy>} />
+        <Route path="/advisor" element={<Lazy><AdvisorPage /></Lazy>} />
+        <Route path="/tds-calculator" element={<Lazy><TdsCalculatorPage /></Lazy>} />
+        <Route path="/place-of-supply" element={<Lazy><PlaceOfSupplyPage /></Lazy>} />
+        <Route path="/refund-calculator" element={<Lazy><RefundCalculatorPage /></Lazy>} />
+        <Route path="/e-invoice-generator" element={<Lazy><EInvoiceGeneratorPage /></Lazy>} />
+        <Route path="/gstr9-helper" element={<Lazy><Gstr9HelperPage /></Lazy>} />
         <Route path="/whatsapp" element={<Lazy><WhatsAppPage /></Lazy>} />
         <Route path="/embed" element={<EmbedPage />} />
         <Route path="/widget" element={<Lazy><WidgetPage /></Lazy>} />

@@ -15,6 +15,60 @@ import { api } from "../lib/api";
 import { track } from "../lib/track";
 import { normalizeGstin } from "../lib/validate";
 
+const TOOL_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "WebApplication",
+  name: "Free GSTIN Lookup & Verification",
+  url: "https://gst.doaide.com/lookup",
+  applicationCategory: "FinanceApplication",
+  operatingSystem: "Any",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
+};
+
+const FAQ_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "What is a GSTIN?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "A GSTIN is a unique 15-character identifier for every GST-registered business in India. It encodes the state code, PAN of the entity, entity number within that state, and a check digit.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "How do I verify a GSTIN?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Enter the 15-digit GSTIN above to validate its format (state code, PAN structure, check digit) and see the registration state, PAN, and validity. You can also verify on the GST portal.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Why should I verify a GSTIN before transacting?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "A wrong GSTIN on a purchase invoice is the top reason ITC goes unclaimed — it shows as missing in GSTR-2B and the credit never arrives. Verifying before you transact catches typos early.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "What does each part of a GSTIN mean?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: "Digits 1-2 are the state code, digits 3-12 are the PAN, digit 13 is the entity number for that PAN in that state, digit 14 is always Z (reserved), and digit 15 is the check digit computed from the first 14 characters.",
+      },
+    },
+  ],
+};
+
+const BREADCRUMBS = [
+  { name: "Home", url: "https://gst.doaide.com" },
+  { name: "GSTIN Lookup" },
+];
+
 export default function LookupPage() {
   usePageTitle("Free GSTIN Lookup — Verify Any GST Number Instantly");
   const navigate = useNavigate();
@@ -77,6 +131,8 @@ export default function LookupPage() {
         title="Free GSTIN Lookup & Verification — Check Any GST Number"
         description="Verify any GSTIN instantly. Check registration status, state code, PAN, business name, and filing compliance. Free GSTIN verification tool — no login required."
         path="/lookup"
+        jsonLd={[TOOL_SCHEMA, FAQ_SCHEMA]}
+        breadcrumbs={BREADCRUMBS}
       />
       <ToolsNav />
       <DeadlineBanner />

@@ -30,6 +30,11 @@ const ALL_TOOLS = [
   { path: "/late-fee-calculator", label: "Late Fee Calculator", desc: "Calculate late filing fees for GST returns" },
   { path: "/gstr9-checklist", label: "GSTR-9 Checklist", desc: "Annual return filing checklist" },
   { path: "/gstr2b-reconciliation", label: "GSTR-2B Reconciliation", desc: "Match purchase register with GSTR-2B" },
+  { path: "/tds-calculator", label: "TDS Calculator", desc: "Calculate TDS under GST Section 51" },
+  { path: "/place-of-supply", label: "Place of Supply", desc: "Determine inter/intra-state supply" },
+  { path: "/refund-calculator", label: "Refund Calculator", desc: "Export & inverted duty refund" },
+  { path: "/e-invoice-generator", label: "E-Invoice Generator", desc: "Generate e-invoice JSON for IRP" },
+  { path: "/gstr9-helper", label: "GSTR-9 Helper", desc: "Annual return summary calculator" },
 ];
 
 // Contextual cross-links: which tools are most relevant to which page.
@@ -61,6 +66,11 @@ const RECOMMENDED = {
   "/late-fee-calculator": ["/penalty-calculator", "/interest-calculator", "/due-dates", "/return-calendar"],
   "/gstr9-checklist": ["/audit-checklist", "/due-dates", "/itc-mismatch", "/return-calendar"],
   "/gstr2b-reconciliation": ["/itc-mismatch", "/itc-calculator", "/input-tax-credit", "/audit-checklist"],
+  "/tds-calculator": ["/calculator", "/reverse-charge", "/rcm-calculator", "/payment-challan"],
+  "/place-of-supply": ["/calculator", "/invoice-generator", "/e-invoice-generator", "/hsn-sac-finder"],
+  "/refund-calculator": ["/itc-calculator", "/input-tax-credit", "/calculator", "/e-invoice-generator"],
+  "/e-invoice-generator": ["/invoice-generator", "/hsn-sac-finder", "/place-of-supply", "/calculator"],
+  "/gstr9-helper": ["/gstr9-checklist", "/audit-checklist", "/due-dates", "/itc-calculator"],
 };
 
 export default function RelatedTools({ current }) {
