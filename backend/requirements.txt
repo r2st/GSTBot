@@ -16,7 +16,7 @@ httpx>=0.28.1
 authlib>=1.3
 itsdangerous>=2.1
 celery[redis]>=5.4
-redis>=5.0
+redis>=8.1.0
 
 # Invoice ingestion: PDFs are read as text first (pypdf) and only fall back to
 # the vision model when a page carries no extractable text — a scan.
