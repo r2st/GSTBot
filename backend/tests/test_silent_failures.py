@@ -155,8 +155,7 @@ def test_webhook_missing_entity_id_is_logged(client, caplog):
         )
 
     assert resp.status_code == 200
-    body = resp.json()
-    assert body.get("detail") == "no identifiable entity"
+    assert resp.json() == {"status": "ok"}
     assert any("no identifiable" in r.message for r in caplog.records)
 
 

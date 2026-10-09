@@ -83,6 +83,28 @@ const TOOL_SCHEMA = {
   offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
 };
 
+const FAQ_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "What is the turnover limit for GST registration?",
+      acceptedAnswer: { "@type": "Answer", text: "Goods: Rs 40 lakhs (Rs 20 lakhs in special states). Services: Rs 20 lakhs (Rs 10 lakhs in special states). Interstate and e-commerce sellers must register regardless." },
+    },
+    {
+      "@type": "Question",
+      name: "Is GST registration mandatory for e-commerce sellers?",
+      acceptedAnswer: { "@type": "Answer", text: "Yes. If you sell through e-commerce platforms like Amazon or Flipkart, GST registration is mandatory under Section 24 regardless of your turnover." },
+    },
+    {
+      "@type": "Question",
+      name: "Can I voluntarily register for GST below the threshold?",
+      acceptedAnswer: { "@type": "Answer", text: "Yes. Voluntary registration lets you claim Input Tax Credit on purchases and adds credibility for B2B transactions, even if your turnover is below the mandatory threshold." },
+    },
+  ],
+};
+
 const BREADCRUMBS = [
   { name: "Home", url: "https://gst.doaide.com" },
   { name: "Registration Eligibility" },
@@ -192,7 +214,7 @@ export default function RegistrationCheckerPage() {
         title="GST Registration Eligibility Checker — Do I Need GST?"
         description="Free quiz to check if you need GST registration in India. Answer 7 simple questions about your business to find out if GST registration is mandatory or optional."
         path="/registration-checker"
-        jsonLd={TOOL_SCHEMA}
+        jsonLd={[TOOL_SCHEMA, FAQ_SCHEMA]}
         breadcrumbs={BREADCRUMBS}
       />
       <ToolsNav />

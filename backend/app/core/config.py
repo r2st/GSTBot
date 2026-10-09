@@ -168,6 +168,9 @@ class Settings(BaseSettings):
     # taken: falling back to heuristics now beats the same failure 30s later.
     openrouter_retry_max_wait_seconds: float = Field(default=30.0, ge=0, le=300)
 
+    # ---- AI (Gemini — GST advisor chatbot) ----
+    gemini_api_key: str = ""
+
     # ---- Email (filing-deadline alert digests) ----
     # Off by default: no deployment has SMTP infrastructure until it sets this,
     # and the alert stays exactly as useful in-app either way — this only adds

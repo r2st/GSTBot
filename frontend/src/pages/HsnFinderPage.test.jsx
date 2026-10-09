@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import HsnFinderPage from "./HsnFinderPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+vi.mock("../hooks/useAuth", () => ({ useAuth: () => ({ user: null }) }));
 
 const mockCopyToClipboard = vi.fn();
 vi.mock("../lib/share", () => ({

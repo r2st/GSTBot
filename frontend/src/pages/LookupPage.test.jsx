@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import LookupPage from "./LookupPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+vi.mock("../hooks/useAuth", () => ({ useAuth: () => ({ user: null }) }));
 vi.mock("../lib/share", () => ({
   fullUrl: (p) => `http://localhost${p}`,
   whatsappUrl: (text, url) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`,

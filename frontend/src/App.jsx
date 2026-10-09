@@ -59,6 +59,8 @@ const GstReturnFilingOnline = lazy(() => import("./pages/blog/GstReturnFilingOnl
 const GstRatesServices2026 = lazy(() => import("./pages/blog/GstRatesServices2026"));
 const CgstSgstIgstDifference = lazy(() => import("./pages/blog/CgstSgstIgstDifference"));
 const GstLatePenaltyCalculator = lazy(() => import("./pages/blog/GstLatePenaltyCalculator"));
+const GstComplianceTipsSmallBusiness = lazy(() => import("./pages/blog/GstComplianceTipsSmallBusiness"));
+const ReverseChargeGstGuide = lazy(() => import("./pages/blog/ReverseChargeGstGuide"));
 const ClearTaxCompare = lazy(() => import("./pages/compare/ClearTaxCompare"));
 const ZohoGstCompare = lazy(() => import("./pages/compare/ZohoGstCompare"));
 const TallyCompare = lazy(() => import("./pages/compare/TallyCompare"));
@@ -198,6 +200,8 @@ export default function App() {
           <Route path="gst-rates-services-2026" element={<GstRatesServices2026 />} />
           <Route path="difference-between-cgst-sgst-igst" element={<CgstSgstIgstDifference />} />
           <Route path="gst-late-filing-penalty-calculator" element={<GstLatePenaltyCalculator />} />
+          <Route path="gst-compliance-tips-small-business-2026" element={<GstComplianceTipsSmallBusiness />} />
+          <Route path="reverse-charge-mechanism-gst-guide-2026" element={<ReverseChargeGstGuide />} />
         </Route>
         <Route path="/calculator" element={<CalculatorPage />} />
         <Route path="/lookup" element={<LookupPage />} />

@@ -15,6 +15,19 @@ import { track } from "../lib/track";
 
 const ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
+const ENTITY_TYPES = {
+  A: "Association of Persons (AOP)",
+  B: "Body of Individuals (BOI)",
+  C: "Company",
+  F: "Partnership Firm / LLP",
+  G: "Government Agency",
+  H: "Hindu Undivided Family (HUF)",
+  J: "Artificial Juridical Person",
+  L: "Local Authority",
+  P: "Individual / Proprietorship",
+  T: "Trust (AOP)",
+};
+
 const STATE_CODES = {
   "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab",
   "04": "Chandigarh", "05": "Uttarakhand", "06": "Haryana", "07": "Delhi",
@@ -75,6 +88,9 @@ function validateGstin(raw) {
     errors.push(`Invalid check digit — expected "${expectedCheck}", got "${checkDigit}"`);
   }
 
+  const panEntityChar = pan.length >= 4 ? pan[3] : "";
+  const entityType = ENTITY_TYPES[panEntityChar] || "Unknown";
+
   return {
     gstin,
     valid: errors.length === 0 && checkValid,
@@ -84,6 +100,7 @@ function validateGstin(raw) {
       stateName: stateName || "Unknown",
       pan,
       entityCode,
+      entityType,
       reservedZ,
       checkDigit,
       expectedCheck,
@@ -230,6 +247,10 @@ export default function GstinValidatorPage() {
                     <div className="calc-result-row">
                       <span>PAN</span>
                       <strong>{result.breakdown.pan}</strong>
+                    </div>
+                    <div className="calc-result-row">
+                      <span>Entity Type</span>
+                      <strong>{result.breakdown.entityType}</strong>
                     </div>
                     <div className="calc-result-row">
                       <span>Entity Number</span>

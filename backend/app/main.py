@@ -360,6 +360,7 @@ def create_app() -> FastAPI:
     )
 
     prefix = settings.api_v1_prefix
+    application.include_router(advisor.router, prefix=prefix)
     application.include_router(misc.router, prefix=prefix)
     application.include_router(auth.router, prefix=prefix)
     application.include_router(oauth.router, prefix=prefix)

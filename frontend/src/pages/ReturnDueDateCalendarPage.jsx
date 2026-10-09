@@ -10,6 +10,7 @@ import SeoHead from "../components/SeoHead";
 import ShareButtons from "../components/ShareButtons";
 import ToolsNav from "../components/ToolsNav";
 import { usePageTitle } from "../hooks/usePageTitle";
+import { formatINR } from "../lib/gstCalc";
 
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -92,6 +93,37 @@ function daysUntil(d) {
   return Math.ceil((target - now) / 86400000);
 }
 
+function calculateLateFee(returnType, daysLate, isNilReturn) {
+  if (daysLate <= 0) return null;
+
+  if (returnType === "gstr1") {
+    const daily = isNilReturn ? 20 : 50;
+    const fee = Math.min(daily * daysLate, 5000);
+    return { daily, fee, max: 5000, interest: null };
+  }
+
+  if (returnType === "gstr3b") {
+    const daily = isNilReturn ? 20 : 50;
+    const fee = Math.min(daily * daysLate, isNilReturn ? 500 : 5000);
+    const interestRate = 18;
+    return { daily, fee, max: isNilReturn ? 500 : 5000, interest: interestRate };
+  }
+
+  if (returnType === "gstr9") {
+    const daily = 200;
+    const fee = Math.min(daily * daysLate, 5000);
+    return { daily, fee, max: 5000, interest: null };
+  }
+
+  if (returnType === "cmp08") {
+    const daily = isNilReturn ? 20 : 50;
+    const fee = Math.min(daily * daysLate, 5000);
+    return { daily, fee, max: 5000, interest: null };
+  }
+
+  return null;
+}
+
 const TOOL_SCHEMA = {
   "@context": "https://schema.org",
   "@type": "WebApplication",
@@ -100,6 +132,28 @@ const TOOL_SCHEMA = {
   applicationCategory: "FinanceApplication",
   operatingSystem: "Any",
   offers: { "@type": "Offer", price: "0", priceCurrency: "INR" },
+};
+
+const FAQ_SCHEMA = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "What is the late fee for not filing GSTR-3B on time?",
+      acceptedAnswer: { "@type": "Answer", text: "Rs 50/day (Rs 25 CGST + Rs 25 SGST) for regular returns, Rs 20/day for nil returns, capped at Rs 5,000. Interest at 18% p.a. applies on unpaid tax." },
+    },
+    {
+      "@type": "Question",
+      name: "What is the penalty for late filing of GSTR-1?",
+      acceptedAnswer: { "@type": "Answer", text: "Late fee for GSTR-1 is Rs 50 per day (Rs 25 CGST + Rs 25 SGST) up to Rs 5,000. For nil GSTR-1, it is Rs 20 per day up to Rs 5,000." },
+    },
+    {
+      "@type": "Question",
+      name: "What are the due dates for GST return filing?",
+      acceptedAnswer: { "@type": "Answer", text: "GSTR-1: 11th of the following month. GSTR-3B: 20th of the following month. GSTR-9: 31st December of the next financial year. CMP-08: 18th of the month after the quarter." },
+    },
+  ],
 };
 
 const BREADCRUMBS = [
@@ -148,7 +202,7 @@ export default function ReturnDueDateCalendarPage() {
         title="GST Return Due Date Calendar — Filing Deadlines 2026-27"
         description="Free GST return due date calendar with filing deadlines for GSTR-1, GSTR-3B, GSTR-9, CMP-08, and IFF. Filter by return type and month. Never miss a deadline."
         path="/return-calendar"
-        jsonLd={TOOL_SCHEMA}
+        jsonLd={[TOOL_SCHEMA, FAQ_SCHEMA]}
         breadcrumbs={BREADCRUMBS}
       />
       <ToolsNav />
@@ -212,6 +266,18 @@ export default function ReturnDueDateCalendarPage() {
                           <span>{days} days remaining</span>
                         )}
                       </div>
+                      {isPast && (() => {
+                        const lf = calculateLateFee(d.type, Math.abs(days), false);
+                        return lf ? (
+                          <div className="calendar-late-fee" style={{ marginTop: "0.5rem", padding: "0.5rem 0.75rem", background: "rgba(248,113,113,0.08)", borderRadius: "0.375rem", fontSize: "0.85rem" }}>
+                            <strong style={{ color: "#f87171" }}>Estimated late fee: {formatINR(lf.fee)}</strong>
+                            <span style={{ color: "var(--text-secondary)", display: "block", fontSize: "0.8rem" }}>
+                              {formatINR(lf.daily)}/day, max {formatINR(lf.max)}
+                              {lf.interest ? ` + ${lf.interest}% p.a. interest on tax due` : ""}
+                            </span>
+                          </div>
+                        ) : null;
+                      })()}
                     </div>
                   );
                 })}
@@ -258,6 +324,31 @@ export default function ReturnDueDateCalendarPage() {
               <li><strong>CMP-08:</strong> 18th of the month following each quarter</li>
               <li><strong>GSTR-4:</strong> 30th April of the following financial year (annual)</li>
             </ul>
+          </section>
+
+          <section className="tool-info">
+            <h2>GST Late Fee and Penalty</h2>
+            <p>Filing returns after the due date attracts a late fee and, for GSTR-3B, interest on the tax amount.</p>
+            <h3>Late Fee Rates</h3>
+            <ul>
+              <li><strong>GSTR-1 / GSTR-3B:</strong> Rs 50/day (Rs 25 CGST + Rs 25 SGST), max Rs 5,000</li>
+              <li><strong>Nil returns:</strong> Rs 20/day, max Rs 500 (GSTR-3B) or Rs 5,000 (GSTR-1)</li>
+              <li><strong>GSTR-9 (Annual):</strong> Rs 200/day (Rs 100 CGST + Rs 100 SGST), max Rs 5,000</li>
+              <li><strong>Interest:</strong> 18% p.a. on the net tax liability from the due date (GSTR-3B only)</li>
+            </ul>
+
+            <h3>What is the late fee for not filing GSTR-3B on time?</h3>
+            <p>
+              Rs 50 per day of delay (Rs 25 CGST + Rs 25 SGST) for regular returns, capped at Rs 5,000
+              per return period. For nil returns, it is Rs 20 per day capped at Rs 500. Additionally,
+              interest at 18% per annum applies on the outstanding tax amount from the due date.
+            </p>
+
+            <h3>What is the penalty for late filing of GSTR-1?</h3>
+            <p>
+              Rs 50 per day of delay, capped at Rs 5,000. For nil GSTR-1, Rs 20 per day up to Rs 5,000.
+              No interest applies on GSTR-1 as it is an information return with no tax payment.
+            </p>
           </section>
 
           <InlineCTA variant="remind" />

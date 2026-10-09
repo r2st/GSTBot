@@ -51,6 +51,12 @@ describe("GstinValidatorPage", () => {
     expect(screen.getAllByText(/Maharashtra/).length).toBeGreaterThanOrEqual(1);
   });
 
+  it("shows entity type decoded from PAN", async () => {
+    renderPage();
+    await userEvent.type(screen.getByPlaceholderText(/27AAPFU0939F1ZV/), "27AAPFU0939F1ZV");
+    expect(screen.getByText("Partnership Firm / LLP")).toBeInTheDocument();
+  });
+
   it("shows error for too-short input", async () => {
     renderPage();
     await userEvent.type(screen.getByPlaceholderText(/27AAPFU0939F1ZV/), "27AAPFU");

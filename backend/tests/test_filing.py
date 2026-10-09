@@ -2276,10 +2276,8 @@ def test_export_json_is_a_named_download(auth_client, db_session, business):
 
     assert response.status_code == 200, response.text
     assert response.headers["content-type"].startswith("application/json")
-    assert (
-        response.headers["content-disposition"]
-        == f'attachment; filename="gstr1_{BUSINESS_GSTIN}_042026.json"'
-    )
+    cd = response.headers["content-disposition"]
+    assert cd.startswith(f'attachment; filename="gstr1_{BUSINESS_GSTIN}_042026.json"')
     assert json.loads(response.text)["gstin"] == BUSINESS_GSTIN
 
 

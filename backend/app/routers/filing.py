@@ -428,8 +428,8 @@ def export(
             "business_id": business.id,
             "period": resolved,
             "return_type": kind,
-            "format": fmt,
-            "filename": filename,
+            "export_format": fmt,
+            "export_filename": filename,
         },
     )
     headers = {"Content-Disposition": content_disposition(filename)}

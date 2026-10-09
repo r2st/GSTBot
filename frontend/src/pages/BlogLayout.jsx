@@ -116,6 +116,16 @@ const ARTICLES = [
     title: "GST Late Filing Penalty Calculator 2026",
     description: "Calculate GST late filing penalties and interest for GSTR-1, GSTR-3B, GSTR-9. Current rates, caps, worked examples, and an interactive calculator.",
   },
+  {
+    slug: "gst-compliance-tips-small-business-2026",
+    title: "10 GST Compliance Tips Every Small Business Owner Must Know in 2026",
+    description: "Practical GST compliance tips for Indian small businesses — avoid penalties, maximize ITC, file on time, and stay audit-ready.",
+  },
+  {
+    slug: "reverse-charge-mechanism-gst-guide-2026",
+    title: "Reverse Charge Mechanism Under GST — Complete Guide 2026",
+    description: "Complete guide to RCM under GST — which services attract reverse charge, how to calculate, ITC eligibility, self-invoice rules, and GSTR-3B reporting.",
+  },
 ];
 
 export { ARTICLES };

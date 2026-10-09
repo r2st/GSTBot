@@ -532,6 +532,21 @@ export default function LandingPage() {
           <TrendingTools />
         </div>
 
+        <section className="landing-section landing-advisor-cta" aria-labelledby="advisor-heading">
+          <h2 id="advisor-heading" className="landing-section-title">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="24" height="24" style={{ verticalAlign: "middle", marginRight: 6, color: "var(--brand, #2563eb)" }} aria-hidden="true">
+              <path d="M12 1l2.5 7.5L22 12l-7.5 2.5L12 22l-2.5-7.5L2 12l7.5-2.5z" />
+            </svg>
+            Ask our AI Advisor any GST question — Free!
+          </h2>
+          <p style={{ textAlign: "center", color: "var(--text-secondary, #666)", maxWidth: 520, margin: "0 auto 16px" }}>
+            Get instant answers on GST registration, filing, rates, ITC claims, and compliance — powered by AI.
+          </p>
+          <div style={{ textAlign: "center" }}>
+            <Link to="/advisor" className="btn btn-primary">Try AI Advisor →</Link>
+          </div>
+        </section>
+
         <section className="landing-cta">
           <h2>Need Automated GST Filing?</h2>
           <p>Free for up to 50 invoices/month — upload invoices, auto-reconcile GSTR-2B, and prepare returns in minutes.</p>
@@ -562,6 +577,7 @@ export default function LandingPage() {
             <Link to="/scheme-comparison">Scheme Comparison</Link>
             <Link to="/itc-calculator">ITC Calculation</Link>
             <Link to="/embed">Embed Widget</Link>
+            <Link to="/advisor">AI Advisor</Link>
           </div>
           <div className="landing-footer-col">
             <h4>Product</h4>

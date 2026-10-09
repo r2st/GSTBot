@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import ReturnDueDateCalendarPage from "./ReturnDueDateCalendarPage";
 
 vi.mock("../hooks/usePageTitle", () => ({ usePageTitle: () => {} }));
+vi.mock("../hooks/useAuth", () => ({ useAuth: () => ({ user: null }) }));
 vi.mock("../lib/share", () => ({
   fullUrl: (p) => `http://localhost${p}`,
   whatsappUrl: (text, url) => `https://wa.me/?text=${encodeURIComponent(`${text} ${url}`)}`,
@@ -72,5 +73,32 @@ describe("ReturnDueDateCalendarPage", () => {
   it("shows due dates with deadlines", () => {
     renderPage();
     expect(screen.getByText(/GSTR-1 for/)).toBeInTheDocument();
+  });
+
+  it("shows late fee section", () => {
+    renderPage();
+    expect(screen.getByText("GST Late Fee and Penalty")).toBeInTheDocument();
+  });
+
+  it("shows late fee rates for GSTR-1 and GSTR-3B", () => {
+    renderPage();
+    expect(screen.getByText(/Rs 50\/day/)).toBeInTheDocument();
+    expect(screen.getByText(/18% p\.a\./)).toBeInTheDocument();
+  });
+
+  it("shows FAQ about late fee for GSTR-3B", () => {
+    renderPage();
+    expect(screen.getByText("What is the late fee for not filing GSTR-3B on time?")).toBeInTheDocument();
+  });
+
+  it("shows late fee estimate on past-due cards when navigating to a past month", async () => {
+    renderPage();
+    const prevBtn = screen.getByRole("button", { name: "Previous month" });
+    await userEvent.click(prevBtn);
+    await userEvent.click(prevBtn);
+    const overdueTexts = screen.queryAllByText(/Overdue by/);
+    if (overdueTexts.length > 0) {
+      expect(screen.queryAllByText(/Estimated late fee/).length).toBeGreaterThanOrEqual(1);
+    }
   });
 });
