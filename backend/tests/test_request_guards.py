@@ -118,6 +118,8 @@ class TestSetOffNeedsAToken:
             "/api/v1/auth/microsoft/callback",
             # WhatsApp webhook — called by Twilio / WhatsApp servers.
             "/api/v1/whatsapp/webhook",
+            # Anonymous product feedback from the floating widget.
+            "/api/v1/feedback",
         }
 
         def calls(dependant):

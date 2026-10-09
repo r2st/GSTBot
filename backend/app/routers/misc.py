@@ -35,7 +35,7 @@ from app.core.rate_limit import RateLimit
 from app.core.redis_client import get_redis, mark_unavailable, ping as redis_ping
 from app.core.storage import check_upload_dir
 from app.models.subscriber import Subscriber
-from app.schemas.misc import ReminderSubscribeRequest, SubscriberRequest
+from app.schemas.misc import FeedbackRequest, ReminderSubscribeRequest, SubscriberRequest
 from app.services import gstin as gstin_service
 from app.services import job_health
 from app.services.openrouter_client import is_configured
@@ -496,3 +496,37 @@ def unsubscribe(
         extra={"email_domain": email.rsplit("@", 1)[-1]},
     )
     return {"unsubscribed": True, "message": "You've been unsubscribed."}
+
+
+# --------------------------------------------------------------------------
+# Feedback — anonymous product feedback, stored to a JSON file
+# --------------------------------------------------------------------------
+
+_FEEDBACK_PATH = "/opt/GSTBot/feedback.json"
+_feedback_limit = RateLimit("feedback", "10/minute", by="ip")
+
+
+@router.post(
+    "/feedback",
+    summary="Submit anonymous product feedback",
+    description=(
+        "Captures a page URL, a 1–5 star rating, and an optional comment. "
+        "Public — called from the floating feedback widget on every page."
+    ),
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(_feedback_limit)],
+)
+def submit_feedback(body: FeedbackRequest) -> dict[str, bool]:
+    import json
+    import os
+
+    entry = body.model_dump()
+    try:
+        fd = os.open(_FEEDBACK_PATH, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        try:
+            os.write(fd, (json.dumps(entry) + "\n").encode())
+        finally:
+            os.close(fd)
+    except OSError:
+        logger.warning("Could not write feedback to %s", _FEEDBACK_PATH)
+    return {"ok": True}

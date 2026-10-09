@@ -122,6 +122,7 @@ class TestUnauthorizedIsDocumentedWhereItCanHappen:
             "/api/v1/auth/microsoft",
             "/api/v1/auth/microsoft/callback",
             "/api/v1/auth/register",
+            "/api/v1/feedback",
             "/api/v1/health",
             "/api/v1/health/jobs",
             "/api/v1/health/live",
@@ -130,10 +131,15 @@ class TestUnauthorizedIsDocumentedWhereItCanHappen:
             "/api/v1/meta/recent-lookups",
             "/api/v1/meta/reminder-subscribe",
             "/api/v1/meta/states",
+            "/api/v1/seo/og-image",
             "/api/v1/seo/robots.txt",
             "/api/v1/seo/sitemap.xml",
+            "/api/v1/subscribers",
+            "/api/v1/subscribers/unsubscribe",
             "/api/v1/subscriptions/pricing",
             "/api/v1/subscriptions/webhook",
+            "/api/v1/whatsapp/webhook",
+            "/api/v1/whatsapp/webhook",
         ]
 
 

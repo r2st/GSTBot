@@ -506,6 +506,8 @@ UNGATED_MUTATIONS = {
     # WhatsApp webhook — called by Twilio / WhatsApp servers, authenticated
     # by webhook signature rather than a bearer token.
     "/api/v1/whatsapp/webhook",
+    # Anonymous product feedback — no session exists.
+    "/api/v1/feedback",
 }
 
 

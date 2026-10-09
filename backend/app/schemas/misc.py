@@ -14,3 +14,10 @@ class SubscriberRequest(BaseModel):
         default="landing",
         pattern=r"^(calculator|lookup|filing-dates|landing)$",
     )
+
+
+class FeedbackRequest(BaseModel):
+    page: str = Field(..., max_length=500)
+    rating: int = Field(..., ge=1, le=5)
+    comment: str = Field(default="", max_length=2000)
+    timestamp: str = Field(..., max_length=40)

@@ -8,6 +8,7 @@ import { useAuth } from "./hooks/useAuth";
 import LandingPage from "./pages/LandingPage";
 import ToolTracker from "./components/ToolTracker";
 import SocialProofBar from "./components/SocialProofBar";
+import FeedbackWidget from "./components/FeedbackWidget";
 import ReferralBanner from "./components/ReferralBanner";
 
 const AlertsPage = lazy(() => import("./pages/AlertsPage"));
@@ -329,6 +330,7 @@ export default function App() {
       </Routes>
       <InstallPrompt />
       <ReferralBanner />
+      <FeedbackWidget />
     </Suspense>
   );
 }
