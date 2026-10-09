@@ -29,6 +29,7 @@ from app.core.redis_client import close as redis_close
 from app.core.redis_client import ping as redis_ping
 from app.core.storage import check_upload_dir
 from app.routers import (
+    advisor,
     alerts,
     auth,
     businesses,
@@ -371,6 +372,7 @@ def create_app() -> FastAPI:
     application.include_router(alerts.router, prefix=prefix)
     application.include_router(subscriptions.router, prefix=prefix)
     application.include_router(seo.router, prefix=prefix)
+    application.include_router(advisor.router, prefix=prefix)
     application.include_router(whatsapp.router, prefix=prefix)
 
     @application.get("/", include_in_schema=False)

@@ -120,6 +120,8 @@ class TestSetOffNeedsAToken:
             "/api/v1/whatsapp/webhook",
             # Anonymous product feedback from the floating widget.
             "/api/v1/feedback",
+            # AI advisor chatbot — public, proxied through the backend.
+            "/api/v1/advisor/ask",
         }
 
         def calls(dependant):

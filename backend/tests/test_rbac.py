@@ -508,6 +508,8 @@ UNGATED_MUTATIONS = {
     "/api/v1/whatsapp/webhook",
     # Anonymous product feedback — no session exists.
     "/api/v1/feedback",
+    # AI advisor chatbot — public, no session exists.
+    "/api/v1/advisor/ask",
 }
 
 

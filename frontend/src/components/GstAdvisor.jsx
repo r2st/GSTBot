@@ -1,30 +1,5 @@
 import { useCallback, useRef, useState } from "react";
 
-const API_URL =
-  `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`;
-
-const SYSTEM_PROMPT =
-  "You are GSTBot AI Advisor, an expert on India's Goods and Services Tax. " +
-  "Help users with GST registration, GSTR-1/GSTR-3B/GSTR-9 filing, HSN and SAC codes, " +
-  "input tax credit (ITC) eligibility and reconciliation, composition scheme rules, " +
-  "e-way bill requirements, reverse charge mechanism, GST rates for goods and services, " +
-  "inter-state vs intra-state supply, TDS/TCS under GST, refund procedures, " +
-  "penalties and interest for late filing, and general GST compliance for Indian SMBs. " +
-  "Answer concisely and accurately. Cite relevant sections of the CGST/SGST/IGST Acts " +
-  "when applicable. If a question is outside GST or Indian tax law, politely decline " +
-  "and redirect to GST topics. Use simple language suited for small business owners.";
-
-function buildContents(history) {
-  return [
-    { role: "user", parts: [{ text: SYSTEM_PROMPT }] },
-    { role: "model", parts: [{ text: "Understood. I'm your GST advisor. How can I help?" }] },
-    ...history.map((m) => ({
-      role: m.role === "user" ? "user" : "model",
-      parts: [{ text: m.text }],
-    })),
-  ];
-}
-
 export default function GstAdvisor() {
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([]);
@@ -54,12 +29,12 @@ export default function GstAdvisor() {
     scrollToBottom();
 
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetch("/api/v1/advisor/ask", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: buildContents(next),
-          generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
+          message: text,
+          history: messages.map((m) => ({ role: m.role, text: m.text })),
         }),
       });
 
@@ -69,8 +44,7 @@ export default function GstAdvisor() {
       }
 
       const data = await res.json();
-      const reply =
-        data?.candidates?.[0]?.content?.parts?.[0]?.text ?? "Sorry, I could not generate a response.";
+      const reply = data?.reply ?? "Sorry, I could not generate a response.";
       setMessages((prev) => [...prev, { role: "assistant", text: reply }]);
     } catch (err) {
       setError(err.message || "Something went wrong. Please try again.");

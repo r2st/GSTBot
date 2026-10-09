@@ -49,9 +49,7 @@ describe("GstAdvisor", () => {
         ok: true,
         json: () =>
           Promise.resolve({
-            candidates: [
-              { content: { parts: [{ text: "The GST rate for IT services is 18%." }] } },
-            ],
+            reply: "The GST rate for IT services is 18%.",
           }),
       }),
     );
@@ -71,7 +69,7 @@ describe("GstAdvisor", () => {
     });
 
     expect(global.fetch).toHaveBeenCalledWith(
-      expect.stringContaining("generativelanguage.googleapis.com"),
+      "/api/v1/advisor/ask",
       expect.objectContaining({ method: "POST" }),
     );
   });
@@ -109,11 +107,7 @@ describe("GstAdvisor", () => {
       Promise.resolve({
         ok: true,
         json: () =>
-          Promise.resolve({
-            candidates: [
-              { content: { parts: [{ text: "Reply" }] } },
-            ],
-          }),
+          Promise.resolve({ reply: "Reply" }),
       }),
     );
 
@@ -132,11 +126,7 @@ describe("GstAdvisor", () => {
       Promise.resolve({
         ok: true,
         json: () =>
-          Promise.resolve({
-            candidates: [
-              { content: { parts: [{ text: "Hi!" }] } },
-            ],
-          }),
+          Promise.resolve({ reply: "Hi!" }),
       }),
     );
 
