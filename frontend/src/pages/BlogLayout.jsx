@@ -126,6 +126,21 @@ const ARTICLES = [
     title: "Reverse Charge Mechanism Under GST — Complete Guide 2026",
     description: "Complete guide to RCM under GST — which services attract reverse charge, how to calculate, ITC eligibility, self-invoice rules, and GSTR-3B reporting.",
   },
+  {
+    slug: "gst-registration-process-step-by-step-2026",
+    title: "GST Registration Process 2026: Complete Step-by-Step Guide",
+    description: "Complete step-by-step guide to GST registration in India 2026 — eligibility, documents, portal walkthrough, Aadhaar authentication, timelines, and common rejection reasons.",
+  },
+  {
+    slug: "gstr-3b-common-mistakes-how-to-avoid",
+    title: "GSTR-3B Filing: Common Mistakes and How to Avoid Them",
+    description: "Top 10 common GSTR-3B filing mistakes and how to avoid them — ITC mismatch, wrong tax period, missing RCM, GSTR-1 discrepancy, and penalty implications.",
+  },
+  {
+    slug: "itc-rules-2026-what-every-business-must-know",
+    title: "Input Tax Credit (ITC) Rules 2026: What Every Business Must Know",
+    description: "Complete guide to ITC rules in 2026 — eligibility conditions, blocked credits, time limits, reversal rules, GSTR-2B matching, and ITC on capital goods.",
+  },
 ];
 
 export { ARTICLES };
